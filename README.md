@@ -1,25 +1,47 @@
-# Smolit-Assistant
+# Smolit Assistant
 
-    Ihr intelligenter KI-Assistent für das SmolituxOS-Ökosystem
+Smolit Assistant ist als leichtgewichtiger, always-on Hintergrunddienst aufgebaut. Der Fokus dieses Bootstraps liegt auf einem sauberen Rust-Core, einer klar getrennten Adapter-Schicht und einer minimalen CLI, die Eingaben an ABrain weiterreicht.
 
-## Übersicht
+## Struktur
 
-Smolit-Assistant ist ein fortschrittlicher KI-Assistent, der speziell für das SmolituxOS-Ökosystem entwickelt wurde. Er kombiniert modernste Technologien im Bereich maschinelles Lernen und künstliche Intelligenz, um Benutzern eine intuitive und effiziente Interaktionsmöglichkeit zu bieten.
+```text
+smolit-assistant/
+├── core/                  # Rust daemon
+├── ui/                    # Platzhalter für spätere Godot-UI
+├── adapters/
+│   ├── abrain/
+│   └── adminbot/
+├── config/
+├── docs/
+├── scripts/
+├── .env.example
+├── README.md
+└── ROADMAP.md
+```
 
-### Hauptfunktionen
+## Setup
 
-    Intelligente Konversation: Natürliche Sprachverarbeitung für menschenähnliche Interaktionen
-    Modulare Architektur: Anpassbar an verschiedene Anwendungsfälle und Benutzeranforderungen
-    Datenschutz: Fokus auf lokale Verarbeitung für maximale Privatsphäre
-    Nahtlose Integration: Optimiert für die Zusammenarbeit mit anderen SmolituxOS-Komponenten
+ABrain muss lokal verfügbar sein. Standardmäßig wird der Befehl `abrain` verwendet.
 
-### Das SMOLIT-Konzept
+Optionale Konfiguration über `.env` im Repo-Root:
 
-Unser Assistent basiert auf dem SMOLIT-Konzept, das für folgende Kernprinzipien steht:
+```env
+ABRAIN_CMD=abrain
+LOG_LEVEL=info
+```
 
-    Spech Recognition (Spracherkennung)
-    Modular Framework (Modulares Framework)
-    Open Source (Offene Quelle)
-    Local Artificial Intelligence (Lokale KI)
-    Interactive AI Assistants (Interaktive KI-Assistenten)
-    Toolchain Optimization (Toolchain-Optimierung)
+## Run
+
+```bash
+cd core
+cargo run
+```
+
+Nach dem Start:
+
+```text
+Smolit ready.
+> hello
+[ABrain Antwort]
+> exit
+```
