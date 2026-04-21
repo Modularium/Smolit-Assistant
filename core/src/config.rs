@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 
 const DEFAULT_ABRAIN_CMD: &str = "abrain";
 const DEFAULT_LOG_LEVEL: &str = "info";
+const DEFAULT_STT_TIMEOUT_SECONDS: u64 = 20;
+const DEFAULT_TTS_TIMEOUT_SECONDS: u64 = 20;
 
 #[derive(Debug, Parser)]
 #[command(name = "smolit", about = "Smolit Assistant core daemon")]
@@ -21,9 +23,21 @@ struct CliArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioConfig {
+    pub tts_enabled: bool,
+    pub tts_cmd: Option<String>,
+    pub tts_timeout_seconds: u64,
+    pub stt_enabled: bool,
+    pub stt_cmd: Option<String>,
+    pub stt_timeout_seconds: u64,
+    pub auto_speak: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub abrain_cmd: String,
     pub log_level: String,
+    pub audio: AudioConfig,
 }
 
 impl Config {
@@ -31,27 +45,75 @@ impl Config {
         let args = CliArgs::parse();
         let dotenv = load_dotenv()?;
 
+        let lookup = |key: &str| -> Option<String> {
+            env::var(key).ok().or_else(|| dotenv.get(key).cloned())
+        };
+
         let abrain_cmd = args
             .abrain_cmd
-            .or_else(|| env::var("ABRAIN_CMD").ok())
-            .or_else(|| dotenv.get("ABRAIN_CMD").cloned())
+            .or_else(|| lookup("ABRAIN_CMD"))
             .unwrap_or_else(|| DEFAULT_ABRAIN_CMD.to_string());
 
         let log_level = args
             .log_level
-            .or_else(|| env::var("LOG_LEVEL").ok())
-            .or_else(|| dotenv.get("LOG_LEVEL").cloned())
+            .or_else(|| lookup("LOG_LEVEL"))
             .unwrap_or_else(|| DEFAULT_LOG_LEVEL.to_string());
+
+        let tts_enabled = parse_bool(lookup("SMOLIT_TTS_ENABLED").as_deref(), true);
+        let tts_cmd = non_empty(lookup("SMOLIT_TTS_CMD"));
+        let tts_timeout_seconds =
+            parse_u64(lookup("SMOLIT_TTS_TIMEOUT_SECONDS").as_deref(), DEFAULT_TTS_TIMEOUT_SECONDS);
+
+        let stt_enabled = parse_bool(lookup("SMOLIT_STT_ENABLED").as_deref(), true);
+        let stt_cmd = non_empty(lookup("SMOLIT_STT_CMD"));
+        let stt_timeout_seconds =
+            parse_u64(lookup("SMOLIT_STT_TIMEOUT_SECONDS").as_deref(), DEFAULT_STT_TIMEOUT_SECONDS);
+
+        let auto_speak = parse_bool(lookup("SMOLIT_AUDIO_AUTO_SPEAK").as_deref(), true);
 
         Ok(Self {
             abrain_cmd,
             log_level,
+            audio: AudioConfig {
+                tts_enabled,
+                tts_cmd,
+                tts_timeout_seconds,
+                stt_enabled,
+                stt_cmd,
+                stt_timeout_seconds,
+                auto_speak,
+            },
         })
     }
 
     pub fn as_json(&self) -> String {
         serde_json::to_string(self).unwrap_or_else(|_| "{\"error\":\"config-serialize\"}".into())
     }
+}
+
+fn parse_bool(value: Option<&str>, default: bool) -> bool {
+    match value.map(|v| v.trim().to_ascii_lowercase()) {
+        Some(v) if matches!(v.as_str(), "true" | "1" | "yes" | "on") => true,
+        Some(v) if matches!(v.as_str(), "false" | "0" | "no" | "off") => false,
+        Some(_) | None => default,
+    }
+}
+
+fn parse_u64(value: Option<&str>, default: u64) -> u64 {
+    value
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(default)
+}
+
+fn non_empty(value: Option<String>) -> Option<String> {
+    value.and_then(|v| {
+        let trimmed = v.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
 }
 
 fn load_dotenv() -> Result<HashMap<String, String>> {
