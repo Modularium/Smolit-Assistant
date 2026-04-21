@@ -25,7 +25,7 @@ Siehe [docs/VISION.md](./docs/VISION.md) für die Produktperspektive und
 
 ---
 
-## Ist-Zustand (Stand Phase 3.1)
+## Ist-Zustand (Stand Phase 3.2)
 
 Produktiv im Repo vorhanden und durch Tests gedeckt:
 
@@ -37,10 +37,14 @@ Produktiv im Repo vorhanden und durch Tests gedeckt:
   `core/src/app.rs`).
 - Godot-UI-Bootstrap (`ui/`) mit Autoloads `EventBus` + `IpcClient`,
   Status-/Event-Log, Reconnect 500 ms → 5 s.
+- Avatar-MVP (`ui/scenes/avatar/`, `ui/scripts/avatar/`) mit
+  State-Mapping `idle` / `thinking` / `talking` (+ `disconnected` /
+  `error`), deterministischem Rückfall auf `idle` und Platzhalter-
+  Rendering (ColorRect-Body, Gesicht, Mouth-Tween, Thinking-Indicator).
 
-Was noch **nicht** existiert: Avatar-Rendering, Animation, Always-on-top,
-Emotion-Mapping, Personality, natives ABrain-API, Multimodalität, Tool-
-Orchestrierung.
+Was noch **nicht** existiert: echte Charakteranimation, Always-on-top /
+transparenter Hintergrund, Emotion-Mapping, Personality, natives
+ABrain-API, Multimodalität, Tool-Orchestrierung.
 
 ---
 
@@ -103,12 +107,23 @@ Orchestrierung.
 - [x] Reconnect- und Lifecycle-Handling (500 ms → 5 s Backoff,
       automatisches `get_status` nach Connect)
 
-### Subeinheit 3.2 – Avatar + Zustandsrendering
+### Subeinheit 3.2 – Avatar + Zustandsrendering (MVP ✅)
 
-- [ ] 2D-Avatar-Rendering
-- [ ] Scene-State-Machine auf bestehenden EventBus-Signalen
-      (`idle` / `thinking` / `talking` / `error`)
+- [x] Avatar-Szene (`ui/scenes/avatar/avatar_root.tscn`) mit eigener
+      Node-Struktur und State-Controller
+      (`ui/scripts/avatar/avatar_controller.gd`)
+- [x] State-Mapping auf bestehenden EventBus-Signalen
+      (`idle` / `thinking` / `talking` / `disconnected` / `error`)
+- [x] Deterministischer Rückfall `talking → idle` via Timer
+- [x] Platzhalter-Rendering (ColorRect-Body, Gesicht, Mouth-Tween,
+      Thinking-Indicator)
+
+### Offen (Phase 3.2)
+
+- [ ] Echte Sprite-/Charakteranimation statt Platzhalter
 - [ ] Speech-Bubble für `response` und `heard`
+- [ ] Speech-Sync via TTS-Lebenszyklus-Events (setzt Protokollerweiterung
+      `speaking_started` / `speaking_ended` voraus)
 
 ### Subeinheit 3.3 – Fenster-Präsenz
 
@@ -225,5 +240,6 @@ sondern Merge-Kriterium.
 
 ## Aktueller Fokus
 
-→ **Phase 3.2** – Avatar + Zustandsrendering (setzt auf das bereits
-umgesetzte 3.1-Bootstrap auf, ohne Protokolländerung).
+→ **Phase 3.3** – Fenster-Präsenz (randloses Fenster, transparenter
+Hintergrund, Click-through togglebar). Avatar-MVP aus 3.2 steht; echte
+Charakteranimation und Speech-Sync bleiben offene Folgearbeiten.

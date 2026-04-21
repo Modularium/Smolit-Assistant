@@ -1,6 +1,7 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="PackedScene" path="res://scenes/avatar/avatar_root.tscn" id="2_avatar"]
 
 [node name="Main" type="Control"]
 layout_mode = 3
@@ -26,6 +27,9 @@ grow_vertical = 2
 [node name="StatusLabel" type="Label" parent="VBox"]
 layout_mode = 2
 text = "disconnected"
+
+[node name="Avatar" parent="VBox" instance=ExtResource("2_avatar")]
+layout_mode = 2
 
 [node name="Log" type="RichTextLabel" parent="VBox"]
 layout_mode = 2

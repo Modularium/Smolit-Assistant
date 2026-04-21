@@ -137,21 +137,24 @@ Ausgehend (Core → UI):
 
 Ungültige JSON-Payloads führen zu einer `error`-Antwort, nicht zu einem Crash.
 
-## UI (Godot, Phase 3.1 Bootstrap)
+## UI (Godot, Phase 3.2 Avatar MVP)
 
 Unter [ui/](ui/) liegt ein Godot-4-Projekt, das die Core-Bridge als lokaler
-Client konsumiert. Zweck in dieser Phase: nachweisen, dass ein separater
-UI-Prozess den Round-Trip sauber abwickelt — ohne Avatar, ohne
-Always-on-top, ohne Business-Logik.
+Client konsumiert. Phase 3.2 ergänzt einen ersten Avatar-MVP: ein
+Platzhalter-Avatar mit den Zuständen `idle` / `thinking` / `talking`
+(plus `disconnected` / `error`), rein auf Basis vorhandener Core-Events.
+Kein Always-on-top, keine echte Charakteranimation, keine Business-Logik
+in der UI.
 
 ### Starten
 
 1. Godot 4.2+ öffnen, Projektordner `ui/` wählen, Projekt importieren.
 2. Den Rust-Core mit aktivem IPC laufen lassen
    (`SMOLIT_IPC_ENABLED=true`, Default-Bind `127.0.0.1:8787`).
-3. Godot-Szene ausführen. Es erscheint ein einfaches Fenster mit:
+3. Godot-Szene ausführen. Es erscheint ein Fenster mit:
 
    - Statuszeile (`connected` / `disconnected`)
+   - Avatar-Bereich mit State-Label und Debug-State-Anzeige
    - Event-Log (RichTextLabel, farbcodiert)
    - Eingabezeile + „Send" / „Ping"-Buttons
 
@@ -160,28 +163,36 @@ Always-on-top, ohne Business-Logik.
 ```text
 ui/
 ├── project.godot
-├── config.cfg         # UI-Config (websocket_url, reconnect backoff)
+├── config.cfg                 # UI-Config (websocket_url, reconnect backoff)
 ├── autoload/
-│   ├── event_bus.gd   # Signal-Hub (keine Logik)
-│   └── ipc_client.gd  # WebSocketPeer-Wrapper mit Reconnect
+│   ├── event_bus.gd           # Signal-Hub (keine Logik)
+│   └── ipc_client.gd          # WebSocketPeer-Wrapper mit Reconnect
 ├── scenes/
-│   └── main.tscn
+│   ├── main.tscn              # Composition Root: Status, Avatar, Log, Input
+│   └── avatar/
+│       └── avatar_root.tscn   # eigenständige Avatar-Szene
 ├── scripts/
-│   └── main.gd        # Scene-Controller
+│   ├── main.gd                # Scene-Controller (Log + Input)
+│   └── avatar/
+│       ├── avatar_state.gd    # State-Enum + Name-Mapping
+│       └── avatar_controller.gd  # State-Mapping + Rendering
 └── assets/
+    └── avatar/                # Platzhalter für spätere Sprites
 ```
 
-Scenes hängen ausschließlich an `EventBus` — der Transport (`IpcClient`)
-kann später ersetzt werden, ohne Scene-Code anzufassen.
+### Avatar-States (MVP)
 
-### Verbindungsverhalten
+- `idle` → Grundzustand, auch nach Connect.
+- `thinking` → Core sendet `thinking` (blinkender Indikator).
+- `talking` → Core sendet `response` (kurzer Mouth-Tween, deterministischer
+  Rückfall auf `idle` nach ~1,8 s).
+- `disconnected` → Transport ist offen; ohne weitere Aktion zeigt der
+  Avatar eine neutrale Farbe.
+- `error` → kurzer Fehlerzustand nach `error`-Event, fällt auf `idle`
+  bzw. `disconnected` zurück.
 
-- Default-URL: `ws://127.0.0.1:8787` (überschreibbar in `ui/config.cfg`).
-- Reconnect-Backoff 500 ms → 5 s, verdoppelnd, gecapped.
-- Nach jedem erfolgreichen Connect sendet die UI automatisch
-  `get_status` als Handshake.
-- Während „disconnected" bleibt die UI benutzbar, `Send`/`Ping` sind
-  deaktiviert.
+Der Avatar hört ausschließlich am `EventBus`. Keine zweite
+Core-Verbindung, keine UI-seitige Interpretation von Inhalten.
 
 Scenes hängen ausschließlich an `EventBus` — der Transport (`IpcClient`)
 kann später ersetzt werden, ohne Scene-Code anzufassen.
