@@ -57,6 +57,11 @@ Geplant (Ziel-Zustand):
 | `speak_text`  | `text: string` | Direkte TTS-Ausgabe ohne ABrain. Bei Fehler: `error`.           |
 | `voice_once`  | —              | Einmal STT aufnehmen, Ergebnis als `heard`, dann ABrain-Flow.   |
 
+Zusätzlich nimmt der Core Interaction-Nachrichten des Desktop
+Interaction Layer MVP entgegen (Details in Abschnitt 2.6):
+
+- `interaction_open_application` mit Feld `application: string`.
+
 Beispiele:
 
 ```json
@@ -65,6 +70,7 @@ Beispiele:
 {"type":"submit_text","text":"Hallo Smolit"}
 {"type":"speak_text","text":"Dies ist ein Test"}
 {"type":"voice_once"}
+{"type":"interaction_open_application","application":"calendar"}
 ```
 
 ### 2.2 Ausgehend (Core → UI)
@@ -77,6 +83,10 @@ Beispiele:
 | `response`  | `payload: { text: string }`  | ABrain-Antworttext.                                         |
 | `heard`     | `payload: { text: string }`  | STT-Ergebnis (nur im `voice_once`-Flow).                    |
 | `error`     | `message: string`            | Fehler bei Parsing, Ausführung oder Adapter.                |
+
+Zusätzlich emittiert der Core **Action Events** (Action Event Model v1).
+Sie sind additiv; ältere UIs, die sie nicht kennen, dürfen sie
+ignorieren. Details in Abschnitt 2.5.
 
 Beispiele:
 
@@ -93,12 +103,14 @@ Beispiele:
 
 ```json
 {
-  "tts_enabled":   true,
-  "tts_available": false,
-  "stt_enabled":   true,
-  "stt_available": false,
-  "auto_speak":    true,
-  "ipc_enabled":   true
+  "tts_enabled":         true,
+  "tts_available":       false,
+  "stt_enabled":         true,
+  "stt_available":       false,
+  "auto_speak":          true,
+  "ipc_enabled":         true,
+  "interaction_enabled": true,
+  "interaction_backend": "command"
 }
 ```
 
@@ -111,8 +123,16 @@ Semantik:
 - `auto_speak`: wird jede `response` zusätzlich über TTS ausgegeben?
 - `ipc_enabled`: ist der WebSocket-Server aktiv? (per Definition `true`
   für jeden UI-Client, der dieses Feld sieht.)
+- `interaction_enabled`: ist der Desktop Interaction Layer aktiv?
+- `interaction_backend`: Name des aktiven Interaction-Backends
+  (MVP: `command`). Welche Kinds effektiv erlaubt sind, ergibt sich aus
+  `SMOLIT_INTERACTION_ALLOW_*`.
 
 ### 2.4 Flow-Beispiele
+
+Dieser Abschnitt zeigt nur die **klassischen** Events
+(`thinking` / `response` / `heard` / `error`). Die parallel dazu
+emittierten Action Events sind in Abschnitt 2.5 beschrieben.
 
 `submit_text`:
 
@@ -144,6 +164,227 @@ Ungültiges JSON:
 UI → Core: not-json
 Core → UI: {"type":"error","message":"invalid JSON: ..."}
 ```
+
+### 2.5 Action Event Model v1
+
+Der Core emittiert **standardisierte Action Events** parallel zu den
+klassischen `thinking` / `response` / `heard` / `error`-Nachrichten.
+Sie sind die Basis für Avatar-/Präsenz-Reaktionen, UI-Feedback, Logs,
+spätere Replay-/Trace-Integration und die zukünftige Desktop-
+Interaction-Schicht.
+
+Grundprinzipien:
+
+- **Additiv.** Keine bestehende Nachricht wird verändert oder entfernt.
+- **Stabile Action-IDs.** Jede Aktion bekommt eine kurze ID
+  (z. B. `act_000001`), mit der UI und Logs zusammengehören.
+- **Symbolisches Visual Mapping.** Felder wie `target` und `mapping`
+  sind in v1 beschreibend / symbolisch, nicht geometrisch.
+- **Unknown-friendly.** Neue Eventtypen und neue `target.type`-Werte
+  dürfen additiv dazukommen; unbekannte Felder dürfen ignoriert werden.
+
+#### Eventtypen
+
+| `type`                | Zweck                                                        |
+|-----------------------|--------------------------------------------------------------|
+| `action_planned`      | Eine Aktion ist erkannt und grob beschrieben.                |
+| `action_started`      | Die Aktion beginnt.                                          |
+| `action_progress`     | Fortschrittsindikator (optional, derzeit nicht emittiert).   |
+| `action_step`         | Einzelschritt innerhalb der Aktion.                          |
+| `action_verification` | Verifikationsphase (Modell für spätere Automation).          |
+| `action_completed`    | Aktion erfolgreich abgeschlossen.                            |
+| `action_failed`       | Aktion fehlgeschlagen.                                       |
+| `action_cancelled`    | Aktion abgebrochen (Modell für spätere Automation).          |
+
+In v1 emittieren die bestehenden Flows aktiv: `action_planned`,
+`action_started`, `action_step`, `action_completed`, `action_failed`.
+`action_progress`, `action_verification` und `action_cancelled` sind
+als Schema und Outgoing-Typ bereits vorgesehen, werden von v1-Handlern
+aber (noch) nicht emittiert.
+
+#### Action Kinds (`action_kind`)
+
+`query` · `speech` · `ui` · `system` · `automation` · `unknown`.
+
+In v1 genutzt: `query` (Text an ABrain), `speech` (STT-/TTS-Flow).
+
+#### Phasen (`phase`)
+
+`planned` · `started` · `in_progress` · `verifying` · `completed` ·
+`failed` · `cancelled`.
+
+Derzeit transportiert nur `action_started` das Feld `phase`
+(Wert `started`). Die übrigen Phasen sind intern/für spätere Phasen
+vorgesehen.
+
+#### Target (`target`)
+
+Kleines, abstrahiertes Zielmodell. Varianten (v1):
+
+- `{"type":"application","name":"<name>","hint?":"..."}`
+- `{"type":"window","title?":"...","app?":"..."}`
+- `{"type":"ui_element","role":"...","label?":"...","hint?":"..."}`
+- `{"type":"region","name?":"...","hint?":"..."}`
+- `{"type":"unknown"}` — Default für die derzeitigen Flows.
+
+Das Target ist bewusst beschreibend: es sagt, **worauf** sich eine
+Aktion richtet, nicht **wo** dieses Ziel pixelgenau liegt.
+
+#### Mapping (`mapping`, optional)
+
+Symbolisches Visual Mapping als Datenmodell; in v1 **nicht**
+emittiert, aber im Schema vorhanden:
+
+```json
+{ "space": "logical_space", "hint": "towards calendar app" }
+```
+
+`space` ∈ `logical_space` · `window_space` · `screen_space`.
+`window` ist optional. Geometrie/Koordinaten sind explizit kein Teil
+von v1.
+
+#### Fehler (`action_failed`)
+
+`action_failed` trägt ein Pflichtfeld `message` und ein optionales
+`error` (Fehlerkontext). Zusätzlich wird weiterhin die bestehende
+`error`-Nachricht ausgesendet, damit UIs, die Action Events (noch)
+nicht kennen, nicht regressiv werden.
+
+#### Beispiele
+
+`submit_text` (Erfolgspfad):
+
+```text
+UI   → Core: {"type":"submit_text","text":"Hallo"}
+Core → UI:   {"type":"action_planned","payload":{"action_id":"act_000001","action_kind":"query","title":"Process text request","target":{"type":"unknown"}}}
+Core → UI:   {"type":"action_started","payload":{"action_id":"act_000001","phase":"started"}}
+Core → UI:   {"type":"action_step","payload":{"action_id":"act_000001","title":"Dispatch to ABrain"}}
+Core → UI:   {"type":"thinking"}
+Core → UI:   {"type":"response","payload":{"text":"Hallo!"}}
+Core → UI:   {"type":"action_completed","payload":{"action_id":"act_000001","status":"completed"}}
+```
+
+`voice_once` ohne STT:
+
+```text
+UI   → Core: {"type":"voice_once"}
+Core → UI:   {"type":"action_planned","payload":{"action_id":"act_000002","action_kind":"speech","title":"Voice request","target":{"type":"unknown"}}}
+Core → UI:   {"type":"action_started","payload":{"action_id":"act_000002","phase":"started"}}
+Core → UI:   {"type":"error","message":"STT is not available."}
+Core → UI:   {"type":"action_failed","payload":{"action_id":"act_000002","status":"failed","message":"STT is not available."}}
+```
+
+#### Rückwärtskompatibilität
+
+- `thinking`, `response`, `heard`, `error`, `status`, `pong` bleiben
+  unverändert.
+- UIs, die Action Events nicht kennen, funktionieren weiter.
+- Erst spätere Phasen dürfen die UI stärker auf Action Events
+  ausrichten; v1 ist additiv.
+
+### 2.6 Desktop Interaction Layer MVP
+
+Der Core enthält seit dieser Phase eine Interaction-Schicht
+(`core/src/interaction/`), die Desktop-nahe Aktionen modelliert,
+ausführt, verifiziert und als Action Events sichtbar macht. Die
+Schicht ist bewusst klein und konservativ konfiguriert.
+
+Eingehend:
+
+- `{"type":"interaction_open_application","application":"<name>"}` —
+  symbolischer App-Name (`"calendar"`, `"terminal"`, …).
+
+Der Handler ruft intern `App::execute_open_application(name)` auf,
+erzeugt einen `InteractionAction` und führt ihn über den
+`InteractionExecutor` aus. Das Ergebnis ist eine
+Action-Event-Sequenz.
+
+#### Eventfolge (Erfolgspfad, Best-effort)
+
+```text
+UI   → Core: {"type":"interaction_open_application","application":"calendar"}
+Core → UI:   {"type":"action_planned","payload":{"action_id":"act_000001","action_kind":"automation","title":"Open calendar","description":"interaction:open_application","target":{"type":"application","name":"calendar"}}}
+Core → UI:   {"type":"action_started","payload":{"action_id":"act_000001","phase":"started"}}
+Core → UI:   {"type":"action_step","payload":{"action_id":"act_000001","title":"Resolving target"}}
+Core → UI:   {"type":"action_step","payload":{"action_id":"act_000001","title":"Opening application"}}
+Core → UI:   {"type":"action_verification","payload":{"action_id":"act_000001","title":"Best-effort: Spawned open command"}}
+Core → UI:   {"type":"action_completed","payload":{"action_id":"act_000001","status":"completed","message":"spawned `gtk-launch` for `calendar` (no window probe yet)"}}
+```
+
+Wichtig: Verifikation ist in v1 **"uncertain" / best-effort**. Der Core
+spawnt den konfigurierten Launcher und protokolliert den Spawn, prüft
+aber **nicht**, ob die Anwendung tatsächlich erschienen ist. Das wird
+im `action_verification`-Event durch das `Best-effort:`-Präfix und im
+`action_completed`-`message` ehrlich ausgedrückt.
+
+#### Eventfolge (Fehlerpfade)
+
+Wenn der Layer deaktiviert ist, ein Kind nicht erlaubt ist, das
+Open-App-Command-Template fehlt, oder der Backend-Spawn scheitert,
+endet die Sequenz nach `action_started` (bzw. nach den Steps) mit:
+
+```json
+{"type":"action_failed","payload":{"action_id":"act_00000X","status":"failed","message":"...","error":"recovery_hint=<hint>"}}
+```
+
+Das Feld `error` enkodiert einen klassifikatorischen Recovery-Hinweis:
+
+- `recovery_hint=retry` — Spawn schlug fehl, retry ist sinnvoll.
+- `recovery_hint=abort` — Preconditions fehlen (z. B. leerer App-Name);
+  Retry ohne Änderung bringt nichts.
+- `recovery_hint=ask_user` — Bestätigung/Eingabe notwendig (z. B. wenn
+  die Aktion `requires_confirmation=true` trägt und der globale
+  `SMOLIT_INTERACTION_REQUIRE_CONFIRMATION` aktiv ist — der
+  Confirmation-Kanal selbst ist noch nicht implementiert, siehe
+  Phase 8b).
+- `recovery_hint=fallback_unavailable` — Kind ist vom Backend
+  strukturell nicht unterstützt (z. B. `type_text` / `send_shortcut`
+  in diesem MVP) oder per Config deaktiviert.
+
+#### Action-Kind und Target
+
+Interaction-Aktionen werden als `action_kind: "automation"` geplant.
+Das `target` übernimmt die Variante aus `crate::actions::ActionTarget`
+(typisch `{"type":"application","name":"..."}`). Das Feld
+`description` trägt einen technischen Hinweis der Form
+`"interaction:<kind>"` (z. B. `"interaction:open_application"`), damit
+Logs/Replays die Interaction-Herkunft klar erkennen, ohne die UI
+darauf festzulegen.
+
+#### Config (Überblick)
+
+- `SMOLIT_INTERACTION_ENABLED` (Default `true`) — Layer insgesamt
+  an/aus.
+- `SMOLIT_INTERACTION_BACKEND` (Default `command`) — aktives Backend;
+  für MVP nur `command`.
+- `SMOLIT_INTERACTION_ALLOW_OPEN_APP` (Default `true`) —
+  `open_application` erlaubt?
+- `SMOLIT_INTERACTION_ALLOW_TYPE_TEXT` (Default `false`) — `type_text`
+  erlaubt? (Backend liefert dennoch `BackendUnsupported`.)
+- `SMOLIT_INTERACTION_ALLOW_SHORTCUTS` (Default `false`) —
+  `send_shortcut` erlaubt? (Analog MVP-Stub.)
+- `SMOLIT_INTERACTION_REQUIRE_CONFIRMATION` (Default `true`) — Policy;
+  freigabepflichtige Aktionen werden derzeit abgelehnt, bis der
+  Confirmation-Kanal landet (Phase 8b).
+- `SMOLIT_INTERACTION_OPEN_APP_CMD` (Default *leer*) — Command-Template
+  für Open-App, z. B. `xdg-open {name}` oder `gtk-launch {name}`.
+
+Ohne ein Command-Template meldet der Backend für die jeweilige
+Operation ehrlich „preconditions not met" bzw. `BackendUnsupported` —
+das Verhalten ist damit deterministisch und ungefährlich.
+
+#### Scope-Grenzen (explizit)
+
+- **Keine** OCR / Pixel-Matching / Button-Erkennung per Vision.
+- **Keine** Accessibility-Vollintegration (AT-SPI / UIA).
+- **Keine** Window-Probe nach dem Spawn — Verification bleibt
+  „uncertain".
+- **Keine** globale Tastatur-/Mausinjektion: `type_text` /
+  `send_shortcut` sind nur als Hooks modelliert und liefern
+  `BackendUnsupported`.
+- **Keine** Eingabe in sensible Dialoge (Anmelde-, Zahlungs-, System-
+  dialoge) geplant; erst eine spätere Phase definiert Trust-Stufen
+  (siehe `docs/presence_desktop_interaction.md`, §7).
 
 ---
 
@@ -312,9 +553,18 @@ optionale Felder:
 
 ## 10. Referenz-Quellen im Repo
 
-- `core/src/ipc/protocol.rs` — Enum-Definitionen für Ein-/Ausgang.
-- `core/src/ipc/server.rs` — WebSocket-Accept-Loop und Dispatch.
-- `core/src/app.rs` — geteilte Handler (CLI und IPC nutzen denselben Code).
+- `core/src/ipc/protocol.rs` — Enum-Definitionen für Ein-/Ausgang
+  inkl. Action Event Varianten.
+- `core/src/ipc/server.rs` — WebSocket-Accept-Loop und Dispatch;
+  emittiert Action Events für `submit_text`, `voice_once`, `speak_text`.
+- `core/src/actions/` — Datenmodell für Action Events, Targets und
+  symbolisches Visual Mapping (v1).
+- `core/src/interaction/` — Desktop Interaction Layer MVP:
+  `InteractionAction`, `InteractionBackend` / `CommandBackend`,
+  `InteractionExecutor`, Verification- und Recovery-Hints.
+- `core/src/app.rs` — geteilte Handler (CLI und IPC nutzen denselben Code),
+  Action-ID-Generator (`next_action_id`), `handle_interaction_action` /
+  `execute_open_application`.
 - `core/src/audio/` — STT/TTS-Command-Adapter.
 - `core/src/config.rs` — Env-Konfiguration (`SMOLIT_*`).
 - `ui/autoload/ipc_client.gd` — Godot-seitige Referenzimplementierung

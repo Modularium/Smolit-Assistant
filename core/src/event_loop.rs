@@ -135,6 +135,7 @@ impl EventLoop {
             status.stt_enabled, status.stt_available
         );
         println!("auto-speak: {}", status.auto_speak);
+        println!("IPC: enabled={}", status.ipc_enabled);
     }
 }
 
@@ -144,7 +145,7 @@ fn print_help() {
     println!("  exit | quit       shut down the assistant");
     println!("  voice             capture a single STT utterance and send to ABrain");
     println!("  speak <text>      speak the given text via TTS");
-    println!("  audio-status      show TTS/STT availability");
+    println!("  audio-status      show TTS/STT/IPC availability");
     println!("  <text>            send free text to ABrain");
 }
 

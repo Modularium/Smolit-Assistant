@@ -4,6 +4,11 @@ Dieses Dokument beschreibt den **heutigen Stand** der UI nach Phase 3.1 sowie
 den geplanten Ausbau. Alles, was noch nicht implementiert ist, ist explizit
 als Ziel-Zustand markiert.
 
+Für das übergeordnete Zielbild von Smolit als sichtbare Desktop-Präsenz
+und für das Zusammenspiel mit echter Desktop-Automation siehe
+[`docs/presence_desktop_interaction.md`](./presence_desktop_interaction.md).
+Dieses Dokument hier bleibt auf die **UI-/Godot-Ebene** fokussiert.
+
 ---
 
 ## 1. Rolle der UI
@@ -20,6 +25,14 @@ Die Godot-UI ist ein **reiner Client** des Rust-Cores. Sie hat:
 
 Die UI konsumiert Events vom Core und rendert sie. Alle Interaktionen
 werden als wohldefinierte IPC-Nachrichten an den Core zurückgespielt.
+
+Im Sinne des Presence-Modells ist die UI der **Presence Layer**:
+sichtbare Figur, Zustände, Overlay-Verhalten, Rückmeldung. Sie ist
+ausdrücklich **nicht** die Stelle, an der Desktop-Automation
+implementiert wird — siehe
+[`docs/presence_desktop_interaction.md`](./presence_desktop_interaction.md),
+Abschnitt 3 („Visual truth, not implementation coupling“) und
+Abschnitt 15.
 
 ---
 
@@ -70,7 +83,11 @@ Ausdrücklich **nicht** in der UI:
 - keine zweite Audiopipeline,
 - keine persistente Wahrheit über den Verlauf (Event-Log ist volatil),
 - keine direkten Zugriffe auf ABrain, Dateisysteme oder Subsysteme außerhalb
-  der IPC-Nachrichten.
+  der IPC-Nachrichten,
+- **keine Desktop-Automation** (kein Klicken, Tippen, Fenster-Steuern,
+  kein OCR/Screenshot). Desktop-Interaktion gehört in eine eigene
+  Adapterfamilie unterhalb des Cores, nicht in Godot — siehe
+  [`docs/presence_desktop_interaction.md`](./presence_desktop_interaction.md).
 
 ---
 
@@ -137,6 +154,34 @@ die geplante Ausbaustrecke, nicht der heutige Stand.
   kann als Debug-Panel bleiben.
 - Keine Protokolländerung nötig; es werden nur bestehende Events gemappt.
 
+### Phase B+ – Reaktion auf Action Events (Ziel)
+
+Zusätzlich zu `thinking` / `response` / `heard` / `error` emittiert der
+Core seit Action Event Model v1 (siehe [`docs/api.md`](./api.md), §2.5)
+standardisierte **Action Events** (`action_planned`, `action_started`,
+`action_step`, `action_completed`, `action_failed`, …). Sie sind die
+vorgesehene Grundlage für:
+
+- Avatar-/Präsenz-Reaktion auf Handlungsphasen statt nur auf
+  `thinking`/`response`,
+- spätere sichtbare Fehlerdarstellung (`action_failed` → Warn-/Failure-
+  State am Avatar),
+- spätere symbolische Bewegung Richtung Ziel (über `target` und
+  `mapping`).
+
+Wichtig für die UI-Ebene:
+
+- **Mapping ist symbolisch.** `mapping.space` ∈
+  `logical_space` / `window_space` / `screen_space`, ohne Geometrie.
+  Die UI soll daraus eine Richtung / Intention ableiten, keine
+  Pixelpositionen berechnen.
+- **Additiv.** Die bestehenden Signale bleiben. Action Events werden
+  schrittweise eingebunden, keine Umschreibung des Scene-Codes auf
+  einmal.
+- **Keine UI-Geschäftslogik.** Die UI reagiert auf die Events, sie
+  interpretiert keine Targets eigenständig und löst keine
+  Desktop-Aktionen aus.
+
 ### Phase C – Erweiterter Ausdruck (Ziel > 3.x)
 
 - Feinere Zustände (z. B. `curious`, `focused`, `alert`).
@@ -166,15 +211,48 @@ Conversation-Turn startet mit einem `submit_text` oder `voice_once`.
 
 ## 9. Always-on-top- und Overlay-Verhalten (Ziel-Zustand)
 
-Nicht in 3.1 umgesetzt. Geplant in Subeinheit 3.3:
+Phase 3.3 liefert das **Presence-MVP** in-window: die Modi
+**Docked / Expanded / Action / Disconnected** laufen bereits als
+eigenständige State-Maschine (`ui/scripts/presence/`). Presence-State
+(UI-Umfang) und Avatar-State (visueller Ausdruck) sind bewusst
+orthogonal geführt.
+
+Was das MVP umsetzt:
+
+- eigener `PresenceController` als Autoload-artiger Node in `main.tscn`,
+- Hold-Timer für Completed / Failed / Cancelled als Nachhall nach einer
+  Action, bevor die Presence in den gewählten Base-Mode zurückfällt,
+- Action-Banner mit Titel, Step und **symbolischem** Target-Text
+  (`→ Anwendung`, `→ Fenstertitel`, `→ Label (Rolle)`, `→ Region`) —
+  ohne Pixelgeometrie,
+- manuelle Umschaltung zwischen Docked und Expanded über den
+  Header-Toggle; Docked blendet Log und Eingabezeile aus.
+
+Noch **nicht** umgesetzt und explizit ausserhalb des MVP:
 
 - randloses Fenster,
 - transparenter Hintergrund,
 - optionales Click-through (togglebar),
-- Positionsverhalten (Snap-to-Edge, Idle-Movement) kommt erst in Phase 6.
+- Snap-to-Edge / Idle-Movement / Multi-Monitor-Heuristik.
 
-Bis dahin läuft die UI als normales Fenster — das ist bewusst, weil es
-den Phase-3.1-Scope klein hält.
+Die Architektur ist so vorbereitet, dass ein späteres natives Overlay
+(GDExtension oder Window-Mode-Wechsel) nur Rendering und Fenstermodus
+berühren muss — die Presence-Logik bleibt unverändert und zieht ihren
+Modus weiterhin aus den Core-Events. Das Zielbild bleibt
+[`docs/presence_desktop_interaction.md`](./presence_desktop_interaction.md),
+§6.
+
+Wichtig: **natives Overlay ist nicht automatisch Teil von Godot selbst.**
+Fähigkeiten wie Always-on-top, Click-through, transparenter Desktop-
+Überzug und Pixel-Positionierung hängen an Protokoll (Wayland vs. X11)
+und Compositor (Mutter, KWin, wlroots, …) und sind unter Ubuntu 24.04
+Wayland nicht pauschal verfügbar. Die UI-Architektur bleibt deshalb
+bewusst **host-window-neutral**: Scenes und Presence-Controller kennen
+kein Always-on-top, keine Input-Region, keine Portal-Aufrufe. Die
+Linux-spezifische Fenster- und Overlay-Strategie — inklusive der
+geplanten separaten Window-Behavior-Abstraktion — ist in
+[`docs/linux_window_overlay_architecture.md`](./linux_window_overlay_architecture.md)
+dokumentiert.
 
 ---
 
@@ -189,15 +267,28 @@ den Phase-3.1-Scope klein hält.
   fehlende Audiocommands dürfen die UI nicht abstürzen lassen.
 - **Minimalismus**: keine klassische Fensterflut, Fokus auf Präsenz statt
   auf Bedien-UI.
+- **Action-driven Avatar**: Avatar-Zustände und -Reaktionen sind
+  Core-/Action-getrieben. Die UI animiert, sie entscheidet nicht über
+  Handlung, Ziel oder Erfolg einer Desktop-Aktion — das kommt als
+  Event-Strom aus Core und Desktop Interaction Layer.
+- **Interaction Layer bleibt im Core**: Desktop-nahe Ausführung
+  (`core/src/interaction/`) läuft strikt serverseitig. Die UI sendet
+  höchstens einen symbolischen Auslöser
+  (`interaction_open_application`, siehe
+  [`docs/api.md`](./api.md), §2.6) und konsumiert die zurückkommenden
+  Action Events — sie führt nichts selbst aus. Der Core entscheidet
+  per Policy und Backend über Ausführbarkeit, Verifikation und
+  Recovery.
 
 ---
 
 ## 11. Offene Punkte
 
-- **Avatar-Rendering** (Subeinheit 3.2) — State-Machine-Mapping noch zu
-  entwerfen.
-- **Fenster-Präsenz** (Subeinheit 3.3) — Always-on-top, Transparenz,
-  Click-through.
+- **Avatar-Rendering** — Platzhalter-Grafik; echte Sprite-/
+  Charakteranimation steht aus.
+- **Natives Overlay** (Folge zu 3.3) — Always-on-top, Transparenz,
+  Click-through, Snap-to-Edge. Presence-Logik ist bereits in-window
+  fertig; das Desktop-Overlay hängt nur noch am Fenstermodus.
 - **TTS-Lebenszyklus-Events** — aktuell gibt es kein `speaking_started` /
   `speaking_ended` im Protokoll; Animation-Sync hängt davon ab.
 - **Emotion-Feld** — heute transportiert das Protokoll keine Emotion in

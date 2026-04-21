@@ -11,6 +11,8 @@ const DEFAULT_ABRAIN_CMD: &str = "abrain";
 const DEFAULT_LOG_LEVEL: &str = "info";
 const DEFAULT_STT_TIMEOUT_SECONDS: u64 = 20;
 const DEFAULT_TTS_TIMEOUT_SECONDS: u64 = 20;
+const DEFAULT_IPC_BIND: &str = "127.0.0.1:8787";
+const DEFAULT_INTERACTION_BACKEND: &str = "command";
 
 #[derive(Debug, Parser)]
 #[command(name = "smolit", about = "Smolit Assistant core daemon")]
@@ -34,10 +36,33 @@ pub struct AudioConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IpcConfig {
+    pub enabled: bool,
+    pub bind: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InteractionConfig {
+    pub enabled: bool,
+    pub backend: String,
+    pub allow_open_application: bool,
+    pub allow_type_text: bool,
+    pub allow_shortcuts: bool,
+    pub require_confirmation: bool,
+    /// Command template used by the `command` backend to spawn an
+    /// application launcher. `{name}` is substituted at call time.
+    /// Kept optional so absence is an honest "unavailable" signal
+    /// rather than a silent default like `xdg-open`.
+    pub open_app_cmd_template: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub abrain_cmd: String,
     pub log_level: String,
     pub audio: AudioConfig,
+    pub ipc: IpcConfig,
+    pub interaction: InteractionConfig,
 }
 
 impl Config {
@@ -71,6 +96,32 @@ impl Config {
 
         let auto_speak = parse_bool(lookup("SMOLIT_AUDIO_AUTO_SPEAK").as_deref(), true);
 
+        let ipc_enabled = parse_bool(lookup("SMOLIT_IPC_ENABLED").as_deref(), true);
+        let ipc_bind = non_empty(lookup("SMOLIT_IPC_BIND"))
+            .unwrap_or_else(|| DEFAULT_IPC_BIND.to_string());
+
+        let interaction_enabled =
+            parse_bool(lookup("SMOLIT_INTERACTION_ENABLED").as_deref(), true);
+        let interaction_backend = non_empty(lookup("SMOLIT_INTERACTION_BACKEND"))
+            .unwrap_or_else(|| DEFAULT_INTERACTION_BACKEND.to_string());
+        let allow_open_application = parse_bool(
+            lookup("SMOLIT_INTERACTION_ALLOW_OPEN_APP").as_deref(),
+            true,
+        );
+        let allow_type_text = parse_bool(
+            lookup("SMOLIT_INTERACTION_ALLOW_TYPE_TEXT").as_deref(),
+            false,
+        );
+        let allow_shortcuts = parse_bool(
+            lookup("SMOLIT_INTERACTION_ALLOW_SHORTCUTS").as_deref(),
+            false,
+        );
+        let require_confirmation = parse_bool(
+            lookup("SMOLIT_INTERACTION_REQUIRE_CONFIRMATION").as_deref(),
+            true,
+        );
+        let open_app_cmd_template = non_empty(lookup("SMOLIT_INTERACTION_OPEN_APP_CMD"));
+
         Ok(Self {
             abrain_cmd,
             log_level,
@@ -82,6 +133,19 @@ impl Config {
                 stt_cmd,
                 stt_timeout_seconds,
                 auto_speak,
+            },
+            ipc: IpcConfig {
+                enabled: ipc_enabled,
+                bind: ipc_bind,
+            },
+            interaction: InteractionConfig {
+                enabled: interaction_enabled,
+                backend: interaction_backend,
+                allow_open_application,
+                allow_type_text,
+                allow_shortcuts,
+                require_confirmation,
+                open_app_cmd_template,
             },
         })
     }
