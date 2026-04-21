@@ -1,0 +1,30 @@
+; Engine configuration file.
+; Generated for Smolit Assistant UI (Phase 3.1 bootstrap).
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="Smolit Assistant UI"
+config/description="Local WebSocket client and renderer for Smolit Core."
+run/main_scene="res://scenes/main.tscn"
+config/features=PackedStringArray("4.2", "GL Compatibility")
+
+[autoload]
+
+EventBus="*res://autoload/event_bus.gd"
+IpcClient="*res://autoload/ipc_client.gd"
+
+[display]
+
+window/size/viewport_width=520
+window/size/viewport_height=420
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

@@ -1,0 +1,10 @@
+# Godot 4 editor-generated artefacts
+.godot/
+.import/
+*.import
+*.translation
+export.cfg
+export_presets.cfg
+
+# System
+.DS_Store
