@@ -3,6 +3,7 @@ mod app;
 pub mod adapters {
     pub mod abrain;
 }
+mod approvals;
 mod audio;
 mod config;
 mod event_loop;

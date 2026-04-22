@@ -12,6 +12,7 @@ use crate::actions::{
     ActionStartedPayload, ActionStatus, ActionStepPayload, ActionTarget,
 };
 use crate::app::App;
+use crate::approvals::IncomingApprovalDecision;
 use crate::ipc::protocol::{
     HeardPayload, IncomingMessage, OutgoingMessage, ResponsePayload, encode_outgoing,
     parse_incoming,
@@ -59,41 +60,67 @@ where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
     let (mut sink, mut stream) = ws.split();
+    let mut events_rx = app.subscribe_events();
 
-    while let Some(frame) = stream.next().await {
-        let frame = match frame {
-            Ok(frame) => frame,
-            Err(err) => {
-                warn!(error = %err, "websocket read error");
-                break;
+    loop {
+        tokio::select! {
+            biased;
+
+            incoming = stream.next() => {
+                let Some(frame) = incoming else { break };
+                let frame = match frame {
+                    Ok(frame) => frame,
+                    Err(err) => {
+                        warn!(error = %err, "websocket read error");
+                        break;
+                    }
+                };
+
+                match frame {
+                    Message::Text(text) => {
+                        let responses = dispatch(&app, &text).await;
+                        for msg in responses {
+                            let encoded = encode_outgoing(&msg);
+                            if let Err(err) = sink.send(Message::Text(encoded)).await {
+                                warn!(error = %err, "failed to send ipc response");
+                                return Ok(());
+                            }
+                        }
+                    }
+                    Message::Binary(_) => {
+                        let msg = OutgoingMessage::Error {
+                            message: "binary frames are not supported".into(),
+                        };
+                        let _ = sink.send(Message::Text(encode_outgoing(&msg))).await;
+                    }
+                    Message::Ping(payload) => {
+                        let _ = sink.send(Message::Pong(payload)).await;
+                    }
+                    Message::Close(_) => {
+                        debug!("client closed ipc connection");
+                        break;
+                    }
+                    Message::Pong(_) | Message::Frame(_) => {}
+                }
             }
-        };
 
-        match frame {
-            Message::Text(text) => {
-                let responses = dispatch(&app, &text).await;
-                for msg in responses {
-                    let encoded = encode_outgoing(&msg);
-                    if let Err(err) = sink.send(Message::Text(encoded)).await {
-                        warn!(error = %err, "failed to send ipc response");
-                        return Ok(());
+            event = events_rx.recv() => {
+                match event {
+                    Ok(msg) => {
+                        let encoded = encode_outgoing(&msg);
+                        if let Err(err) = sink.send(Message::Text(encoded)).await {
+                            warn!(error = %err, "failed to forward broadcast event");
+                            return Ok(());
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!(lagged = n, "broadcast events channel lagged");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        break;
                     }
                 }
             }
-            Message::Binary(_) => {
-                let msg = OutgoingMessage::Error {
-                    message: "binary frames are not supported".into(),
-                };
-                let _ = sink.send(Message::Text(encode_outgoing(&msg))).await;
-            }
-            Message::Ping(payload) => {
-                let _ = sink.send(Message::Pong(payload)).await;
-            }
-            Message::Close(_) => {
-                debug!("client closed ipc connection");
-                break;
-            }
-            Message::Pong(_) | Message::Frame(_) => {}
         }
     }
 
@@ -121,6 +148,21 @@ async fn dispatch(app: &Arc<App>, raw: &str) -> Vec<OutgoingMessage> {
         IncomingMessage::InteractionOpenApplication { application } => {
             app.execute_open_application(&application).await
         }
+        IncomingMessage::ApprovalResponse {
+            approval_id,
+            decision,
+        } => handle_approval_response(app, approval_id, decision),
+    }
+}
+
+fn handle_approval_response(
+    app: &Arc<App>,
+    approval_id: String,
+    decision: IncomingApprovalDecision,
+) -> Vec<OutgoingMessage> {
+    match app.resolve_approval(&approval_id, decision.to_decision()) {
+        Ok(()) => Vec::new(),
+        Err(message) => vec![OutgoingMessage::Error { message }],
     }
 }
 
@@ -320,7 +362,7 @@ async fn handle_voice_once(app: &Arc<App>) -> Vec<OutgoingMessage> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{AudioConfig, Config, InteractionConfig, IpcConfig};
+    use crate::config::{ApprovalConfig, AudioConfig, Config, InteractionConfig, IpcConfig};
     use futures_util::{SinkExt, StreamExt};
     use tokio_tungstenite::connect_async;
 
@@ -337,6 +379,19 @@ mod tests {
     }
 
     fn test_app_with(interaction: InteractionConfig) -> Arc<App> {
+        test_app_with_approval(interaction, default_approval_config())
+    }
+
+    fn default_approval_config() -> ApprovalConfig {
+        ApprovalConfig {
+            timeout_seconds: 2,
+        }
+    }
+
+    fn test_app_with_approval(
+        interaction: InteractionConfig,
+        approval: ApprovalConfig,
+    ) -> Arc<App> {
         let config = Config {
             abrain_cmd: "/bin/false".into(),
             log_level: "info".into(),
@@ -354,6 +409,7 @@ mod tests {
                 bind: "127.0.0.1:0".into(),
             },
             interaction,
+            approval,
         };
         Arc::new(App::new(config))
     }
@@ -495,6 +551,7 @@ mod tests {
         let started = recv_text(&mut ws).await;
         assert!(started.contains(r#""type":"action_started""#));
 
+        // Two steps: resolving, opening.
         let step1 = recv_text(&mut ws).await;
         assert!(step1.contains(r#""type":"action_step""#));
         assert!(step1.contains("Resolving target"));
@@ -591,5 +648,196 @@ mod tests {
 
         let failed = recv_text(&mut ws).await;
         assert!(failed.contains(r#""type":"action_failed""#));
+    }
+
+    fn interaction_with_confirmation() -> InteractionConfig {
+        InteractionConfig {
+            enabled: true,
+            backend: "command".into(),
+            allow_open_application: true,
+            allow_type_text: false,
+            allow_shortcuts: false,
+            require_confirmation: true,
+            open_app_cmd_template: Some("/bin/true".into()),
+        }
+    }
+
+    async fn spawn_server_with_approval(
+        interaction: InteractionConfig,
+        approval: ApprovalConfig,
+    ) -> String {
+        let app = test_app_with_approval(interaction, approval);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = accept_loop(app, listener).await;
+        });
+        format!("ws://{addr}")
+    }
+
+    fn extract_approval_id(frame: &str) -> String {
+        let marker = r#""approval_id":""#;
+        let start = frame.find(marker).expect("approval_id in frame") + marker.len();
+        let rest = &frame[start..];
+        let end = rest.find('"').expect("closing quote");
+        rest[..end].to_string()
+    }
+
+    #[tokio::test]
+    async fn approval_approved_produces_completed_via_broadcast() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 5 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_open_application","application":"calendar"}"#.into(),
+        ))
+        .await
+        .unwrap();
+
+        let planned = recv_text(&mut ws).await;
+        assert!(planned.contains(r#""type":"action_planned""#));
+
+        let requested = recv_text(&mut ws).await;
+        assert!(requested.contains(r#""type":"approval_requested""#));
+        let approval_id = extract_approval_id(&requested);
+
+        let response = format!(
+            r#"{{"type":"approval_response","approval_id":"{approval_id}","decision":"approved"}}"#
+        );
+        ws.send(Message::Text(response)).await.unwrap();
+
+        let resolved = recv_text(&mut ws).await;
+        assert!(resolved.contains(r#""type":"approval_resolved""#));
+        assert!(resolved.contains(r#""decision":"approved""#));
+
+        let started = recv_text(&mut ws).await;
+        assert!(started.contains(r#""type":"action_started""#));
+
+        // step(resolving), step(opening), verification, completed
+        let step1 = recv_text(&mut ws).await;
+        assert!(step1.contains(r#""type":"action_step""#));
+        let step2 = recv_text(&mut ws).await;
+        assert!(step2.contains(r#""type":"action_step""#));
+        let verification = recv_text(&mut ws).await;
+        assert!(verification.contains(r#""type":"action_verification""#));
+        let completed = recv_text(&mut ws).await;
+        assert!(completed.contains(r#""type":"action_completed""#));
+    }
+
+    #[tokio::test]
+    async fn approval_denied_produces_cancelled() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 5 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_open_application","application":"calendar"}"#.into(),
+        ))
+        .await
+        .unwrap();
+
+        let _planned = recv_text(&mut ws).await;
+        let requested = recv_text(&mut ws).await;
+        let approval_id = extract_approval_id(&requested);
+
+        let response = format!(
+            r#"{{"type":"approval_response","approval_id":"{approval_id}","decision":"denied"}}"#
+        );
+        ws.send(Message::Text(response)).await.unwrap();
+
+        let resolved = recv_text(&mut ws).await;
+        assert!(resolved.contains(r#""type":"approval_resolved""#));
+        assert!(resolved.contains(r#""decision":"denied""#));
+
+        let cancelled = recv_text(&mut ws).await;
+        assert!(cancelled.contains(r#""type":"action_cancelled""#));
+        assert!(cancelled.contains("denied"));
+    }
+
+    #[tokio::test]
+    async fn approval_timeout_produces_cancelled() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 1 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_open_application","application":"calendar"}"#.into(),
+        ))
+        .await
+        .unwrap();
+
+        let _planned = recv_text(&mut ws).await;
+        let _requested = recv_text(&mut ws).await;
+
+        let resolved = recv_text(&mut ws).await;
+        assert!(resolved.contains(r#""type":"approval_resolved""#));
+        assert!(resolved.contains(r#""decision":"timed_out""#));
+
+        let cancelled = recv_text(&mut ws).await;
+        assert!(cancelled.contains(r#""type":"action_cancelled""#));
+    }
+
+    #[tokio::test]
+    async fn approval_unknown_id_returns_error() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 5 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"approval_response","approval_id":"apr_nope","decision":"approved"}"#.into(),
+        ))
+        .await
+        .unwrap();
+
+        let err = recv_text(&mut ws).await;
+        assert!(err.contains(r#""type":"error""#));
+        assert!(err.contains("apr_nope"));
+    }
+
+    #[tokio::test]
+    async fn approval_duplicate_response_returns_error() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 5 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_open_application","application":"calendar"}"#.into(),
+        ))
+        .await
+        .unwrap();
+
+        let _planned = recv_text(&mut ws).await;
+        let requested = recv_text(&mut ws).await;
+        let approval_id = extract_approval_id(&requested);
+
+        let response = format!(
+            r#"{{"type":"approval_response","approval_id":"{approval_id}","decision":"approved"}}"#
+        );
+        ws.send(Message::Text(response.clone())).await.unwrap();
+
+        // Drain resolved + started + ... for first approval. Second
+        // response with same id must produce an error frame somewhere
+        // after the approval is already gone.
+        let mut saw_error = false;
+        ws.send(Message::Text(response)).await.unwrap();
+        for _ in 0..12 {
+            let frame = recv_text(&mut ws).await;
+            if frame.contains(r#""type":"error""#) && frame.contains(&approval_id) {
+                saw_error = true;
+                break;
+            }
+        }
+        assert!(saw_error, "expected error frame for duplicate response");
     }
 }

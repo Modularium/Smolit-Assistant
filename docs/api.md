@@ -62,6 +62,11 @@ Interaction Layer MVP entgegen (Details in Abschnitt 2.6):
 
 - `interaction_open_application` mit Feld `application: string`.
 
+Für den Approval / Confirmation Flow (Details in Abschnitt 2.7):
+
+- `approval_response` mit `approval_id: string` und `decision`
+  (`"approved" | "denied" | "cancelled"`).
+
 Beispiele:
 
 ```json
@@ -88,6 +93,10 @@ Zusätzlich emittiert der Core **Action Events** (Action Event Model v1).
 Sie sind additiv; ältere UIs, die sie nicht kennen, dürfen sie
 ignorieren. Details in Abschnitt 2.5.
 
+Für freigabepflichtige Aktionen kommen die Approval-Events
+`approval_requested` und `approval_resolved` hinzu (Details in
+Abschnitt 2.7).
+
 Beispiele:
 
 ```json
@@ -103,14 +112,15 @@ Beispiele:
 
 ```json
 {
-  "tts_enabled":         true,
-  "tts_available":       false,
-  "stt_enabled":         true,
-  "stt_available":       false,
-  "auto_speak":          true,
-  "ipc_enabled":         true,
-  "interaction_enabled": true,
-  "interaction_backend": "command"
+  "tts_enabled":              true,
+  "tts_available":            false,
+  "stt_enabled":              true,
+  "stt_available":            false,
+  "auto_speak":               true,
+  "ipc_enabled":              true,
+  "interaction_enabled":      true,
+  "interaction_backend":      "command",
+  "approval_timeout_seconds": 20
 }
 ```
 
@@ -127,6 +137,9 @@ Semantik:
 - `interaction_backend`: Name des aktiven Interaction-Backends
   (MVP: `command`). Welche Kinds effektiv erlaubt sind, ergibt sich aus
   `SMOLIT_INTERACTION_ALLOW_*`.
+- `approval_timeout_seconds`: Fenster, in dem die UI auf ein
+  `approval_requested` mit `approval_response` antworten muss, bevor
+  der Core die Aktion als `timed_out` abbricht (siehe 2.7).
 
 ### 2.4 Flow-Beispiele
 
@@ -294,10 +307,10 @@ Eingehend:
 - `{"type":"interaction_open_application","application":"<name>"}` —
   symbolischer App-Name (`"calendar"`, `"terminal"`, …).
 
-Der Handler ruft intern `App::execute_open_application(name)` auf,
-erzeugt einen `InteractionAction` und führt ihn über den
-`InteractionExecutor` aus. Das Ergebnis ist eine
-Action-Event-Sequenz.
+Die Handler rufen intern `App::execute_open_application(name)` auf,
+erzeugen einen `InteractionAction` und führen ihn über den
+`InteractionExecutor` aus. Das Ergebnis ist eine Action-Event-Sequenz
+(und ggf. der Approval-Flow aus 2.7).
 
 #### Eventfolge (Erfolgspfad, Best-effort)
 
@@ -364,8 +377,7 @@ darauf festzulegen.
 - `SMOLIT_INTERACTION_ALLOW_SHORTCUTS` (Default `false`) —
   `send_shortcut` erlaubt? (Analog MVP-Stub.)
 - `SMOLIT_INTERACTION_REQUIRE_CONFIRMATION` (Default `true`) — Policy;
-  freigabepflichtige Aktionen werden derzeit abgelehnt, bis der
-  Confirmation-Kanal landet (Phase 8b).
+  freigabepflichtige Aktionen laufen über den Approval-Flow (2.7).
 - `SMOLIT_INTERACTION_OPEN_APP_CMD` (Default *leer*) — Command-Template
   für Open-App, z. B. `xdg-open {name}` oder `gtk-launch {name}`.
 
@@ -382,9 +394,99 @@ das Verhalten ist damit deterministisch und ungefährlich.
 - **Keine** globale Tastatur-/Mausinjektion: `type_text` /
   `send_shortcut` sind nur als Hooks modelliert und liefern
   `BackendUnsupported`.
+- **Keine** Fensterliste, keine a11y-basierte Fenstersuche — der
+  Core reicht die symbolischen Felder an das Command-Template weiter
+  und überlässt dem externen Helper (z. B. `wmctrl -a`), was er daraus
+  macht. Keine Sonderpfade für Wayland.
 - **Keine** Eingabe in sensible Dialoge (Anmelde-, Zahlungs-, System-
   dialoge) geplant; erst eine spätere Phase definiert Trust-Stufen
   (siehe `docs/presence_desktop_interaction.md`, §7).
+
+---
+
+### 2.7 Approval / Confirmation Flow MVP
+
+Aktionen, die laut `InteractionAction.requires_confirmation` und
+`InteractionConfig.require_confirmation` freigabepflichtig sind, werden
+vom Core **nicht** mehr stumm abgelehnt. Stattdessen tritt der Core in
+einen expliziten Dialog mit der UI:
+
+1. Core emittiert `action_planned` wie gewohnt.
+2. Core emittiert `approval_requested` mit einer Beschreibung der
+   geplanten Aktion.
+3. Core wartet auf ein passendes `approval_response` (oder auf den
+   konfigurierten Timeout).
+4. Bei `approved` läuft der Executor durch und emittiert
+   `action_started` → `action_step*` → `action_verification` →
+   `action_completed` / `action_failed`.
+5. Bei `denied`, `cancelled` oder Timeout emittiert der Core
+   `approval_resolved` und anschließend `action_cancelled`.
+
+Die Zuordnung erfolgt über die `approval_id`; jede UI-Instanz kann
+sie eindeutig einem `action_id` zuordnen.
+
+#### Eingehend (UI → Core)
+
+- `approval_response` — Antwort auf ein zuvor empfangenes
+  `approval_requested`. Felder:
+  - `approval_id: string`
+  - `decision: "approved" | "denied" | "cancelled"`
+
+  Idempotent: eine zweite Antwort mit gleicher `approval_id` erzeugt
+  einen `error`-Frame.
+
+#### Ausgehend (Core → UI)
+
+- `approval_requested` — Core bittet um Freigabe. `payload` ist eine
+  `ApprovalRequest` mit den Feldern `approval_id`, `action_id`,
+  `action_kind`, `title`, `message`, `target`, optional `reason`,
+  `timeout_seconds`.
+- `approval_resolved` — Endergebnis der Freigabe. `payload.decision`
+  ist einer der Strings `approved`, `denied`, `cancelled`,
+  `timed_out`. Wird vor dem endgültigen `action_completed` bzw.
+  `action_cancelled` emittiert.
+
+`approval_resolved` ist eine Bestätigung für die UI, unabhängig vom
+anschließenden Action-Event-Strom. `timed_out` tritt nur core-intern
+auf (die UI kann es nicht selbst senden).
+
+#### Fehlerfälle
+
+- **Unbekannte `approval_id`** (nie gesehen oder bereits aufgelöst):
+  Core antwortet mit einem `error`-Frame, der Action-Strom bleibt
+  unberührt.
+- **Timeout** (`SMOLIT_APPROVAL_TIMEOUT_SECONDS`, Default 20):
+  Core emittiert `approval_resolved { decision: "timed_out" }` und
+  `action_cancelled`.
+- **UI nicht verbunden**: Das `approval_requested`-Frame geht verloren,
+  der Timeout-Watchdog cancelt die Aktion ordentlich.
+- **Core-Restart**: Pending Approvals sind rein in-memory und gehen
+  mit einem Neustart verloren — bewusst, keine Persistenz im MVP.
+
+#### Beispiel
+
+```json
+// Core → UI
+{"type":"action_planned","payload":{"action_id":"act_000001","action_kind":"automation","title":"Open calendar","target":{"type":"application","name":"calendar"}}}
+{"type":"approval_requested","payload":{"approval_id":"apr_000001","action_id":"act_000001","action_kind":"open_application","title":"Open calendar","message":"Confirm open_application: Open calendar","target":{"type":"application","name":"calendar"},"timeout_seconds":20}}
+
+// UI → Core
+{"type":"approval_response","approval_id":"apr_000001","decision":"approved"}
+
+// Core → UI
+{"type":"approval_resolved","payload":{"approval_id":"apr_000001","action_id":"act_000001","decision":"approved"}}
+{"type":"action_started","payload":{"action_id":"act_000001","phase":"started"}}
+// …step, verification, completed…
+```
+
+#### Approval-Scope-Grenzen (explizit)
+
+- Keine Persistenz, kein „remember this choice", kein Global-Policy-UI.
+- Kein Multi-User / Multi-Seat — ein einziger UI-Client entscheidet.
+- Keine kryptografische Absicherung des Approval-Kanals (lokaler
+  Loopback-WebSocket als Vertrauensgrenze).
+- `type_text` und `send_shortcut` bekommen keine eigene
+  Approval-Semantik — sie bleiben MVP-seitig abgelehnt.
 
 ---
 

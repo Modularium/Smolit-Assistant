@@ -5,6 +5,7 @@ use crate::actions::{
     ActionProgressPayload, ActionStartedPayload, ActionStepPayload, ActionVerificationPayload,
 };
 use crate::app::StatusPayload;
+use crate::approvals::{ApprovalRequest, ApprovalResolvedPayload, IncomingApprovalDecision};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -20,6 +21,10 @@ pub enum IncomingMessage {
     VoiceOnce,
     InteractionOpenApplication {
         application: String,
+    },
+    ApprovalResponse {
+        approval_id: String,
+        decision: IncomingApprovalDecision,
     },
 }
 
@@ -41,6 +46,8 @@ pub enum OutgoingMessage {
     ActionCompleted { payload: ActionCompletedPayload },
     ActionFailed { payload: ActionFailedPayload },
     ActionCancelled { payload: ActionCancelledPayload },
+    ApprovalRequested { payload: ApprovalRequest },
+    ApprovalResolved { payload: ApprovalResolvedPayload },
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -125,6 +125,13 @@ damit austauschbar, ohne Scene-Code anzufassen.
   deaktivieren sich jedoch, da kein Transport offen ist.
 - Ungültige JSON-Frames führen zu einer lokalen `error_received`-Emission,
   nicht zu einem Crash.
+- Für freigabepflichtige Aktionen versteht die UI die zusätzlichen
+  Approval-Frames (`approval_requested` / `approval_resolved`) aus
+  [`docs/api.md`](./api.md) §2.7. `IpcClient.send_approval_response`
+  ist der einzige Weg, Approve/Deny zurück an den Core zu schicken;
+  `EventBus` vermittelt sie an die Scene, die einen modalen Banner
+  mit Approve-/Deny-Buttons einblendet, solange eine Approval-ID
+  offen ist.
 
 Das genaue Protokoll (Eingangs- und Ausgangs-Nachrichten, Felder,
 Semantik) ist in [`docs/api.md`](./api.md) beschrieben und ist die
@@ -276,9 +283,9 @@ dokumentiert.
   höchstens einen symbolischen Auslöser
   (`interaction_open_application`, siehe
   [`docs/api.md`](./api.md), §2.6) und konsumiert die zurückkommenden
-  Action Events — sie führt nichts selbst aus. Der Core entscheidet
-  per Policy und Backend über Ausführbarkeit, Verifikation und
-  Recovery.
+  Action Events — sie führt nichts selbst aus. Die UI stellt nur das
+  Approval-Banner dar, der Core entscheidet per Policy und Backend
+  über Ausführbarkeit, Verifikation und Recovery.
 
 ---
 

@@ -79,9 +79,9 @@ Confidence `verified`/`uncertain`/`failed`) und klassifiziert
 Fehler über `RecoveryHint` (`retry` / `abort` / `ask_user` /
 `fallback_unavailable`). Integration verläuft ausschließlich über
 Action Events; das Protokoll kennt zusätzlich
-`interaction_open_application` als eingehende Nachricht. `type_text`
-und `send_shortcut` sind als Hooks modelliert, liefern aber
-`BackendUnsupported`.
+`interaction_open_application` als eingehende Nachricht. `type_text`,
+`send_shortcut` und `focus_window` sind als Hooks modelliert, liefern
+aber `BackendUnsupported`.
 
 ---
 
@@ -332,10 +332,17 @@ UI-Phasen geführt und noch **nicht** begonnen.
 - [ ] Desktop Automation Modes (none / assist only / confirm before
       action / allowed trusted actions only)
 - [ ] Trust-Modell für Anwendungen und Fenster
-- [ ] Approval / Confirmation Flow zwischen Core und UI (Banner,
-      `approval_requested` / `approval_response` / `approval_resolved`)
-- [ ] `focus_window` Interaction-Spike mit Policy-Gate und Template-
-      gesteuertem MVP-Backend
+- [x] Approval / Confirmation Flow MVP zwischen Core und UI (Banner,
+      `approval_requested` / `approval_response` / `approval_resolved`,
+      Timeout über `SMOLIT_APPROVAL_TIMEOUT_SECONDS`; siehe
+      [docs/api.md §2.7](./docs/api.md))
+- [ ] `focus_window` Interaction-Spike: Policy-Gate, command-basiertes
+      MVP-Backend mit Template, Approval-Integration, ehrliches
+      `uncertain` statt Pseudo-Verifikation, `BackendUnsupported` wenn
+      kein Template (z. B. Wayland).
+- [ ] Confirmation- und Approval-UX für weitere Action Kinds
+      (`type_text`, `send_shortcut`, Multi-Step-Flows, persistente
+      Trust-Entscheidungen)
 - [ ] Kill switch / Stop-Mechanik
 - [ ] Action-/Verification-/Failure-Events additiv in
       [docs/api.md](./docs/api.md) (Basis steht seit Action Event
@@ -415,6 +422,13 @@ Window-/Overlay-Architektur (Phase 3b, siehe
 und die strukturierten Targets aus einer Desktop-Interaction-Schicht
 (Phase 8b). Avatar-seitig bleiben echte Charakteranimation und
 Speech-Sync offene Folgearbeiten.
+
+Für den Desktop Interaction Layer läuft jetzt ein konkreter
+**Approval / Confirmation Flow MVP**: freigabepflichtige Aktionen
+(aktuell `open_application`) werden vom Core nicht mehr stumm
+abgelehnt, sondern über `approval_requested` / `approval_response` /
+`approval_resolved` an die UI gespiegelt und bei Timeout sauber
+`action_cancelled`. Details in [docs/api.md §2.7](./docs/api.md).
 
 Zusätzlich begonnen: **Phase 3b Linux Window & Overlay Architecture**
 als parallele Architekturlinie. Das Dokument legt Wayland/X11-Trennung,

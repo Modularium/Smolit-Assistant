@@ -13,6 +13,7 @@ enum State {
 	TALKING,
 	DISCONNECTED,
 	ERROR,
+	ACTING,
 }
 
 const DEFAULT: int = State.IDLE
@@ -25,4 +26,5 @@ static func name_of(state: int) -> String:
 		State.TALKING: return "talking"
 		State.DISCONNECTED: return "disconnected"
 		State.ERROR: return "error"
+		State.ACTING: return "acting"
 		_: return "unknown"

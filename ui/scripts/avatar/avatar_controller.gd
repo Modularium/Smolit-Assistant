@@ -14,12 +14,14 @@ const AvatarStateRef := preload("res://scripts/avatar/avatar_state.gd")
 
 const TALK_HOLD_SECONDS: float = 1.8
 const ERROR_HOLD_SECONDS: float = 1.2
+const ACTING_SUCCESS_HOLD_SECONDS: float = 0.9
 
 const IDLE_COLOR: Color = Color(0.32, 0.55, 0.78)
 const THINKING_COLOR: Color = Color(0.85, 0.70, 0.25)
 const TALKING_COLOR: Color = Color(0.35, 0.78, 0.52)
 const DISCONNECTED_COLOR: Color = Color(0.45, 0.45, 0.50)
 const ERROR_COLOR: Color = Color(0.82, 0.32, 0.32)
+const ACTING_COLOR: Color = Color(0.52, 0.46, 0.86)
 
 @onready var _body: ColorRect = $VisualRoot/Body
 @onready var _mouth: ColorRect = $VisualRoot/Face/Mouth
@@ -44,6 +46,12 @@ func _ready() -> void:
 	EventBus.thinking_received.connect(_on_thinking)
 	EventBus.response_received.connect(_on_response)
 	EventBus.error_received.connect(_on_error)
+
+	EventBus.action_started_received.connect(_on_action_started)
+	EventBus.action_step_received.connect(_on_action_step)
+	EventBus.action_completed_received.connect(_on_action_completed)
+	EventBus.action_failed_received.connect(_on_action_failed)
+	EventBus.action_cancelled_received.connect(_on_action_cancelled)
 
 	var initial: int = AvatarStateRef.State.IDLE if IpcClient.is_connected_to_core() \
 		else AvatarStateRef.State.DISCONNECTED
@@ -83,6 +91,10 @@ func _apply_state_visuals() -> void:
 			_body.color = DISCONNECTED_COLOR
 		AvatarStateRef.State.ERROR:
 			_body.color = ERROR_COLOR
+		AvatarStateRef.State.ACTING:
+			_body.color = ACTING_COLOR
+			_thinking_indicator.visible = true
+			_start_thinking_tween()
 
 
 func _start_thinking_tween() -> void:
@@ -116,7 +128,9 @@ func _start_hold(seconds: float) -> void:
 
 
 func _on_hold_timeout() -> void:
-	if _state == AvatarStateRef.State.TALKING or _state == AvatarStateRef.State.ERROR:
+	if _state == AvatarStateRef.State.TALKING \
+			or _state == AvatarStateRef.State.ERROR \
+			or _state == AvatarStateRef.State.ACTING:
 		var next: int = AvatarStateRef.State.IDLE if IpcClient.is_connected_to_core() \
 			else AvatarStateRef.State.DISCONNECTED
 		_set_state(next)
@@ -145,3 +159,42 @@ func _on_response(_text: String) -> void:
 func _on_error(_message: String) -> void:
 	_set_state(AvatarStateRef.State.ERROR)
 	_start_hold(ERROR_HOLD_SECONDS)
+
+
+func _on_action_started(_payload: Dictionary) -> void:
+	# Action-Events dominieren nur, solange der Avatar nicht gerade
+	# aktiv spricht — Talking/Thinking bleiben als bereits etablierte
+	# Signalisierung bestehen.
+	if _state == AvatarStateRef.State.TALKING or _state == AvatarStateRef.State.THINKING:
+		return
+	_hold_timer.stop()
+	_set_state(AvatarStateRef.State.ACTING)
+
+
+func _on_action_step(_payload: Dictionary) -> void:
+	if _state == AvatarStateRef.State.TALKING or _state == AvatarStateRef.State.THINKING:
+		return
+	_hold_timer.stop()
+	_set_state(AvatarStateRef.State.ACTING)
+
+
+func _on_action_completed(_payload: Dictionary) -> void:
+	# Kurzer Erfolgs-Puls über den bestehenden Talking-Visual, dann
+	# sauberer Rückfall in idle/disconnected.
+	if _state == AvatarStateRef.State.TALKING:
+		return
+	_set_state(AvatarStateRef.State.TALKING)
+	_start_hold(ACTING_SUCCESS_HOLD_SECONDS)
+
+
+func _on_action_failed(_payload: Dictionary) -> void:
+	_set_state(AvatarStateRef.State.ERROR)
+	_start_hold(ERROR_HOLD_SECONDS)
+
+
+func _on_action_cancelled(_payload: Dictionary) -> void:
+	if _state != AvatarStateRef.State.ACTING:
+		return
+	var next: int = AvatarStateRef.State.IDLE if IpcClient.is_connected_to_core() \
+		else AvatarStateRef.State.DISCONNECTED
+	_set_state(next)

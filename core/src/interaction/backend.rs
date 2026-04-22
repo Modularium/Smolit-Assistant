@@ -157,6 +157,7 @@ mod tests {
     async fn open_application_with_true_command_is_uncertain() {
         let backend = CommandBackend::new(CommandBackendConfig {
             open_app_cmd_template: Some("/bin/true".into()),
+            ..CommandBackendConfig::default()
         });
         let result = backend
             .open_application(&action("anything"), "anything")
@@ -174,4 +175,5 @@ mod tests {
             .expect_err("expected unsupported");
         assert!(matches!(err, InteractionError::BackendUnsupported(_)));
     }
+
 }

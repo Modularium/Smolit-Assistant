@@ -13,6 +13,7 @@ const DEFAULT_STT_TIMEOUT_SECONDS: u64 = 20;
 const DEFAULT_TTS_TIMEOUT_SECONDS: u64 = 20;
 const DEFAULT_IPC_BIND: &str = "127.0.0.1:8787";
 const DEFAULT_INTERACTION_BACKEND: &str = "command";
+const DEFAULT_APPROVAL_TIMEOUT_SECONDS: u64 = 20;
 
 #[derive(Debug, Parser)]
 #[command(name = "smolit", about = "Smolit Assistant core daemon")]
@@ -57,12 +58,20 @@ pub struct InteractionConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApprovalConfig {
+    /// How long the core waits for an `approval_response` before
+    /// treating the approval as timed out and cancelling the action.
+    pub timeout_seconds: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub abrain_cmd: String,
     pub log_level: String,
     pub audio: AudioConfig,
     pub ipc: IpcConfig,
     pub interaction: InteractionConfig,
+    pub approval: ApprovalConfig,
 }
 
 impl Config {
@@ -122,6 +131,11 @@ impl Config {
         );
         let open_app_cmd_template = non_empty(lookup("SMOLIT_INTERACTION_OPEN_APP_CMD"));
 
+        let approval_timeout_seconds = parse_u64(
+            lookup("SMOLIT_APPROVAL_TIMEOUT_SECONDS").as_deref(),
+            DEFAULT_APPROVAL_TIMEOUT_SECONDS,
+        );
+
         Ok(Self {
             abrain_cmd,
             log_level,
@@ -146,6 +160,9 @@ impl Config {
                 allow_shortcuts,
                 require_confirmation,
                 open_app_cmd_template,
+            },
+            approval: ApprovalConfig {
+                timeout_seconds: approval_timeout_seconds,
             },
         })
     }

@@ -165,25 +165,33 @@ Action Event Model v1 (`action_planned` → `action_started` →
 (`retry` / `abort` / `ask_user` / `fallback_unavailable`) klassifiziert
 und im `action_failed.error`-Feld als `recovery_hint=<x>` übertragen.
 
-Im MVP ist nur `open_application` wirklich implementiert
-(`CommandBackend`, konfigurierbares Kommando-Template wie
-`gtk-launch {name}` oder `xdg-open {name}`). `type_text` und
-`send_shortcut` sind nur als Hooks vorhanden, liefern
+Im MVP ist ausschließlich `open_application` wirklich implementiert
+(`CommandBackend`, konfigurierbare Kommando-Templates wie
+`gtk-launch {name}` / `xdg-open {name}`). `focus_window`, `type_text`
+und `send_shortcut` sind weiterhin nur als Hooks vorhanden, liefern
 `BackendUnsupported`. Defaults sind bewusst restriktiv:
 `allow_type_text=false`, `allow_shortcuts=false`,
-`require_confirmation=true`, leeres
-`SMOLIT_INTERACTION_OPEN_APP_CMD` meldet ehrlich „Preconditions not
-met". Kein OCR, keine A11y-Traversierung, keine Pixel-Erkennung,
-keine globalen Input-Grabs — siehe
-[docs/api.md](docs/api.md) §2.6 und
+`require_confirmation=true`, leeres `SMOLIT_INTERACTION_OPEN_APP_CMD`
+meldet ehrlich „Preconditions not met". Kein OCR, keine
+A11y-Traversierung, keine Pixel-Erkennung, keine globalen Input-Grabs
+— siehe [docs/api.md](docs/api.md) §2.6 und
 [docs/presence_desktop_interaction.md](docs/presence_desktop_interaction.md)
 §14b.
 
-Eingehende IPC-Nachricht:
+Eingehende IPC-Nachrichten:
 
 ```json
 {"type":"interaction_open_application","application":"firefox"}
 ```
+
+Aktionen mit `requires_confirmation=true` (heute: jede
+`interaction_open_application`) gehen durch den
+**Approval / Confirmation Flow**: der Core sendet `approval_requested`, die UI
+zeigt einen Banner mit Approve/Deny, und ein
+`approval_response`-Frame settelt die Aktion. Ohne Antwort innerhalb
+von `SMOLIT_APPROVAL_TIMEOUT_SECONDS` (Default 20) emittiert der Core
+`approval_resolved` mit `decision="timed_out"` und anschließend
+`action_cancelled`. Details: [docs/api.md §2.7](docs/api.md).
 
 ## UI (Godot, Phase 3.3 Presence MVP)
 

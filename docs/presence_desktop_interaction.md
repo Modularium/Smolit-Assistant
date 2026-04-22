@@ -308,10 +308,12 @@ Smolit **tatsächlich** am Desktop tun darf.
   expliziter Bestätigung pro Aktion (oder pro Plan).
 - Zielobjekt, Eingaben und erwartete Wirkung werden vor der
   Ausführung sichtbar gemacht.
-- **Im MVP** werden freigabepflichtige Aktionen (`requires_confirmation`
-  zusammen mit `SMOLIT_INTERACTION_REQUIRE_CONFIRMATION=true`)
-  schlicht abgelehnt. Der Confirmation-Kanal selbst landet in einer
-  späteren Phase.
+- **Konkretisiert im MVP** durch den Approval / Confirmation Flow
+  (siehe `docs/api.md`, §2.7): der Core sendet `approval_requested`,
+  die UI zeigt einen Banner mit Titel, Message und Target, und
+  Approve/Deny schickt ein `approval_response` zurück. Ohne Antwort
+  innerhalb von `SMOLIT_APPROVAL_TIMEOUT_SECONDS` wird die Aktion
+  mit `action_cancelled` verworfen — Default ist „nicht ausführen".
 
 ### 8.4 allowed trusted actions only
 
@@ -665,9 +667,9 @@ kein Confirmation-Kanal existiert. Das ist der ehrliche MVP-Zustand
 
 ### 14b.4 Ehrliche Scope-Grenzen
 
-- `type_text` und `send_shortcut` sind als Hooks modelliert, liefern
-  aber immer `BackendUnsupported`. Das Protokoll kennt sie bereits,
-  der Executor emittiert `action_failed` mit
+- `focus_window`, `type_text` und `send_shortcut` sind als Hooks
+  modelliert, liefern aber immer `BackendUnsupported`. Das Protokoll
+  kennt sie bereits, der Executor emittiert `action_failed` mit
   `recovery_hint=fallback_unavailable`.
 - Kein Window-Probe, kein Screenshot, kein OCR, keine globale
   Eingabe. Verification bleibt „best-effort" und wird im
@@ -678,13 +680,10 @@ kein Confirmation-Kanal existiert. Das ist der ehrliche MVP-Zustand
 
 ### 14b.5 Nächste Schritte (nicht Teil dieses MVP)
 
-- Echte Confirmation-UX über IPC (`approval_requested` /
-  `approval_response`) — kommt in der nächsten Phase.
+- Echte Confirmation-UX über IPC (`interaction_confirm` / `… deny`).
 - Backend für Linux mit AT-SPI oder D-Bus (§16, erste Offene Punkte).
 - Optional: Window-Probe nach `open_application`, um von `uncertain`
   auf `verified` hochzustufen.
-- Ein `focus_window`-Kind auf demselben Action-Event-Modell
-  (kommt im Anschluss an den Approval-Flow).
 - Structured Targets aus einer Discovery-Stufe (§10.1), damit
   `target` jenseits von `application:<name>` strukturiert wird.
 - Richtige Schaltflächen im Presence Layer für „ausführen /
