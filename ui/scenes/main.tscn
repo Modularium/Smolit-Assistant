@@ -1,22 +1,24 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene format=3 uid="uid://c3bqaivxfaeob"]
 
-[ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="Script" uid="uid://c1otyptd2n3mp" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="PackedScene" path="res://scenes/avatar/avatar_root.tscn" id="2_avatar"]
-[ext_resource type="Script" path="res://scripts/presence/presence_controller.gd" id="3_presence"]
+[ext_resource type="Script" uid="uid://cm25rv0s348px" path="res://scripts/presence/presence_controller.gd" id="3_presence"]
+[ext_resource type="Theme" path="res://themes/compact_panel.tres" id="4_theme"]
 
-[node name="Main" type="Control"]
+[node name="Main" type="Control" unique_id=748218674]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+theme = ExtResource("4_theme")
 script = ExtResource("1_main")
 
-[node name="PresenceController" type="Node" parent="."]
+[node name="PresenceController" type="Node" parent="." unique_id=348731445]
 script = ExtResource("3_presence")
 
-[node name="VBox" type="VBoxContainer" parent="."]
+[node name="VBox" type="VBoxContainer" parent="." unique_id=386434142]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -29,197 +31,262 @@ grow_horizontal = 2
 grow_vertical = 2
 theme_override_constants/separation = 8
 
-[node name="HeaderRow" type="HBoxContainer" parent="VBox"]
+[node name="HeaderRow" type="HBoxContainer" parent="VBox" unique_id=1707816705]
 layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="StatusLabel" type="Label" parent="VBox/HeaderRow"]
+[node name="StatusLabel" type="Label" parent="VBox/HeaderRow" unique_id=494085995]
+modulate = Color(1, 1, 1, 0.75)
 layout_mode = 2
 size_flags_horizontal = 3
 text = "disconnected"
 
-[node name="PresenceLabel" type="Label" parent="VBox/HeaderRow"]
-layout_mode = 2
-text = "presence: docked"
-modulate = Color(1, 1, 1, 0.75)
-
-[node name="PresenceToggle" type="Button" parent="VBox/HeaderRow"]
-layout_mode = 2
-text = "Expand"
-
-[node name="ActionBanner" type="PanelContainer" parent="VBox"]
+[node name="ActionBanner" type="PanelContainer" parent="VBox" unique_id=86414064]
 visible = false
 layout_mode = 2
 
-[node name="ActionVBox" type="VBoxContainer" parent="VBox/ActionBanner"]
+[node name="ActionVBox" type="VBoxContainer" parent="VBox/ActionBanner" unique_id=668604798]
 layout_mode = 2
 theme_override_constants/separation = 2
 
-[node name="ActionTitle" type="Label" parent="VBox/ActionBanner/ActionVBox"]
+[node name="ActionTitle" type="Label" parent="VBox/ActionBanner/ActionVBox" unique_id=696293946]
 layout_mode = 2
 text = "action"
 
-[node name="TargetRow" type="HBoxContainer" parent="VBox/ActionBanner/ActionVBox"]
+[node name="TargetRow" type="HBoxContainer" parent="VBox/ActionBanner/ActionVBox" unique_id=1209790347]
 visible = false
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="TargetKindChip" type="Label" parent="VBox/ActionBanner/ActionVBox/TargetRow"]
+[node name="TargetKindChip" type="Label" parent="VBox/ActionBanner/ActionVBox/TargetRow" unique_id=61749612]
+modulate = Color(0.75, 0.85, 1, 0.9)
 layout_mode = 2
 text = "target"
-modulate = Color(0.75, 0.85, 1, 0.9)
 
-[node name="TargetName" type="Label" parent="VBox/ActionBanner/ActionVBox/TargetRow"]
+[node name="TargetName" type="Label" parent="VBox/ActionBanner/ActionVBox/TargetRow" unique_id=1520100974]
+modulate = Color(1, 1, 1, 0.85)
 layout_mode = 2
 size_flags_horizontal = 3
-text = ""
-modulate = Color(1, 1, 1, 0.85)
 
-[node name="TargetDetail" type="Label" parent="VBox/ActionBanner/ActionVBox/TargetRow"]
-layout_mode = 2
-text = ""
+[node name="TargetDetail" type="Label" parent="VBox/ActionBanner/ActionVBox/TargetRow" unique_id=838477781]
 modulate = Color(1, 1, 1, 0.55)
-
-[node name="MappingChip" type="Label" parent="VBox/ActionBanner/ActionVBox"]
-visible = false
 layout_mode = 2
-text = ""
+
+[node name="MappingChip" type="Label" parent="VBox/ActionBanner/ActionVBox" unique_id=2054651209]
+visible = false
 modulate = Color(0.8, 0.9, 0.8, 0.75)
-
-[node name="ActionStep" type="Label" parent="VBox/ActionBanner/ActionVBox"]
 layout_mode = 2
-text = ""
+
+[node name="ActionStep" type="Label" parent="VBox/ActionBanner/ActionVBox" unique_id=303465648]
 modulate = Color(1, 1, 1, 0.8)
-
-[node name="ActionTarget" type="Label" parent="VBox/ActionBanner/ActionVBox"]
 layout_mode = 2
-text = ""
+
+[node name="ActionTarget" type="Label" parent="VBox/ActionBanner/ActionVBox" unique_id=549178]
 modulate = Color(1, 1, 1, 0.55)
-
-[node name="ActionStatus" type="Label" parent="VBox/ActionBanner/ActionVBox"]
 layout_mode = 2
-text = ""
 
-[node name="ApprovalBanner" type="PanelContainer" parent="VBox"]
+[node name="ActionStatus" type="Label" parent="VBox/ActionBanner/ActionVBox" unique_id=224940245]
+layout_mode = 2
+
+[node name="ApprovalBanner" type="PanelContainer" parent="VBox" unique_id=2141579767]
 visible = false
 layout_mode = 2
 
-[node name="ApprovalVBox" type="VBoxContainer" parent="VBox/ApprovalBanner"]
+[node name="ApprovalVBox" type="VBoxContainer" parent="VBox/ApprovalBanner" unique_id=1744870373]
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="ApprovalTitle" type="Label" parent="VBox/ApprovalBanner/ApprovalVBox"]
+[node name="ApprovalTitle" type="Label" parent="VBox/ApprovalBanner/ApprovalVBox" unique_id=190596566]
 layout_mode = 2
 text = "Confirm action"
 
-[node name="ApprovalMessage" type="Label" parent="VBox/ApprovalBanner/ApprovalVBox"]
-layout_mode = 2
-text = ""
-autowrap_mode = 2
+[node name="ApprovalMessage" type="Label" parent="VBox/ApprovalBanner/ApprovalVBox" unique_id=73712435]
 modulate = Color(1, 1, 1, 0.85)
+layout_mode = 2
+autowrap_mode = 2
 
-[node name="ApprovalSelectedTarget" type="Label" parent="VBox/ApprovalBanner/ApprovalVBox"]
+[node name="ApprovalSelectedTarget" type="Label" parent="VBox/ApprovalBanner/ApprovalVBox" unique_id=1770229516]
 visible = false
-layout_mode = 2
-text = ""
 modulate = Color(0.75, 0.85, 1, 0.85)
-
-[node name="ApprovalTimeout" type="Label" parent="VBox/ApprovalBanner/ApprovalVBox"]
 layout_mode = 2
-text = ""
-modulate = Color(1, 1, 1, 0.55)
 
-[node name="ApprovalButtons" type="HBoxContainer" parent="VBox/ApprovalBanner/ApprovalVBox"]
+[node name="ApprovalTimeout" type="Label" parent="VBox/ApprovalBanner/ApprovalVBox" unique_id=2120413601]
+modulate = Color(1, 1, 1, 0.55)
+layout_mode = 2
+
+[node name="ApprovalButtons" type="HBoxContainer" parent="VBox/ApprovalBanner/ApprovalVBox" unique_id=208288677]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="ApproveButton" type="Button" parent="VBox/ApprovalBanner/ApprovalVBox/ApprovalButtons"]
+[node name="ApproveButton" type="Button" parent="VBox/ApprovalBanner/ApprovalVBox/ApprovalButtons" unique_id=1506587449]
 layout_mode = 2
 text = "Approve"
 
-[node name="DenyButton" type="Button" parent="VBox/ApprovalBanner/ApprovalVBox/ApprovalButtons"]
+[node name="DenyButton" type="Button" parent="VBox/ApprovalBanner/ApprovalVBox/ApprovalButtons" unique_id=298128303]
 layout_mode = 2
 text = "Deny"
 
-[node name="DiscoveryPanel" type="PanelContainer" parent="VBox"]
+[node name="DiscoveryPanel" type="PanelContainer" parent="VBox" unique_id=548929695]
 visible = false
 layout_mode = 2
 
-[node name="DiscoveryVBox" type="VBoxContainer" parent="VBox/DiscoveryPanel"]
+[node name="DiscoveryVBox" type="VBoxContainer" parent="VBox/DiscoveryPanel" unique_id=2034955982]
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="DiscoveryHeader" type="HBoxContainer" parent="VBox/DiscoveryPanel/DiscoveryVBox"]
+[node name="DiscoveryHeader" type="HBoxContainer" parent="VBox/DiscoveryPanel/DiscoveryVBox" unique_id=48811285]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="DiscoveryTitle" type="Label" parent="VBox/DiscoveryPanel/DiscoveryVBox/DiscoveryHeader"]
+[node name="DiscoveryTitle" type="Label" parent="VBox/DiscoveryPanel/DiscoveryVBox/DiscoveryHeader" unique_id=32496483]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "accessibility discovery"
 
-[node name="DiscoveryStatusBadge" type="Label" parent="VBox/DiscoveryPanel/DiscoveryVBox/DiscoveryHeader"]
+[node name="DiscoveryStatusBadge" type="Label" parent="VBox/DiscoveryPanel/DiscoveryVBox/DiscoveryHeader" unique_id=292284550]
+modulate = Color(1, 1, 1, 0.75)
 layout_mode = 2
 text = "[—]"
-modulate = Color(1, 1, 1, 0.75)
 
-[node name="DiscoveryReason" type="Label" parent="VBox/DiscoveryPanel/DiscoveryVBox"]
-layout_mode = 2
-text = ""
-autowrap_mode = 2
+[node name="DiscoveryReason" type="Label" parent="VBox/DiscoveryPanel/DiscoveryVBox" unique_id=604611087]
 modulate = Color(1, 1, 1, 0.6)
+layout_mode = 2
+autowrap_mode = 2
 
-[node name="SelectedTargetRow" type="HBoxContainer" parent="VBox/DiscoveryPanel/DiscoveryVBox"]
+[node name="SelectedTargetRow" type="HBoxContainer" parent="VBox/DiscoveryPanel/DiscoveryVBox" unique_id=1094942446]
 visible = false
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="SelectedTargetPrefix" type="Label" parent="VBox/DiscoveryPanel/DiscoveryVBox/SelectedTargetRow"]
+[node name="SelectedTargetPrefix" type="Label" parent="VBox/DiscoveryPanel/DiscoveryVBox/SelectedTargetRow" unique_id=101963422]
+modulate = Color(1, 1, 1, 0.55)
 layout_mode = 2
 text = "selected:"
-modulate = Color(1, 1, 1, 0.55)
 
-[node name="SelectedTargetLabel" type="Label" parent="VBox/DiscoveryPanel/DiscoveryVBox/SelectedTargetRow"]
+[node name="SelectedTargetLabel" type="Label" parent="VBox/DiscoveryPanel/DiscoveryVBox/SelectedTargetRow" unique_id=768298928]
+modulate = Color(0.75, 0.85, 1, 0.9)
 layout_mode = 2
 size_flags_horizontal = 3
-text = ""
-modulate = Color(0.75, 0.85, 1, 0.9)
 
-[node name="ClearTargetButton" type="Button" parent="VBox/DiscoveryPanel/DiscoveryVBox/SelectedTargetRow"]
+[node name="ClearTargetButton" type="Button" parent="VBox/DiscoveryPanel/DiscoveryVBox/SelectedTargetRow" unique_id=502379292]
 layout_mode = 2
 text = "Clear"
 
-[node name="DiscoveryItems" type="VBoxContainer" parent="VBox/DiscoveryPanel/DiscoveryVBox"]
+[node name="DiscoveryItems" type="VBoxContainer" parent="VBox/DiscoveryPanel/DiscoveryVBox" unique_id=645911402]
 layout_mode = 2
 theme_override_constants/separation = 2
 
-[node name="DiscoveryEmpty" type="Label" parent="VBox/DiscoveryPanel/DiscoveryVBox"]
+[node name="DiscoveryEmpty" type="Label" parent="VBox/DiscoveryPanel/DiscoveryVBox" unique_id=555858782]
 visible = false
+modulate = Color(1, 1, 1, 0.45)
 layout_mode = 2
 text = "no items"
-modulate = Color(1, 1, 1, 0.45)
 
-[node name="Avatar" parent="VBox" instance=ExtResource("2_avatar")]
+[node name="DockPanel" type="PanelContainer" parent="VBox" unique_id=1019877195]
 layout_mode = 2
+size_flags_vertical = 3
 
-[node name="Log" type="RichTextLabel" parent="VBox"]
+[node name="DockVBox" type="VBoxContainer" parent="VBox/DockPanel" unique_id=1194326804]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Log" type="RichTextLabel" parent="VBox/DockPanel/DockVBox" unique_id=1210104840]
 layout_mode = 2
 size_flags_vertical = 3
 bbcode_enabled = true
 scroll_following = true
 
-[node name="InputRow" type="HBoxContainer" parent="VBox"]
+[node name="InputRow" type="HBoxContainer" parent="VBox/DockPanel/DockVBox" unique_id=1105403272]
 layout_mode = 2
+theme_override_constants/separation = 6
 
-[node name="Input" type="LineEdit" parent="VBox/InputRow"]
+[node name="Input" type="LineEdit" parent="VBox/DockPanel/DockVBox/InputRow" unique_id=1228386858]
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "Type a message and hit Send or Enter"
 
-[node name="SendButton" type="Button" parent="VBox/InputRow"]
+[node name="SendButton" type="Button" parent="VBox/DockPanel/DockVBox/InputRow" unique_id=1136417906]
 layout_mode = 2
 text = "Send"
 
-[node name="PingButton" type="Button" parent="VBox/InputRow"]
+[node name="PingButton" type="Button" parent="VBox/DockPanel/DockVBox/InputRow" unique_id=2041957409]
 layout_mode = 2
 text = "Ping"
+
+[node name="CompactInputPanel" type="PanelContainer" parent="." unique_id=308524118]
+visible = false
+z_index = 50
+custom_minimum_size = Vector2(280, 0)
+layout_mode = 0
+offset_right = 280.0
+offset_bottom = 150.0
+
+[node name="CompactVBox" type="VBoxContainer" parent="CompactInputPanel" unique_id=111289398]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="CompactHeaderRow" type="HBoxContainer" parent="CompactInputPanel/CompactVBox" unique_id=740036967]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="CompactTitle" type="Label" parent="CompactInputPanel/CompactVBox/CompactHeaderRow" unique_id=1870100948]
+modulate = Color(1, 1, 1, 0.45)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 11
+text = "smolit"
+
+[node name="CompactCloseButton" type="Button" parent="CompactInputPanel/CompactVBox/CompactHeaderRow" unique_id=1959540484]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "✕"
+flat = true
+
+[node name="CompactInputRow" type="HBoxContainer" parent="CompactInputPanel/CompactVBox" unique_id=1741225605]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="CompactInput" type="LineEdit" parent="CompactInputPanel/CompactVBox/CompactInputRow" unique_id=1939985030]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Ask Smolit…"
+
+[node name="CompactSendButton" type="Button" parent="CompactInputPanel/CompactVBox/CompactInputRow" unique_id=1261397884]
+layout_mode = 2
+text = "Send"
+
+[node name="CompactActionsRow" type="HBoxContainer" parent="CompactInputPanel/CompactVBox" unique_id=1942450749]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="CompactVoiceButton" type="Button" parent="CompactInputPanel/CompactVBox/CompactActionsRow" unique_id=625436866]
+layout_mode = 2
+text = "Voice"
+
+[node name="CompactAddFilesButton" type="Button" parent="CompactInputPanel/CompactVBox/CompactActionsRow" unique_id=1296706873]
+layout_mode = 2
+text = "+ Files"
+
+[node name="CompactCommandsButton" type="Button" parent="CompactInputPanel/CompactVBox/CompactActionsRow" unique_id=2126797417]
+layout_mode = 2
+text = "Commands"
+
+[node name="CompactHint" type="Label" parent="CompactInputPanel/CompactVBox" unique_id=1234339828]
+visible = false
+modulate = Color(1, 1, 1, 0.6)
+layout_mode = 2
+autowrap_mode = 2
+
+[node name="CompactCommandsHint" type="Label" parent="CompactInputPanel/CompactVBox" unique_id=1611223922]
+visible = false
+modulate = Color(1, 1, 1, 0.6)
+layout_mode = 2
+autowrap_mode = 2
+
+[node name="Avatar" parent="." unique_id=1255277686 instance=ExtResource("2_avatar")]
+z_index = 100
+layout_mode = 0
+offset_left = 18.0
+offset_top = 46.0
+offset_right = 122.0
+offset_bottom = 150.0

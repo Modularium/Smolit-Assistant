@@ -293,6 +293,27 @@ ui/
   Aktivitätsindikator. Fällt nach `action_completed` / `action_failed` /
   `action_cancelled` sauber zurück.
 
+### Micro-Animation / Personality Layer v1
+
+Zusätzlich zum State-Mapping trägt der Avatar eine kleine, rein visuelle
+Ausdrucksschicht — keine neuen States, keine neuen Core-Events, nur
+leichte Körpersprache:
+
+- **Idle** atmet sehr ruhig (Scale-Puls ~3 s, ±1,5 %) und zeigt alle
+  14–28 s einen kurzen „curious wiggle" als Rotationsnudge.
+- **Thinking** atmet enger und langsamer (fokussiert), zusätzlich zum
+  bestehenden Alpha-Puls.
+- **Talking** puls rhythmisch leicht aktiver als Idle.
+- **Acting** hat einen minimal zielgerichteteren Puls, die bestehende
+  Target-Tönung bleibt erhalten.
+- **Error** spielt einen kurzen, einmaligen Startle (Flinch + Rebound +
+  Settle) und bleibt danach ruhig.
+- **Disconnected** bleibt bewusst still.
+
+Hover, Idle-Atem, State-Pulse und Wiggle sitzen auf getrennten
+Transform-Properties und kollidieren daher nicht. Siehe
+[docs/ui_architecture.md §7](docs/ui_architecture.md) „Phase B++".
+
 ### Discovery Panel (Accessibility)
 
 Neben dem Action-Banner rendert die UI seit der „verified target
@@ -308,6 +329,91 @@ zeigt:
 Die UI **interpretiert** nichts — sie rendert nur, was der Core
 geliefert hat. Fehlende optionale Felder führen zu neutralen
 Defaults, nicht zu Crashes.
+
+### Compact Input UX (Docked)
+
+Im Docked-Modus öffnet ein Klick auf den Avatar ein kleines
+**Compact Input Panel** direkt am Icon — eine leichte Schnellinteraktion,
+kein zweites Expanded. Inhalte:
+
+- **Text + Send** — geht über denselben `submit_text`-Pfad wie die
+  Expanded-Eingabe; Enter sendet ebenfalls.
+- **Voice** — löst den bestehenden `voice_once`-Pfad aus.
+- **+ Files** — in dieser Phase nur ein ehrlicher Platzhalter
+  (`Datei-Anhänge noch nicht implementiert`). Kein echtes
+  Attachment-Backend.
+- **Commands** — togglet eine kompakte Mini-Hilfe mit den heute
+  tatsächlich unterstützten Flows (`help`, `voice`, `audio-status`,
+  `interaction_probe_accessibility`, `interaction_discover_accessibility`).
+- **✕ / Escape** — schließt das Panel.
+
+Das Panel ist bewusst ein UI-Substate im Docked-Modus, kein neuer
+globaler Presence-Mode: ein Wechsel nach Expanded oder Disconnected
+schließt es kontrolliert, Approval- und Action-Banner bleiben darüber
+sichtbar. Siehe
+[docs/ui_architecture.md §8.3](docs/ui_architecture.md).
+
+### Linux Window Behavior (Spike v1, opt-in)
+
+Für die spätere Overlay-Linie (Phase 3b) sitzt unter
+[`ui/scripts/window_behavior/`](ui/scripts/window_behavior/) eine kleine,
+bewusst zurückhaltende Capability-/Probe-Schicht:
+
+- Capability-Detection liest Session-Typ, DisplayServer-Namen,
+  `XDG_CURRENT_DESKTOP` und das Projekt-Setting
+  `display/window/per_pixel_transparency/allowed`. Pro Fähigkeit
+  (`transparency`, `click_through`, `always_on_top`) kommt ein
+  getaggter Status (`available` / `experimental` / `unsupported` /
+  `unknown`) mit Begründung heraus.
+- Optionaler Runtime-Probe setzt testweise
+  `WINDOW_FLAG_TRANSPARENT` und `WINDOW_FLAG_MOUSE_PASSTHROUGH` und
+  liest sie zurück. Aktivierung per Umgebungsvariable:
+  `SMOLIT_WINDOW_PROBE=1 <godot-run>`. Standardmäßig wird das
+  Fenster danach wieder auf den vorherigen Zustand gesetzt; wer das
+  Ergebnis stehen lassen will, ergänzt `SMOLIT_WINDOW_PROBE_REVERT=0`.
+- Always-on-top wird hier ausdrücklich **nicht** gesetzt — unter
+  Ubuntu 24.04 / GNOME/Mutter ist es über reguläre Toplevel-Hints
+  nicht zuverlässig, und der Spike verspricht das deshalb nicht.
+
+Der Spike ist rein hostseitig: keine IPC-Änderung, keine
+Scene-Kopplung, keine neue UI. Ergebnisse landen per `print()` im
+Log. Einordnung und Grenzen siehe
+[docs/linux_window_overlay_architecture.md §F.1](docs/linux_window_overlay_architecture.md)
+und
+[docs/ui_architecture.md §9.1](docs/ui_architecture.md).
+
+### Overlay MVP Phase B (opt-in transparentes Presence-Fenster)
+
+Aufbauend auf dem Capability-Spike ist jetzt ein **opt-in Overlay-MVP**
+gelandet. Ohne Opt-in bleibt das Verhalten unverändert. Mit
+`SMOLIT_UI_OVERLAY=1 <godot-run>` — und nur dann, wenn die
+Transparenz-Capability im aktuellen Setup tragfähig ist — läuft Smolit
+mit:
+
+- transparentem Hintergrund (`Viewport.transparent_bg = true` +
+  `WINDOW_FLAG_TRANSPARENT = true`; das Projekt-Setting
+  `display/window/per_pixel_transparency/allowed` ist gesetzt),
+- borderlosem Fenster (`WINDOW_FLAG_BORDERLESS = true`),
+- unveränderten Presence-/Avatar-Modi — nur die äußere Fensterhülle
+  ändert sich.
+
+Bewusst **nicht** aktiviert:
+
+- **Kein Always-on-top.** Unter Ubuntu 24.04 / GNOME/Mutter ist es
+  über reguläre Toplevel-Hints nicht zuverlässig; X11 wäre machbar,
+  aber in Phase B nicht versprochen.
+- **Kein produktives Click-through.** Ein naives
+  `WINDOW_FLAG_MOUSE_PASSTHROUGH=true` würde das ganze Fenster
+  (inklusive Avatar, Banner, Eingabefelder) für Eingaben durchlässig
+  machen. Ein ehrlicher Schritt braucht interaktive Zonen /
+  Passthrough-Polygone und bleibt Folgearbeit.
+
+Fallback-Semantik: meldet die Capability-Detection Transparenz als
+`unsupported` / `unknown`, bleibt das Fenster im normalen Modus und der
+Grund landet im Log. Keine stillen Umschaltungen. Details siehe
+[docs/linux_window_overlay_architecture.md §F.2](docs/linux_window_overlay_architecture.md)
+und
+[docs/ui_architecture.md §9.2](docs/ui_architecture.md).
 
 ### Presence-Modes (Phase 3.3 MVP)
 

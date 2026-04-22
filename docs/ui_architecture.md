@@ -189,6 +189,43 @@ Wichtig für die UI-Ebene:
   interpretiert keine Targets eigenständig und löst keine
   Desktop-Aktionen aus.
 
+### Phase B++ – Micro-Animation / Personality Layer v1 (Ist)
+
+Auf Phase B/B+ sitzt eine reine **UI-Ausdrucksschicht** auf: kleine
+Mikro-Animationen, die Smolit lebendig wirken lassen, ohne neue States,
+neue Events oder Emotions-Protokollfelder zu benötigen. Sie ist ein
+bewusst kleiner Vorgriff auf Phase 4 — kein volles Emotionssystem, kein
+Sprite-Rig.
+
+Zentrale Idee: der Ausdruck sitzt auf **drei orthogonalen
+Transform-Layern**, die sich nie um dieselbe Property streiten:
+
+- **Root `self.scale`** — Hover-Pop (kurzer Tween auf enter/leave).
+- **`_body.scale`** — State-Cycle-Pulse: `idle` atmet ruhig,
+  `thinking` atmet enger/langsamer, `acting` leicht zielgerichteter,
+  `talking` rhythmisch aktiv, `error` zeigt einen einmaligen Startle
+  (Flinch + Rebound + Settle). Es läuft immer höchstens **einer** dieser
+  Scale-Tweens — `_apply_state_visuals` killt den vorherigen sauber
+  beim Statuswechsel.
+- **`_body.rotation`** — seltener „curious wiggle" im Idle: ein
+  kleiner Rotations-Nudge, alle 14–28 s randomisiert, nur wenn
+  weiterhin idle und nicht gerade ein Drag läuft.
+- **`_body.modulate:a`** — Thinking-Alpha-Puls (aus dem MVP
+  übernommen).
+
+Weitere Eigenschaften:
+
+- **Disconnected** bleibt bewusst still — matte Tönung, keine
+  Tween-Last, niedriger Idle-Footprint.
+- Hover-Tweens killen den vorherigen Tween, damit schnelles
+  Enter/Leave keine überlappenden Animationen akkumuliert.
+- Jeder State-Wechsel setzt `_body.scale`/`_body.rotation` wieder auf
+  Ruhe und stoppt Timer/Tweens, damit keine Animationsreste
+  hängenbleiben.
+- Ausdruck basiert **ausschließlich** auf vorhandenen Core-Events /
+  Avatar-States. Keine neue Entscheidungs- oder Emotionslogik, keine
+  neuen IPC-Nachrichten, kein neues State-Feld im Protokoll.
+
 ### Phase C – Erweiterter Ausdruck (Ziel > 3.x)
 
 - Feinere Zustände (z. B. `curious`, `focused`, `alert`).
@@ -287,6 +324,67 @@ Auswahlsemantik, die die UI **nicht** selbst implementiert:
 Es gibt **keinen** von der UI gehaltenen Dialogzustand. Jede neue
 Conversation-Turn startet mit einem `submit_text` oder `voice_once`.
 
+### 8.3 Compact Input UX (Docked Presence)
+
+Ergänzend zum reinen Presence-Layer trägt der Docked-Modus eine kleine
+**Compact Input UX**: ein Klick auf den Avatar öffnet ein leichtes
+Eingabepanel direkt am Icon. Es ist explizit **kein** neuer globaler
+Presence-Mode, sondern ein lokaler UI-Substate (`_compact_input_open`)
+in `ui/scripts/main.gd`, der nur im Docked-Zustand Sinn hat. Das
+Compact Panel tritt als leichte Schnellinteraktion **neben** die große
+Expanded-Ansicht — es ersetzt sie nicht.
+
+Inhalt des Panels:
+
+- **Text Input + Send** — geht über denselben `IpcClient.submit_text`-
+  Pfad wie die bestehende Expanded-Eingabe; es gibt keine zweite
+  Sendearchitektur.
+- **Voice** — ruft `IpcClient.voice_once()` auf, also denselben
+  Voice-Pfad wie bisher.
+- **Add Files** — in dieser Phase nur UI-Hook mit ehrlichem
+  Platzhalter (`Datei-Anhänge noch nicht implementiert`). Kein
+  echtes Attachment-Backend, keine Fake-Dateiauswahl.
+- **Show Commands** — togglet eine kompakte Mini-Hilfe mit genau den
+  heute tatsächlich unterstützten Flows (`help`, `voice`,
+  `audio-status`, `interaction_probe_accessibility`,
+  `interaction_discover_accessibility`). Keine Kommandopalette.
+- **Close / Escape** — schließen das Panel wieder.
+
+Öffnen / Schließen:
+
+- Klick auf den Avatar im Docked-Modus toggelt das Panel (das
+  `clicked`-Signal vom Avatar-Controller ist bewusst die einzige
+  Kopplung — die Avatar-Scene bleibt selbst darstellend).
+- Wechsel nach Expanded oder Disconnected schließt das Panel
+  kontrolliert (Expanded bringt die Volleingabe ohnehin mit;
+  Disconnected sperrt Send/Voice sowieso).
+- Nach erfolgreichem Senden bleibt das Panel offen und behält den
+  Fokus im Textfeld — bewusst für schnelle Folgeeingaben. Der Nutzer
+  schließt per Close-Button oder Escape.
+
+Zusammenspiel mit anderen UI-Schichten:
+
+- **Approval-Banner** bleibt visuell prioritär: er sitzt in
+  `main.tscn` weiterhin oberhalb des Compact Panels. Das Panel darf
+  offen bleiben, die Approval-UI ist nicht verdeckt.
+- **Action-Banner** erscheint ebenfalls oberhalb; das Compact Panel
+  bleibt stehen und kollidiert nicht.
+- **Discovery-Panel** ist ebenfalls oberhalb eingeordnet — die
+  vertikale Reihenfolge (Header → ActionBanner → ApprovalBanner →
+  DiscoveryPanel → CompactInputPanel → Avatar → Log → Input) bleibt
+  stabil.
+
+Abgrenzungen (wichtig):
+
+- Compact Input UX ≠ `type_text`. Dieses Panel ist
+  **Nutzer → Smolit** (Eingabe an den Assistenten), während
+  `type_text` Smolits Schreiben **in fremde Apps** wäre (bleibt
+  Interaction-Layer-Thema, keine UI-Arbeit).
+- Kein natives Overlay, kein zweites Eingabesystem, keine Drag-&-Drop-
+  oder Multi-Line-Composer-Arbeit.
+- Kein eigener Transport und keine Parallel-IPC; alles läuft über
+  den bestehenden `IpcClient` und den bestehenden EventBus.
+
 ---
 
 ## 9. Always-on-top- und Overlay-Verhalten (Ziel-Zustand)
@@ -342,6 +440,76 @@ Linux-spezifische Fenster- und Overlay-Strategie — inklusive der
 geplanten separaten Window-Behavior-Abstraktion — ist in
 [`docs/linux_window_overlay_architecture.md`](./linux_window_overlay_architecture.md)
 dokumentiert.
+
+### 9.1 Window Behavior Spike v1 (opt-in)
+
+Ein erster kleiner Capability-/Probe-Pfad ist in
+[`ui/scripts/window_behavior/`](../ui/scripts/window_behavior/)
+gelandet und bewusst aus der Presence-Schicht herausgehalten:
+
+- `window_capabilities.gd` liest Session-Typ, DisplayServer und
+  Projekt-Setting `display/window/per_pixel_transparency/allowed` und
+  tagt Transparenz, Click-through und Always-on-top pro Eintrag als
+  `available` / `experimental` / `unsupported` / `unknown`.
+- `window_probe.gd` ist ein opt-in Runtime-Probe. Er läuft **nur**,
+  wenn die Umgebungsvariable `SMOLIT_WINDOW_PROBE=1` gesetzt ist,
+  setzt testweise `WINDOW_FLAG_TRANSPARENT` und
+  `WINDOW_FLAG_MOUSE_PASSTHROUGH`, liest sie zurück und revertet die
+  Änderungen standardmäßig.
+- `window_behavior.gd` ist eine dünne Fassade — die einzige Klasse,
+  die `main.gd` kennt.
+
+Die Presence-, Avatar- und EventBus-Ebene kennt diese Schicht
+**nicht**. Sie erzeugt weder neue IPC-Nachrichten noch neue
+UI-Elemente. Ergebnisse landen ausschließlich per `print()` im
+Log. Immer-obenauf wird hier ausdrücklich **nicht** gesetzt — die
+Capability-Detection markiert das unter GNOME/Wayland zu Recht als
+nicht zuverlässig. Details zur Einordnung des Spikes innerhalb der
+Phasen A/B/C siehe
+[`docs/linux_window_overlay_architecture.md` §F.1](./linux_window_overlay_architecture.md).
+
+### 9.2 Overlay MVP Phase B (opt-in transparentes Presence-Fenster)
+
+Auf dem Capability-Spike sitzt jetzt ein **opt-in Overlay-MVP** als
+reine Host-/Fensterschicht. Die Presence-, Avatar- und Scene-Ebene
+bleibt unverändert — Overlay ändert nur die äußere Fensterhülle.
+
+Komponenten:
+
+- `overlay_controller.gd` (neu) — schaltet Transparenz und Borderless
+  capability-gesteuert ein. Aktiv nur, wenn `SMOLIT_UI_OVERLAY=1`
+  gesetzt ist *und* die Transparenz-Capability im aktuellen Setup
+  tragfähig ist.
+- `window_behavior.gd` (erweitert) — trägt
+  `activate_overlay_if_requested(anchor)` als Fassaden-Einstiegspunkt;
+  `main.gd` ruft den Einstieg am Ende von `_ready()` auf.
+
+Im Erfolgspfad passiert exakt dies:
+
+- Projekt-Setting `display/window/per_pixel_transparency/allowed=true`
+  (Pflicht-Opt-in zur Ladezeit — ohne dieses Setting hätte ein
+  Runtime-Flag keine sichtbare Wirkung).
+- `Viewport.transparent_bg = true` auf dem Root-Window.
+- `DisplayServer.WINDOW_FLAG_TRANSPARENT = true`.
+- `DisplayServer.WINDOW_FLAG_BORDERLESS = true`.
+
+Fallback-sicher: ohne Opt-in ist der Einstieg ein No-op; wenn die
+Capability-Detection Transparenz als `unsupported` oder `unknown`
+meldet, bleibt das Fenster im normalen Modus und der Grund landet
+im Log. Kein Always-on-top, kein produktives Click-through, keine
+Scene-Eingriffe, keine neuen EventBus-Signale.
+
+Sichtbarer Effekt auf der UI: die PanelContainer-Flächen
+(Action-/Approval-/Discovery-/Dock-/Compact-Input-Panel) behalten
+ihre halbopake `StyleBoxFlat`-Tönung aus
+[`ui/themes/compact_panel.tres`](../ui/themes/compact_panel.tres),
+während die leeren Bereiche zwischen ihnen transparent werden. Der
+Docked-Avatar steht damit als echte Floating Entity frei auf dem
+Desktop, ohne Fensterrahmen. In Expanded wirkt das Log/Input-Panel
+weiterhin als kompakter opaker Block — kein Re-Design nötig.
+
+Vollständige Einordnung inklusive Phase-B/C-Grenzen siehe
+[`docs/linux_window_overlay_architecture.md` §F.2](./linux_window_overlay_architecture.md).
 
 ---
 

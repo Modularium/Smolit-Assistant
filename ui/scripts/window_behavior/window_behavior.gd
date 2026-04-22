@@ -1,0 +1,52 @@
+extends RefCounted
+## Linux Window Behavior — schmale Fassade (Phase 3b Spike v1)
+##
+## Koordiniert die beiden konkreten Bausteine (Capabilities + Probe)
+## unter einer einzigen, einfachen Einstiegsklasse. Zweck: `main.gd`
+## muss nur genau einen Aufruf kennen, um den opt-in Spike zu triggern.
+##
+## Absichtlich *kein* Autoload, *kein* Node, *kein* Singleton mit
+## State. Die Fassade ist ein kleiner Funktionscontainer.
+##
+## Wichtig:
+##   * keine Business-Logik, keine Presence-Entscheidungen
+##   * kein Always-on-top in dieser Phase (siehe docs/linux_window_overlay_architecture.md §F)
+##   * keine neue UI, keine neuen IPC-Events
+
+class_name SmolitWindowBehavior
+
+const _CapabilitiesRef := preload("res://scripts/window_behavior/window_capabilities.gd")
+const _ProbeRef := preload("res://scripts/window_behavior/window_probe.gd")
+const _OverlayRef := preload("res://scripts/window_behavior/overlay_controller.gd")
+
+
+## Cheap — nur Detection. Sicher, auch aus `_ready()` aufzurufen.
+static func capabilities() -> Dictionary:
+	return _CapabilitiesRef.detect()
+
+
+## Opt-in Einstiegspunkt. Tut *nichts*, solange
+## `SMOLIT_WINDOW_PROBE=1` nicht gesetzt ist.
+static func run_probe_if_enabled() -> Dictionary:
+	return _ProbeRef.run_if_enabled()
+
+
+## Für manuelle Debugsitzungen / spätere Tests — ignoriert die
+## Env-Variable und führt den Probe trotzdem aus. Nicht als Default-
+## Pfad gedacht.
+static func run_probe_now() -> Dictionary:
+	return _ProbeRef.run_now()
+
+
+## Opt-in Overlay-MVP (Phase B). Aktiviert einen transparenten
+## Presence-Modus nur, wenn `SMOLIT_UI_OVERLAY=1` gesetzt ist *und* die
+## Transparenz-Capability im aktuellen Setup tragfähig ist. Ohne Opt-in
+## und bei unsupported-Umgebung bleibt das Fenster im normalen Modus.
+static func activate_overlay_if_requested(anchor: Node) -> Dictionary:
+	return _OverlayRef.activate_if_requested(anchor)
+
+
+## Für manuelle Debugsitzungen — ignoriert das Env-Flag und aktiviert
+## den Overlay-Modus. Nicht als Default-Pfad gedacht.
+static func activate_overlay_now(anchor: Node) -> Dictionary:
+	return _OverlayRef.activate_now(anchor)

@@ -196,18 +196,30 @@ aber `BackendUnsupported`.
       stille Fallbacks, wenn Target- oder Mapping-Felder fehlen
 - [x] Symbolische Avatar-Tint-Variante je Target-Kind im ACTING-State
       (rein farblich, keine Bewegung, keine Koordinaten)
+- [x] Compact Input UX am Icon (Docked-Presence): Klick auf den Avatar
+      öffnet ein leichtes Eingabepanel mit Text/Send, Voice, Add-Files-
+      Hook (Placeholder), Mini-Commands-Hilfe und Close/Escape. Nutzt
+      denselben `submit_text`- / `voice_once`-Pfad wie die Expanded-
+      Eingabe und schließt kontrolliert beim Wechsel nach Expanded/
+      Disconnected. Siehe
+      [docs/ui_architecture.md §8.3](./docs/ui_architecture.md).
 
 ### Offen (Phase 3.3)
 
-- [ ] Randloses, always-on-top Fenster (native) — unter Wayland
+- [ ] Randloses, always-on-top Fenster (native) — randlos ist mit dem
+      opt-in Overlay-MVP (Phase B) bereits Teil der transparenten
+      Presence-Schicht; Always-on-top bleibt unter Wayland
       (GNOME/Mutter) **nicht** über Standard-Toplevel-Hints machbar,
       siehe
       [docs/linux_window_overlay_architecture.md](./docs/linux_window_overlay_architecture.md)
       §C.1 / §D
-- [ ] Transparenter Hintergrund / echter Desktop-Overlay — unter beiden
-      Protokollen realistisch, Compositor-Edge-Cases beachten
+- [~] Transparenter Hintergrund / echter Desktop-Overlay — opt-in über
+      `SMOLIT_UI_OVERLAY=1` mit ehrlichem Fallback; siehe
+      [docs/linux_window_overlay_architecture.md §F.2](./docs/linux_window_overlay_architecture.md)
 - [ ] Click-through-Modus (togglebar) — X11 via XShape, Wayland via
-      `wl_surface.set_input_region`, siehe
+      `wl_surface.set_input_region`, braucht zusätzlich definierte
+      interaktive Zonen (Passthrough-Polygone), damit Avatar und Banner
+      klickbar bleiben; siehe
       [docs/linux_window_overlay_architecture.md](./docs/linux_window_overlay_architecture.md)
       §C.3
 - [ ] Snap-to-Edge, Screen-Positionierung, Multi-Monitor-Heuristik —
@@ -222,12 +234,21 @@ aber `BackendUnsupported`.
 
 ## Phase 4 – Behavioral Layer (V0.5)
 
+- [x] **Micro-Animation / Personality Layer v1 (UI-only)** — subtile
+      Idle-Breath, Thinking-Breath, Acting-Pulse, Talking-Pulse,
+      Error-Startle; seltener Curious-Wiggle im Idle; ruhiger
+      Disconnected-Zustand; sauber geschichtet auf drei orthogonalen
+      Transform-Properties (Root-Scale / Body-Scale / Body-Rotation).
+      Rein UI-seitig, keine neuen States, keine IPC-/Protokolländerung.
+      Siehe
+      [docs/ui_architecture.md §7](./docs/ui_architecture.md) „Phase B++".
 - [ ] Feinere Animationszustände (`curious`, `focused`, `alert`, …)
 - [ ] Emotion-Mapping Core → UI (setzt Protokollerweiterung um
       `emotion` voraus)
 - [ ] Speech-Sync (TTS-Lebenszyklus-Events → Animation)
 - [ ] Antwortabhängige Reaktionen
-- [ ] erste Persönlichkeits-Cues
+- [ ] erste echte Persönlichkeits-Cues über rein visuelle Mikro-Cues
+      hinaus
 
 ---
 
@@ -295,6 +316,14 @@ dokumentierter Fallback.
 - [x] Architekturdokument Linux Window & Overlay
       ([docs/linux_window_overlay_architecture.md](./docs/linux_window_overlay_architecture.md))
       mit Wayland/X11-Trennung, Capability-Matrix und Phasen A/B/C.
+- [x] **Window Behavior Capability Spike v1** — kleine
+      `ui/scripts/window_behavior/`-Linie (Fassade + Capability-
+      Detection + opt-in Runtime-Probe via `SMOLIT_WINDOW_PROBE=1`)
+      für Transparenz und Click-through. Kein Always-on-top, keine
+      Scene-Kopplung, keine IPC-Änderung. Siehe
+      [docs/linux_window_overlay_architecture.md §F.1](./docs/linux_window_overlay_architecture.md)
+      und
+      [docs/ui_architecture.md §9.1](./docs/ui_architecture.md).
 - [ ] Forschungsspikes zu Wayland-Constraints unter GNOME 46/47
       (Transparenz, Input-Region, HiDPI, Fractional Scaling,
       Nvidia/XWayland-Edge-Cases).
@@ -303,15 +332,27 @@ dokumentierter Fallback.
 - [ ] Entscheidungsspike „Godot-Fenster-Flags vs. GDExtension vs.
       Host-Prozess mit eingebettetem Godot".
 - [ ] Window-Behavior-Abstraktion als eigene Schicht
-      (`window_behavior/`) entwerfen — Trait/Interface mit
+      (`window_behavior/`) vollständig ausbauen — Trait/Interface mit
       `set_always_on_top`, `set_transparent`, `set_click_through`,
-      `request_position`, `current_capabilities`.
+      `request_position`, `current_capabilities` (Capability-Seite
+      steht per Spike v1 bereits; Setter-/Backend-Seite offen).
 - [ ] Backends als getrennte Familie einordnen: `backend_x11`,
       `backend_wayland_mutter`, `backend_wayland_wlroots`,
       `backend_noop` (first-class Fallback).
-- [ ] Overlay-MVP Phase B (opt-in): transparent + click-through +
-      interaktive Zone — **ohne** Always-on-top-Zusicherung unter
-      GNOME/Wayland.
+- [~] Overlay-MVP Phase B (opt-in): transparent + borderless
+      Presence-Fenster per `SMOLIT_UI_OVERLAY=1`, capability-gesteuert
+      mit ehrlichem Fallback; **ohne** Always-on-top-Zusicherung unter
+      GNOME/Wayland und **ohne** produktives Click-through
+      (interaktive Zonen / Passthrough-Polygone sind Folgearbeit).
+      Siehe
+      [docs/linux_window_overlay_architecture.md §F.2](./docs/linux_window_overlay_architecture.md)
+      und
+      [docs/ui_architecture.md §9.2](./docs/ui_architecture.md).
+- [ ] Click-through mit definierten interaktiven Zonen
+      (Avatar + Banner bleiben klickbar) als Folgeschritt auf Phase B —
+      X11 via XShape/`WINDOW_FLAG_MOUSE_PASSTHROUGH` + Passthrough-
+      Polygon, Wayland via `wl_surface.set_input_region` plus
+      Input-Region pro interaktiver Zone.
 - [ ] Compositor-spezifische Pfade (wlroots layer-shell,
       optional GNOME-Extension) erst in Phase C, falls
       Nutzungsnachfrage da ist.
@@ -495,8 +536,25 @@ Template (typisch Wayland) meldet der Core
 
 Zusätzlich begonnen: **Phase 3b Linux Window & Overlay Architecture**
 als parallele Architekturlinie. Das Dokument legt Wayland/X11-Trennung,
-Capability-Matrix und eine noch nicht implementierte Window-Behavior-
-Abstraktion fest — bewusst ohne Codeänderungen.
+Capability-Matrix und eine noch nicht vollständig implementierte
+Window-Behavior-Abstraktion fest. Als erster Codepunkt ist ein
+**Window Behavior Capability Spike v1** gelandet:
+`ui/scripts/window_behavior/` (Capability-Detection + opt-in
+Transparenz-/Click-through-Probe via `SMOLIT_WINDOW_PROBE=1`, ohne
+Always-on-top-Versprechen und ohne Scene-Kopplung). Details in
+[docs/linux_window_overlay_architecture.md §F.1](./docs/linux_window_overlay_architecture.md).
+
+Aufbauend darauf ist jetzt ein **Overlay-MVP Phase B** gelandet:
+`ui/scripts/window_behavior/overlay_controller.gd` aktiviert opt-in
+(via `SMOLIT_UI_OVERLAY=1`) einen transparenten, borderlosen
+Presence-Modus — capability-gesteuert, mit ehrlichem Fallback auf das
+normale Fenster, wenn die Transparenz im aktuellen Setup nicht
+tragfähig ist. Click-through und Always-on-top werden bewusst **nicht**
+versprochen (Folgearbeit bzw. compositor-abhängig). Presence- und
+Avatar-Schicht bleiben unberührt. Details in
+[docs/linux_window_overlay_architecture.md §F.2](./docs/linux_window_overlay_architecture.md)
+und
+[docs/ui_architecture.md §9.2](./docs/ui_architecture.md).
 
 Ebenfalls gelandet: **Verified Target Discovery** (Phase 8b). Der
 Accessibility-Spike unterscheidet jetzt explizit zwischen `ok`,

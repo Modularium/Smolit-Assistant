@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo --version)",
+      "Read(//home/dev/.cargo/bin/**)",
+      "Bash(rustup show *)",
+      "Bash(rustup which *)",
+      "Bash(rustup run *)",
+      "Bash(node -e \"console.log\\(require\\('ws'\\).WebSocket ? 'ws-ok' : 'missing'\\)\")",
+      "Bash(git rm *)",
+      "Bash(cargo check *)"
+    ]
+  }
+}

@@ -199,10 +199,20 @@ Drei-Zustands-Modell für das sichtbare Fenster/Overlay.
 ### 6.1 Docked
 
 - Kleiner, always-on-top Präsenzpunkt bzw. Miniatur-Avatar.
-- Ruhezustand — minimale Animation, minimale CPU/GPU-Last.
+- Ruhezustand — minimale Animation, minimale CPU/GPU-Last. Seit der
+  Micro-Animation / Personality Layer v1 trägt der Docked-Avatar eine
+  sehr dezente Körpersprache (ruhiger Idle-Atem, seltener Curious-Cue,
+  State-abhängige Feinvariationen in Thinking / Talking / Acting /
+  Error / Disconnected) — bewusst leise und additiv, siehe
+  [docs/ui_architecture.md §7](./ui_architecture.md) „Phase B++".
 - Frei positionierbar (Ecke, Kante, Nutzer-definierte Position).
 - Dient als Anker, von dem aus sich Smolit in andere Zustände
   entfaltet.
+- Kann eine **leichte Compact Input UX** direkt am Icon tragen:
+  Klick auf den Avatar öffnet ein kleines Eingabepanel (Text, Voice,
+  Add-Files-Hook, Mini-Commands, Close), das die Schnellinteraktion
+  ermöglicht, ohne in Expanded zu wechseln. Implementierungsdetails
+  siehe [docs/ui_architecture.md §8.3](./ui_architecture.md).
 
 ### 6.2 Expanded
 
@@ -238,6 +248,15 @@ Fähigkeits-Matrix, ist in
 dokumentiert. Dieses Dokument bleibt auf **Produktachsen und
 Leitplanken** fokussiert; es nimmt bewusst keine Plattformfähigkeiten
 als selbstverständlich an.
+
+Als erster technischer Träger für den Docked-/Presence-Modus ist ein
+**opt-in Overlay-MVP Phase B** gelandet: `SMOLIT_UI_OVERLAY=1` aktiviert
+einen transparenten, borderlosen Presence-Modus mit capability-
+gesteuertem Fallback. Always-on-top und produktives Click-through sind
+bewusst **nicht** Teil dieses Schrittes — die Presence-Modi oben bleiben
+gültig, die äußere Fensterhülle ist nur ehrlicher geworden. Siehe
+[`docs/linux_window_overlay_architecture.md` §F.2](./linux_window_overlay_architecture.md)
+und [`docs/ui_architecture.md` §9.2](./ui_architecture.md).
 
 ---
 

@@ -11,12 +11,11 @@ extends Control
 ## bewusst getrennt — hier wird nur der Presence-Teil verkabelt.
 
 const PresenceStateRef := preload("res://scripts/presence/presence_state.gd")
+const _WindowBehaviorRef := preload("res://scripts/window_behavior/window_behavior.gd")
 
 @onready var _presence: Node = $PresenceController
 
 @onready var _status: Label = $VBox/HeaderRow/StatusLabel
-@onready var _presence_label: Label = $VBox/HeaderRow/PresenceLabel
-@onready var _presence_toggle: Button = $VBox/HeaderRow/PresenceToggle
 
 @onready var _action_banner: PanelContainer = $VBox/ActionBanner
 @onready var _action_title: Label = $VBox/ActionBanner/ActionVBox/ActionTitle
@@ -55,18 +54,41 @@ var _current_approval_id: String = ""
 ## We never derive implicit permissions from its presence.
 var _current_selected_target: Dictionary = {}
 
-@onready var _log: RichTextLabel = $VBox/Log
-@onready var _input_row: HBoxContainer = $VBox/InputRow
-@onready var _input: LineEdit = $VBox/InputRow/Input
-@onready var _send_button: Button = $VBox/InputRow/SendButton
-@onready var _ping_button: Button = $VBox/InputRow/PingButton
+@onready var _dock_panel: PanelContainer = $VBox/DockPanel
+@onready var _log: RichTextLabel = $VBox/DockPanel/DockVBox/Log
+@onready var _input_row: HBoxContainer = $VBox/DockPanel/DockVBox/InputRow
+@onready var _input: LineEdit = $VBox/DockPanel/DockVBox/InputRow/Input
+@onready var _send_button: Button = $VBox/DockPanel/DockVBox/InputRow/SendButton
+@onready var _ping_button: Button = $VBox/DockPanel/DockVBox/InputRow/PingButton
+
+@onready var _avatar: Control = $Avatar
+
+## Compact Input UX (Presence Interaction Layer).
+##
+## Leichtgewichtige Schnellinteraktion am Docked-Avatar: ein kleines
+## Popup-Panel mit Text / Voice / Add Files / Show Commands. Es teilt
+## sich Send- und Voice-Pfad mit der bestehenden Expanded-Eingabe und
+## hält *keine* eigene Business-Logik — das ist bewusst ein UI-Substate,
+## nicht ein neuer globaler Presence-Mode.
+@onready var _compact_panel: PanelContainer = $CompactInputPanel
+@onready var _compact_input: LineEdit = $CompactInputPanel/CompactVBox/CompactInputRow/CompactInput
+@onready var _compact_send_button: Button = $CompactInputPanel/CompactVBox/CompactInputRow/CompactSendButton
+@onready var _compact_voice_button: Button = $CompactInputPanel/CompactVBox/CompactActionsRow/CompactVoiceButton
+@onready var _compact_add_files_button: Button = $CompactInputPanel/CompactVBox/CompactActionsRow/CompactAddFilesButton
+@onready var _compact_commands_button: Button = $CompactInputPanel/CompactVBox/CompactActionsRow/CompactCommandsButton
+@onready var _compact_close_button: Button = $CompactInputPanel/CompactVBox/CompactHeaderRow/CompactCloseButton
+@onready var _compact_hint: Label = $CompactInputPanel/CompactVBox/CompactHint
+@onready var _compact_commands_hint: Label = $CompactInputPanel/CompactVBox/CompactCommandsHint
+
+var _compact_input_open: bool = false
+
+const _COMPACT_COMMANDS_TEXT: String = "help · voice · audio-status · interaction_probe_accessibility · interaction_discover_accessibility"
 
 
 func _ready() -> void:
 	_send_button.pressed.connect(_on_send_pressed)
 	_ping_button.pressed.connect(_on_ping_pressed)
 	_input.text_submitted.connect(_on_text_submitted)
-	_presence_toggle.pressed.connect(_on_presence_toggle_pressed)
 
 	EventBus.ipc_connected.connect(_on_connected)
 	EventBus.ipc_disconnected.connect(_on_disconnected)
@@ -97,6 +119,16 @@ func _ready() -> void:
 	_deny_button.pressed.connect(_on_deny_pressed)
 	_clear_target_button.pressed.connect(_on_clear_target_pressed)
 
+	_compact_send_button.pressed.connect(_on_compact_send_pressed)
+	_compact_voice_button.pressed.connect(_on_compact_voice_pressed)
+	_compact_add_files_button.pressed.connect(_on_compact_add_files_pressed)
+	_compact_commands_button.pressed.connect(_on_compact_commands_pressed)
+	_compact_close_button.pressed.connect(_on_compact_close_pressed)
+	_compact_input.text_submitted.connect(_on_compact_text_submitted)
+	_avatar.clicked.connect(_on_avatar_clicked)
+	_avatar.toggle_dock.connect(_on_avatar_toggle_dock)
+	_avatar.moved.connect(_on_avatar_moved)
+
 	_presence.presence_changed.connect(_on_presence_changed)
 	_presence.action_context_changed.connect(_on_action_context_changed)
 
@@ -107,12 +139,35 @@ func _ready() -> void:
 	_discovery_panel.visible = false
 	_selected_target_row.visible = false
 	_approval_selected_target.visible = false
+	_compact_panel.visible = false
+
+	# Linux Window Behavior Spike (Phase 3b). No-op unless the user opts
+	# in via `SMOLIT_WINDOW_PROBE=1`. Lives outside the presence/avatar
+	# state machines by design; it only reports and (opt-in) probes the
+	# host window, never changes scene logic.
+	_WindowBehaviorRef.run_probe_if_enabled()
+
+	# Overlay MVP Phase B — opt-in transparent presence window. No-op
+	# unless `SMOLIT_UI_OVERLAY=1` is set and the current session
+	# advertises transparency as available/experimental. Honest fallback
+	# to the normal window otherwise; no scene or presence change.
+	_WindowBehaviorRef.activate_overlay_if_requested(self)
 
 
 func _set_connected(ok: bool) -> void:
 	_status.text = "connected" if ok else "disconnected"
 	_send_button.disabled = not ok
 	_ping_button.disabled = not ok
+	_compact_send_button.disabled = not ok
+	_compact_voice_button.disabled = not ok
+
+
+func _on_avatar_toggle_dock() -> void:
+	# Der erste Click eines Doppelklicks hat den Compact-Panel bereits
+	# geöffnet — beim Dock-Toggle soll das Quick-Popup nicht als Rest
+	# stehen bleiben.
+	_close_compact_input()
+	_presence.toggle_base_mode()
 
 
 func _append(line: String) -> void:
@@ -135,10 +190,6 @@ func _on_ping_pressed() -> void:
 
 func _on_text_submitted(_text: String) -> void:
 	_on_send_pressed()
-
-
-func _on_presence_toggle_pressed() -> void:
-	_presence.toggle_base_mode()
 
 
 func _on_connected() -> void:
@@ -185,30 +236,23 @@ func _on_presence_changed(mode: int) -> void:
 
 
 func _apply_presence_mode(mode: int) -> void:
-	var label := PresenceStateRef.name_of(mode)
-	_presence_label.text = "presence: %s" % label
-
 	match mode:
 		PresenceStateRef.Mode.DOCKED:
-			_log.visible = false
-			_input_row.visible = false
-			_presence_toggle.text = "Expand"
-			_presence_toggle.disabled = false
+			_dock_panel.visible = false
 		PresenceStateRef.Mode.EXPANDED:
-			_log.visible = true
-			_input_row.visible = true
-			_presence_toggle.text = "Dock"
-			_presence_toggle.disabled = false
+			_dock_panel.visible = true
+			# Expanded bringt bereits eine Volltext-Eingabe mit — das
+			# kleine Compact Panel wird damit überflüssig und würde
+			# nur doppelte UI erzeugen.
+			_close_compact_input()
 		PresenceStateRef.Mode.ACTION:
 			# Während einer Action bleibt das zuletzt gewählte Base-Layout
 			# sichtbar; wir heben nur den Banner hervor (siehe
-			# _on_action_context_changed). Toggle bleibt bedienbar.
-			_presence_toggle.disabled = false
+			# _on_action_context_changed).
+			pass
 		PresenceStateRef.Mode.DISCONNECTED:
-			_log.visible = true
-			_input_row.visible = true
-			_presence_toggle.text = "Expand"
-			_presence_toggle.disabled = true
+			_dock_panel.visible = true
+			_close_compact_input()
 
 
 func _on_action_context_changed(info: Dictionary) -> void:
@@ -671,3 +715,145 @@ func _refresh_discovery_row_buttons() -> void:
 		var is_selected := selected_name != "" and selected_name == item_name
 		button.text = "Selected" if is_selected else "Select"
 		button.disabled = is_selected
+
+
+# --- Compact Input UX ----------------------------------------------------
+
+## Klick auf den Avatar öffnet / schließt das kleine Compact-Panel —
+## aber nur im Docked-Modus. In Expanded existiert die volle Eingabe
+## bereits; in Action / Disconnected soll die Schnellinteraktion nicht
+## zusätzliche UI erzeugen.
+func _on_avatar_clicked() -> void:
+	if _presence.current_mode() != PresenceStateRef.Mode.DOCKED:
+		return
+	_toggle_compact_input()
+
+
+func _toggle_compact_input() -> void:
+	if _compact_input_open:
+		_close_compact_input()
+	else:
+		_open_compact_input()
+
+
+func _open_compact_input() -> void:
+	if _compact_input_open:
+		return
+	_compact_input_open = true
+	_compact_panel.visible = true
+	_compact_hint.visible = false
+	_compact_commands_hint.visible = false
+	_compact_input.text = ""
+	_compact_input.grab_focus()
+	_reposition_compact_panel()
+
+
+## Sitzt das Panel seitlich am Avatar: rechts, wenn der Avatar in der
+## linken Bildschirmhälfte steht — sonst links. Vertikal wird die
+## Panel-Mitte mit der Avatar-Mitte ausgerichtet und anschließend in den
+## Viewport geklammert, damit das Panel nicht oben/unten abgeschnitten
+## wird.
+const _PANEL_GAP: float = 7.0
+
+
+func _reposition_compact_panel() -> void:
+	if not _compact_panel.visible:
+		return
+	# Layout-Pass erzwingen, damit size die tatsächlich benötigte Größe
+	# widerspiegelt (sonst liegt size direkt nach dem Einblenden evtl.
+	# noch auf dem initialen Offset des Scenes).
+	_compact_panel.reset_size()
+	var panel_size: Vector2 = _compact_panel.size
+	if panel_size.x <= 0 or panel_size.y <= 0:
+		panel_size = _compact_panel.get_combined_minimum_size()
+	var viewport: Vector2 = get_viewport_rect().size
+	var avatar_rect: Rect2 = Rect2(_avatar.position, _avatar.size)
+	var avatar_center_x: float = avatar_rect.position.x + avatar_rect.size.x * 0.5
+
+	var target_x: float
+	if avatar_center_x < viewport.x * 0.5:
+		target_x = avatar_rect.position.x + avatar_rect.size.x + _PANEL_GAP
+	else:
+		target_x = avatar_rect.position.x - panel_size.x - _PANEL_GAP
+
+	var target_y: float = avatar_rect.position.y + avatar_rect.size.y * 0.5 - panel_size.y * 0.5
+
+	var max_x: float = maxf(0.0, viewport.x - panel_size.x)
+	var max_y: float = maxf(0.0, viewport.y - panel_size.y)
+	_compact_panel.position = Vector2(
+		clampf(target_x, 0.0, max_x),
+		clampf(target_y, 0.0, max_y),
+	)
+
+
+func _on_avatar_moved(_pos: Vector2) -> void:
+	_reposition_compact_panel()
+
+
+func _close_compact_input() -> void:
+	if not _compact_input_open:
+		# Halte das Panel trotzdem konsistent versteckt, auch wenn der
+		# Zustand bereits geschlossen war (z. B. initiales Setup).
+		_compact_panel.visible = false
+		return
+	_compact_input_open = false
+	_compact_panel.visible = false
+	_compact_hint.visible = false
+	_compact_commands_hint.visible = false
+
+
+func _on_compact_close_pressed() -> void:
+	_close_compact_input()
+
+
+func _on_compact_send_pressed() -> void:
+	var text := _compact_input.text.strip_edges()
+	if text.is_empty():
+		return
+	IpcClient.submit_text(text)
+	_append("[b]> %s[/b]" % text)
+	_compact_input.text = ""
+	# Panel bleibt bewusst offen, damit der Nutzer schnell nachreichen
+	# kann — Schließen läuft über Close-Button, Escape oder Wechsel
+	# in Expanded/Disconnected.
+	_compact_input.grab_focus()
+
+
+func _on_compact_text_submitted(_text: String) -> void:
+	_on_compact_send_pressed()
+
+
+func _on_compact_voice_pressed() -> void:
+	if not IpcClient.is_connected_to_core():
+		return
+	IpcClient.voice_once()
+	_append("[i]voice →[/i]")
+
+
+func _on_compact_add_files_pressed() -> void:
+	# Ehrlicher Platzhalter: der Button existiert, damit das Compact-UX
+	# vollständig wirkt, aber das Backend für Dateianhänge ist in dieser
+	# Phase nicht gelandet. Keine Pseudo-Dateiauswahl.
+	_compact_hint.text = "Datei-Anhänge noch nicht implementiert."
+	_compact_hint.visible = true
+	_append("[color=gray]◦ add files: not implemented yet[/color]")
+
+
+func _on_compact_commands_pressed() -> void:
+	# Kleine, ehrliche Mini-Hilfe. Listet nur Flows, die es heute wirklich
+	# gibt — keine zukünftigen Features vortäuschen.
+	if _compact_commands_hint.visible:
+		_compact_commands_hint.visible = false
+		return
+	_compact_commands_hint.text = _COMPACT_COMMANDS_TEXT
+	_compact_commands_hint.visible = true
+
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	if not _compact_input_open:
+		return
+	if event is InputEventKey:
+		var key := event as InputEventKey
+		if key.pressed and not key.echo and key.keycode == KEY_ESCAPE:
+			_close_compact_input()
+			accept_event()

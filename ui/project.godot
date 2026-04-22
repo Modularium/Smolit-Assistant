@@ -1,5 +1,6 @@
 ; Engine configuration file.
-; Generated for Smolit Assistant UI (Phase 3.1 bootstrap).
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
 ;
 ; Format:
 ;   [section] ; section goes between []
@@ -7,22 +8,32 @@
 
 config_version=5
 
+[animation]
+
+compatibility/default_parent_skeleton_in_mesh_instance_3d=true
+
 [application]
 
 config/name="Smolit Assistant UI"
 config/description="Local WebSocket client and renderer for Smolit Core."
 run/main_scene="res://scenes/main.tscn"
-config/features=PackedStringArray("4.2", "GL Compatibility")
+config/features=PackedStringArray("4.6", "GL Compatibility")
 
 [autoload]
 
 EventBus="*res://autoload/event_bus.gd"
 IpcClient="*res://autoload/ipc_client.gd"
+MCPRuntime="*uid://c5cwu6wmc70kr"
 
 [display]
 
 window/size/viewport_width=520
 window/size/viewport_height=560
+window/per_pixel_transparency/allowed=true
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/godot_mcp/plugin.cfg")
 
 [rendering]
 

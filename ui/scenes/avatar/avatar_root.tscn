@@ -1,100 +1,69 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=7 format=3]
 
 [ext_resource type="Script" path="res://scripts/avatar/avatar_controller.gd" id="1_ctrl"]
+[ext_resource type="Texture2D" path="res://assets/avatar/smolit_idle.png" id="2_idle"]
+[ext_resource type="Texture2D" path="res://assets/avatar/smolit_active.png" id="3_active"]
+
+[sub_resource type="Shader" id="Shader_circle_mask"]
+code = "shader_type canvas_item;
+
+void fragment() {
+	vec2 centered = UV - vec2(0.5);
+	float dist = length(centered);
+	vec4 tex_color = texture(TEXTURE, UV);
+	float alpha = smoothstep(0.5, 0.485, dist);
+	COLOR = vec4(tex_color.rgb, tex_color.a * alpha);
+}
+"
+
+[sub_resource type="ShaderMaterial" id="Mat_circle_mask"]
+shader = SubResource("Shader_circle_mask")
+
+[sub_resource type="StyleBoxFlat" id="Style_shadow"]
+bg_color = Color(0, 0, 0, 0)
+corner_radius_top_left = 48
+corner_radius_top_right = 48
+corner_radius_bottom_right = 48
+corner_radius_bottom_left = 48
+shadow_color = Color(0, 0, 0, 0.45)
+shadow_size = 12
+shadow_offset = Vector2(0, 4)
 
 [node name="AvatarRoot" type="Control"]
-custom_minimum_size = Vector2(0, 180)
+custom_minimum_size = Vector2(104, 104)
 layout_mode = 3
-anchors_preset = 10
-anchor_right = 1.0
-offset_bottom = 180.0
-grow_horizontal = 2
+anchors_preset = 0
+offset_right = 104.0
+offset_bottom = 104.0
+mouse_filter = 1
+mouse_default_cursor_shape = 2
+pivot_offset = Vector2(52, 52)
 script = ExtResource("1_ctrl")
 
-[node name="VisualRoot" type="CenterContainer" parent="."]
+[node name="Shadow" type="Panel" parent="."]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-
-[node name="Body" type="ColorRect" parent="VisualRoot"]
-custom_minimum_size = Vector2(120, 120)
-layout_mode = 2
-color = Color(0.32, 0.55, 0.78, 1)
-
-[node name="Face" type="Control" parent="VisualRoot"]
-custom_minimum_size = Vector2(120, 120)
-layout_mode = 2
-mouse_filter = 2
-
-[node name="Eyes" type="HBoxContainer" parent="VisualRoot/Face"]
-offset_left = 20.0
-offset_top = 32.0
-offset_right = 100.0
-offset_bottom = 52.0
-alignment = 1
-theme_override_constants/separation = 20
-
-[node name="LeftEye" type="ColorRect" parent="VisualRoot/Face/Eyes"]
-custom_minimum_size = Vector2(18, 18)
-layout_mode = 2
-color = Color(0.08, 0.09, 0.12, 1)
-
-[node name="RightEye" type="ColorRect" parent="VisualRoot/Face/Eyes"]
-custom_minimum_size = Vector2(18, 18)
-layout_mode = 2
-color = Color(0.08, 0.09, 0.12, 1)
-
-[node name="Mouth" type="ColorRect" parent="VisualRoot/Face"]
-offset_left = 42.0
-offset_top = 78.0
-offset_right = 78.0
-offset_bottom = 90.0
-pivot_offset = Vector2(18, 6)
-color = Color(0.08, 0.09, 0.12, 1)
-
-[node name="StateLabel" type="Label" parent="VisualRoot"]
-offset_left = 0.0
-offset_top = 132.0
-offset_right = 120.0
-offset_bottom = 152.0
-horizontal_alignment = 1
-text = "idle"
-
-[node name="Effects" type="Control" parent="."]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 2
-
-[node name="ThinkingIndicator" type="ColorRect" parent="Effects"]
-visible = false
 offset_left = 8.0
 offset_top = 8.0
-offset_right = 22.0
-offset_bottom = 22.0
-color = Color(0.85, 0.70, 0.25, 1)
+offset_right = -8.0
+offset_bottom = -8.0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("Style_shadow")
 
-[node name="Debug" type="Control" parent="."]
+[node name="Body" type="TextureRect" parent="."]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 2
-
-[node name="CurrentStateLabel" type="Label" parent="Debug"]
 offset_left = 8.0
-offset_top = -22.0
-offset_right = 200.0
-offset_bottom = -2.0
-anchor_top = 1.0
-anchor_bottom = 1.0
-text = "state: idle"
-modulate = Color(1, 1, 1, 0.55)
+offset_top = 8.0
+offset_right = -8.0
+offset_bottom = -8.0
+mouse_filter = 2
+pivot_offset = Vector2(44, 44)
+material = SubResource("Mat_circle_mask")
+texture = ExtResource("2_idle")
+expand_mode = 1
+stretch_mode = 5
