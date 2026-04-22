@@ -366,15 +366,18 @@ dokumentierter Fallback.
       [docs/linux_window_overlay_architecture.md §F.4](./docs/linux_window_overlay_architecture.md)
       und
       [docs/linux_always_on_top_decision.md](./docs/linux_always_on_top_decision.md).
-      Erste reale Messung (GNOME/X11, `_NET_WM_STATE_ABOVE` auf dem
-      Fenster gesetzt) protokolliert in
-      [docs/x11_always_on_top_verification.md §F.1](./docs/x11_always_on_top_verification.md)
-      plus Rohartefakt
-      [docs/x11_always_on_top_results.md](./docs/x11_always_on_top_results.md).
-      Offen: Messungen auf KDE/KWin (X11), Xfwm4, Openbox, Fluxbox,
-      XWayland-Sonderfall; UX-Ebene (Alt-Tab, Workspace, Fullscreen-
-      Konflikt) manuell; Feintuning (z. B. `_NET_WM_WINDOW_TYPE_DOCK`)
-      nur bei klarer Nachfrage.
+      Auf dem GNOME/X11-Entwicklungshost inzwischen **beide Ebenen**
+      gemessen: Protokoll (`_NET_WM_STATE_ABOVE` gesetzt) und UX mit
+      xterm-Peer (Smolit bleibt im Stacking oberhalb bei
+      Fokuswechsel, über Minimize/Restore und sogar bei
+      fullscreen-xterm; nicht sticky über Workspaces). Details in
+      [docs/x11_always_on_top_verification.md §F.1 / §H](./docs/x11_always_on_top_verification.md)
+      und [docs/x11_always_on_top_results.md](./docs/x11_always_on_top_results.md).
+      Zeile bleibt bewusst bei `[~]` — offen: KDE/KWin (X11), Xfwm4,
+      Openbox, Fluxbox, XWayland-Sonderfall, Browser-F11 /
+      Videospieler-Fullscreen, Multi-Monitor, Langzeitstabilität.
+      Feintuning (z. B. `_NET_WM_WINDOW_TYPE_DOCK`) nur bei klarer
+      Nachfrage.
 - [ ] Entscheidungsspike „Godot-Fenster-Flags vs. GDExtension vs.
       Host-Prozess mit eingebettetem Godot".
 - [ ] Window-Behavior-Abstraktion als eigene Schicht

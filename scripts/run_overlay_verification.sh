@@ -32,6 +32,13 @@
 # Beispiel (real-host Messung für docs/x11_always_on_top_verification.md):
 #   scripts/run_overlay_verification.sh --scene --report aot-x11
 #
+# Für UX-Läufe (Fokus / Stacking / Workspace / Fullscreen-Peer) ist der
+# `--scene`-Modus Pflicht: der Godot-Editor wäre kein verlässlicher
+# Peer. Ein zweites Toplevel (z. B. `xterm`) und ein paar
+# `xdotool` / `wmctrl` / `xprop`-Aufrufe neben diesem Wrapper liefern
+# die Beobachtungen; siehe docs/x11_always_on_top_results.md für die
+# konkreten Messkommandos.
+#
 # Beispiel (headless smoke, jeder Case):
 #   scripts/run_overlay_verification.sh --headless --report click-through
 

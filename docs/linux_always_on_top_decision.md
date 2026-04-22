@@ -321,11 +321,22 @@ opt-in X11-AOT-Sonderpfad existiert jetzt als kleiner MVP
 — keine universelle Linux-AOT-Zusage, kein Standard-MVP. Sichtbares
 Stacking-Verhalten hängt weiterhin vom jeweiligen X11-Window-
 Manager ab; Smolit dokumentiert das im Log und verkauft es nicht als
-Feature-Garantie. Erste reproduzierbare Messung
-(GNOME/X11 auf dem Entwicklungshost, 2026-04-22) bestätigt, dass
-`_NET_WM_STATE_ABOVE` auf dem Godot-Fenster gesetzt wird; die
-UX-Ebene bleibt WM-abhängig und ist pro Session manuell zu prüfen —
-siehe [`x11_always_on_top_verification.md`](./x11_always_on_top_verification.md).
+Feature-Garantie.
+
+Messstand (2026-04-22, GNOME/X11 auf dem Entwicklungshost):
+
+- **Protokollebene** bestätigt (`_NET_WM_STATE_ABOVE` gesetzt).
+- **UX-Ebene** mit einem simplen xterm-Peer gemessen — Smolit
+  bleibt oberhalb bei Fokuswechsel, über Minimize/Restore, und bei
+  einem Fullscreen-xterm. Nicht sticky über Workspaces.
+- **Offen**: andere X11-WMs, komplexere Peers (Browser F11, Electron,
+  native-fullscreen Videoplayer), Langzeitstabilität, Multi-Monitor.
+
+Details in [`x11_always_on_top_verification.md`](./x11_always_on_top_verification.md)
+und [`x11_always_on_top_results.md`](./x11_always_on_top_results.md).
+Die Roadmap-Zeile bleibt bewusst bei `[~]` — der Pfad ist *für
+GNOME/X11 mit einfachem Peer vorzeigbar*, aber nicht auf „Linux-AOT
+gelöst" zu heben.
 
 Auf einer wlroots-Session (Sway/Hyprland/river) gelten dieselben
 produktiven Versprechen. layer-shell-Pfad ist dokumentierte Option,

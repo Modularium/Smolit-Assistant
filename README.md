@@ -501,11 +501,19 @@ scripts/run_overlay_verification.sh --scene --report aot-x11
 Begründung und Kriterien:
 [docs/linux_always_on_top_decision.md](docs/linux_always_on_top_decision.md).
 Messmatrix, Testfälle und reale Ergebnisse:
-[docs/x11_always_on_top_verification.md](docs/x11_always_on_top_verification.md)
-(§F.1 enthält die GNOME/X11-Messung vom Entwicklungshost —
-`_NET_WM_STATE_ABOVE` ist auf der Fenster-Properties-Ebene
-nachweislich gesetzt; UX-Ebene bleibt WM-spezifisch manuell zu
-prüfen).
+[docs/x11_always_on_top_verification.md](docs/x11_always_on_top_verification.md).
+Stand der Messungen auf dem Entwicklungshost (GNOME/X11,
+2026-04-22):
+
+- **Protokollebene**: `_NET_WM_STATE_ABOVE` auf dem Smolit-Fenster
+  bestätigt.
+- **UX-Ebene mit xterm-Peer**: Smolit bleibt oberhalb bei
+  Fokuswechsel, über Minimize/Restore, und sogar bei einem
+  fullscreen-xterm. Nicht sticky über Workspaces.
+- **Offen**: andere X11-WMs (KDE/KWin, Xfwm4, Openbox, Fluxbox),
+  echte Browser-/Videoplayer-Fullscreen, Multi-Monitor,
+  Langzeitstabilität. Matrix-Zeilen dafür stehen im Dokument offen
+  — **nicht** „X11 gelöst".
 
 ### Overlay-Verifikation (nächster Schritt: reale Messung)
 

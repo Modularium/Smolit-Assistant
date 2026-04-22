@@ -775,14 +775,22 @@ Kurzfassung:
 - **GNOME-Shell-Extension.** Ausdrücklich zurückgestellt (Pflege-
   aufwand, Versionsbindung, Sicherheitsmodell). Nur bei klarer,
   messbarer Nachfrage und eigenem Projektrahmen wieder auf dem Tisch.
-- **X11-Sonderpfad — umgesetzt (§F.4) und erstmals gemessen.** Kleiner
-  opt-in MVP über `WINDOW_FLAG_ALWAYS_ON_TOP`, capability- und
-  session-gated; erste reproduzierbare Messung auf GNOME/X11 (siehe
+- **X11-Sonderpfad — umgesetzt (§F.4), protokoll- und UX-level
+  gemessen (GNOME/X11).** Kleiner opt-in MVP über
+  `WINDOW_FLAG_ALWAYS_ON_TOP`, capability- und session-gated. Auf dem
+  Entwicklungshost (GNOME/X11, 2026-04-22) sind jetzt beide Ebenen
+  gemessen: `_NET_WM_STATE_ABOVE` steht am Fenster, und ein
+  Folgelauf mit xterm-Peer zeigt, dass Smolit im Stacking oberhalb
+  bleibt — auch bei fokussiertem Peer, über Minimize/Restore, und
+  sogar mit fullscreen-xterm. Sticky-über-Workspaces ist
+  ausdrücklich nicht Teil des Pfads. Andere X11-WMs (KDE/KWin,
+  Xfwm4, Openbox, Fluxbox) und komplexere Peers (Browser-F11,
+  Electron, Videospieler, Auth-Dialoge) bleiben ungemessen. Details:
   [`x11_always_on_top_verification.md`](./x11_always_on_top_verification.md)
-  §F.1) bestätigt, dass `_NET_WM_STATE_ABOVE` auf dem Fenster
-  gesetzt wird. UX-Ebene ist WM-abhängig und pro Session manuell zu
-  prüfen. Ausdrücklich kein Standard-MVP und **kein Wayland/GNOME-
-  Promise**.
+  §F.1 und
+  [`x11_always_on_top_results.md`](./x11_always_on_top_results.md)
+  „GNOME/X11 UX-Messung (Folgelauf)". Ausdrücklich kein Standard-MVP
+  und **kein Wayland/GNOME-Promise**.
 - **wlroots/layer-shell.** Dokumentierte Option, kein aktuelles Ziel.
 - **Diagnostische Probe.** Der bestehende opt-in
   `SMOLIT_WINDOW_PROBE=1`-Pfad enthält einen kurzen, reversiblen
