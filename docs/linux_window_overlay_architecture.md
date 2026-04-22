@@ -376,16 +376,21 @@ ui/scripts/window_behavior/
 ├── backend_base.gd                           # Backend-Basisklasse (interne Vorbereitung)
 ├── backend_noop.gd                           # first-class Fallback für unknown Sessions
 ├── backend_x11.gd                            # X11-Delegations-Backend
-├── backend_wayland_generic.gd                # Wayland-Delegations-Backend (AOT-Refusal by design)
-└── backend_resolver.gd                       # Session → Backend Auswahl
+├── backend_wayland_mutter.gd                 # Wayland/GNOME — delegiert, keine GNOME-Extension
+├── backend_wayland_wlroots.gd                # Wayland/wlroots-Familie — delegiert, keine layer-shell
+├── backend_xwayland.gd                       # Wayland-Session + X11-Driver (XWayland-Sonderfall)
+├── backend_wayland_generic.gd                # Wayland-Fallback (unbekannter Compositor, z. B. KDE/Wayland)
+└── backend_resolver.gd                       # Session + Desktop → Backend-Auswahl
 ```
 
-Die Backend-Familie ist ausdrücklich **interne Strukturarbeit** — sie
-delegiert an die bestehenden Controller und ändert weder das
-Plattformverhalten noch das Log-Format. Ziel: spätere, echt
-unterschiedliche Pfade (layer-shell, GDExtension, compositor-
-spezifische Policy) haben einen klaren Platz, ohne die Aufrufseite
-(`main.gd`, Fassade, Runtime-Report) erneut anfassen zu müssen.
+Die Backend-Familie ist ausdrücklich **interne Strukturarbeit** — alle
+Backends delegieren an die bestehenden Controller und ändern weder
+Plattformverhalten noch Log-Format. Die Aufteilung der Wayland-Seite
+nach Compositor-Familie (Mutter / wlroots / XWayland / Generic)
+bildet nur die real existierende Plattformheterogenität ab; Ziel:
+spätere echt unterschiedliche Pfade (z. B. `wlr-layer-shell`-Wrapper,
+compositor-spezifische Policy) haben klar benannte Zielorte, ohne
+`main.gd`, die Fassade oder den Runtime-Report erneut anzufassen.
 
 Was der Spike wirklich tut:
 

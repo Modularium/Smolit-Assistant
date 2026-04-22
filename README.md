@@ -363,7 +363,9 @@ Verification** (`window_probe.gd`), **Activation** (Overlay /
 Click-through / X11-AOT, je eigenes Opt-in-Env-Flag), **Reporting**
 (`overlay_runtime_report.gd`) und einer internen
 **Backend-Familie** (`backend_noop`, `backend_x11`,
-`backend_wayland_generic`, ausgewählt über `backend_resolver.gd`).
+`backend_wayland_mutter`, `backend_wayland_wlroots`,
+`backend_xwayland` und `backend_wayland_generic` als Fallback —
+ausgewählt über `backend_resolver.gd`).
 Alle Aktivierungspfade teilen ein gemeinsames Ergebnis-Vokabular
 (`requested / capable / applied / observed / active / reason`,
 siehe `window_behavior_result.gd`). Einziger Einstiegspunkt aus

@@ -474,16 +474,32 @@ halbparallele Sonderpfade neben einander baut:
   (siehe unten).
 - **Backend-Familie (intern, Vorbereitung)** —
   `backend_base.gd` + `backend_noop.gd` + `backend_x11.gd` +
-  `backend_wayland_generic.gd` + `backend_resolver.gd`. Der Resolver
-  wählt pro `apply_all()`-Lauf **ein** Backend anhand des
-  `session_type` im Capability-Snapshot (`x11` → X11-Backend,
-  `wayland` → Wayland-Generic, sonst → Noop). Die Aktivierungen
-  laufen über das gewählte Backend, das aktuell *ausschließlich* an
-  die existierenden Controller delegiert — keine neue Plattformlogik,
-  kein neues Promise, Log-Output bleibt identisch. Spätere
-  compositor-spezifische Pfade (z. B. `backend_wayland_wlroots` mit
-  layer-shell) wären die natürliche Erweiterung, ohne Fassade oder
-  `main.gd` anfassen zu müssen.
+  `backend_wayland_mutter.gd` + `backend_wayland_wlroots.gd` +
+  `backend_xwayland.gd` + `backend_wayland_generic.gd` +
+  `backend_resolver.gd`. Der Resolver wählt pro `apply_all()`-Lauf
+  **ein** Backend anhand des Capability-Snapshots:
+  - `session_type == "x11"` → `backend_x11`.
+  - `session_type == "wayland"` + `display_driver == "x11"`
+    → `backend_xwayland` (Godot als X11-Client in einer Wayland-
+    Session).
+  - `session_type == "wayland"` + GNOME-artiger Desktop (Mutter)
+    → `backend_wayland_mutter`.
+  - `session_type == "wayland"` + wlroots-artiger Desktop
+    (Sway / Hyprland / Wayfire / river / labwc) →
+    `backend_wayland_wlroots`.
+  - `session_type == "wayland"` + alles andere (KDE/Wayland,
+    unbekannte Compositoren) → `backend_wayland_generic` als
+    ehrlicher Fallback.
+  - sonst → `backend_noop`.
+
+  Alle Backends delegieren aktuell 1:1 an die existierenden
+  Controller — die Aufteilung ist **ehrliche interne
+  Plattformstruktur**, keine neuen Features. Keine neue IPC-/
+  EventBus-/Presence-Logik, Log-Output byte-identisch zum Pre-Split-
+  Stand. Spätere compositor-spezifische Pfade (`backend_wayland_wlroots`
+  mit echter `wlr-layer-shell`-Integration, `backend_wayland_mutter`
+  mit offizieller GNOME-Extension-Anbindung, falls jemals angebracht)
+  haben jetzt klar benannte Zielorte.
 
 `main.gd` ruft in `_ready()` nur noch `SmolitWindowBehavior.apply_all(
 self)` auf und hält den Click-through-Controller (falls aktiv) als

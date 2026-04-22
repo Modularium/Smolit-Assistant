@@ -400,18 +400,24 @@ dokumentierter Fallback.
       Interface statt drei separaten Controllern.
 - [~] Backends als getrennte Familie einordnen: `backend_x11`,
       `backend_wayland_mutter`, `backend_wayland_wlroots`,
-      `backend_noop` (first-class Fallback). Interne Vorbereitung
-      gelandet: `backend_base.gd`, `backend_x11.gd`,
-      `backend_wayland_generic.gd`, `backend_noop.gd` + `backend_resolver.gd`
-      unter `ui/scripts/window_behavior/`. Die Fassade
-      `apply_all(anchor)` löst pro Lauf ein Backend auf und delegiert
-      die drei Aktivierungen darüber; Plattformlogik bleibt dabei in
-      den Controller-Gates, Log-Output ist byte-identisch zum
-      Pre-Backend-Stand. Offen: echte Differenzierung
-      (`backend_wayland_mutter` vs. `backend_wayland_wlroots` mit
-      layer-shell), ein expliziter `backend_wayland_unknown`-Case,
-      und die in §F des Architekturdokuments genannten Setter-/
-      Positionsoperationen.
+      `backend_xwayland`, `backend_wayland_generic`,
+      `backend_noop`. **Familienstruktur steht** — alle sechs
+      Klassen existieren unter `ui/scripts/window_behavior/`, plus
+      `backend_base.gd` und `backend_resolver.gd`. Die Fassade
+      `apply_all(anchor)` löst pro Lauf ein Backend auf (Session-Typ
+      + Desktop-Environment + Display-Driver → konservative
+      Klassifikation in GNOME/Mutter, wlroots-Familie, XWayland-
+      Sonderfall, oder generischer Wayland-Fallback) und delegiert
+      die drei Aktivierungen darüber. Plattformlogik bleibt in den
+      Controller-Gates, Log-Output ist byte-identisch zum
+      Pre-Backend-Stand. **Echte backend-spezifische Aktivierung
+      bleibt offen**: die Backends delegieren aktuell 1:1 an die
+      gemeinsamen Controller; echte Differenzierung
+      (`wlr-layer-shell`-Wrapper in `backend_wayland_wlroots`,
+      etwaige Mutter-spezifische Policy in `backend_wayland_mutter`,
+      XWayland-AOT-Feintuning) bleibt spätere, bewusst gewählte
+      Arbeit. Auch die in §F des Architekturdokuments genannten
+      Setter-/Positionsoperationen sind noch offen.
 - [x] Overlay-MVP Phase B (opt-in): transparent + borderless
       Presence-Fenster per `SMOLIT_UI_OVERLAY=1`, capability-gesteuert
       mit ehrlichem Fallback; **ohne** Always-on-top-Zusicherung unter
