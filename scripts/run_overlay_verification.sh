@@ -18,6 +18,12 @@
 #   probe         — SMOLIT_WINDOW_PROBE=1
 #   aot-x11       — SMOLIT_UI_ALWAYS_ON_TOP=1 + SMOLIT_WINDOW_REPORT=1
 #                   (X11-only Sonderpfad — no-op auf Wayland/GNOME)
+#   aot-wayland-refusal
+#                 — AOT-Env + SMOLIT_WINDOW_REPORT=1 mit Wayland-Env-
+#                   Overrides. Diagnostik-Fall: zeigt, dass der
+#                   Controller bei session_type=wayland sauber
+#                   verweigert. KEIN echter Wayland-Compositor-Test —
+#                   siehe docs/wayland_always_on_top_refusal_results.md.
 #   full          — Overlay + Click-through + Probe + AOT + Report
 #   report        — nur SMOLIT_WINDOW_REPORT=1 (Report für Baseline)
 #
@@ -109,6 +115,20 @@ case "${CASE}" in
     # weil das der einzige Weg ist, das Ergebnis ehrlich einzuordnen.
     export SMOLIT_UI_ALWAYS_ON_TOP=1
     export SMOLIT_WINDOW_REPORT=1
+    ;;
+  aot-wayland-refusal)
+    # Diagnostik: Env-Override erzwingt die Wayland-Branch der
+    # Capability-Detection. Reproduziert den Refusal-Pfad des
+    # X11-only Sonderpfads. Kein echter Wayland-Compositor-Test —
+    # Details in docs/wayland_always_on_top_refusal_results.md.
+    export SMOLIT_UI_ALWAYS_ON_TOP=1
+    export SMOLIT_WINDOW_REPORT=1
+    export XDG_SESSION_TYPE=wayland
+    export WAYLAND_DISPLAY=wayland-0-fake
+    export XDG_CURRENT_DESKTOP=ubuntu:GNOME
+    # DISPLAY explizit leeren, damit die Detection sich nicht doch
+    # noch an X11 festhält.
+    export DISPLAY=
     ;;
   full)
     export SMOLIT_UI_OVERLAY=1

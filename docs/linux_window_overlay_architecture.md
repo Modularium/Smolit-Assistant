@@ -772,6 +772,11 @@ Kurzfassung:
 - **Standardpfad auf GNOME/Wayland (Ziel-Session).** Kein
   Always-on-top-Versprechen. Sichtbare Desktop-Präsenz läuft
   weiterhin über Overlay-MVP (§F.2) + opt-in Click-through (§F.3).
+  Der Refusal-Pfad des X11-only Controllers ist per
+  Env-Override-Simulation empirisch belegt — Controller verweigert,
+  `active=false`, klarer `reason`. Rohdaten in
+  [`wayland_always_on_top_refusal_results.md`](./wayland_always_on_top_refusal_results.md).
+  Echter Mutter-Wayland-Compositor-Lauf steht aus.
 - **GNOME-Shell-Extension.** Ausdrücklich zurückgestellt (Pflege-
   aufwand, Versionsbindung, Sicherheitsmodell). Nur bei klarer,
   messbarer Nachfrage und eigenem Projektrahmen wieder auf dem Tisch.

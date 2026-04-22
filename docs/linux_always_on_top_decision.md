@@ -329,8 +329,16 @@ Messstand (2026-04-22, GNOME/X11 auf dem Entwicklungshost):
 - **UX-Ebene** mit einem simplen xterm-Peer gemessen — Smolit
   bleibt oberhalb bei Fokuswechsel, über Minimize/Restore, und bei
   einem Fullscreen-xterm. Nicht sticky über Workspaces.
+- **Wayland/GNOME-Refusal** per Env-Override-Simulation bestätigt:
+  bei Session-Erkennung `wayland` verweigert der Controller sauber
+  (`active=false`, reason „X11-only; current session=wayland").
+  Flag wird nicht gesetzt, Overlay und Click-through unbeeinflusst.
+  Details:
+  [`wayland_always_on_top_refusal_results.md`](./wayland_always_on_top_refusal_results.md).
+  Der echte Mutter-Wayland-Compositor-Lauf ist noch offen.
 - **Offen**: andere X11-WMs, komplexere Peers (Browser F11, Electron,
-  native-fullscreen Videoplayer), Langzeitstabilität, Multi-Monitor.
+  native-fullscreen Videoplayer), Langzeitstabilität, Multi-Monitor,
+  echter Wayland-Compositor-Lauf.
 
 Details in [`x11_always_on_top_verification.md`](./x11_always_on_top_verification.md)
 und [`x11_always_on_top_results.md`](./x11_always_on_top_results.md).

@@ -378,6 +378,13 @@ dokumentierter Fallback.
       Videospieler-Fullscreen, Multi-Monitor, Langzeitstabilität.
       Feintuning (z. B. `_NET_WM_WINDOW_TYPE_DOCK`) nur bei klarer
       Nachfrage.
+      Zusätzlich: **Refusal-Gegentest** für GNOME/Wayland existiert
+      jetzt als dedizierter Harness-Case `aot-wayland-refusal` mit
+      Env-Override-Simulation; Rohdaten in
+      [docs/wayland_always_on_top_refusal_results.md](./docs/wayland_always_on_top_refusal_results.md).
+      Offen bleibt der Lauf gegen einen echten Mutter-Wayland- oder
+      wlroots-Compositor — nicht, um AOT dort einzubauen, sondern um
+      die Refusal-Message gegen reale Session-Signale zu verifizieren.
 - [ ] Entscheidungsspike „Godot-Fenster-Flags vs. GDExtension vs.
       Host-Prozess mit eingebettetem Godot".
 - [ ] Window-Behavior-Abstraktion als eigene Schicht

@@ -514,6 +514,12 @@ Stand der Messungen auf dem Entwicklungshost (GNOME/X11,
   echte Browser-/Videoplayer-Fullscreen, Multi-Monitor,
   Langzeitstabilität. Matrix-Zeilen dafür stehen im Dokument offen
   — **nicht** „X11 gelöst".
+- **GNOME/Wayland-Gegentest**: Refusal-Pfad des Controllers per Env-
+  Override-Simulation auf demselben Host empirisch bestätigt
+  (Controller verweigert mit klarem `reason`, Flag wird nicht
+  gesetzt, Overlay/Click-through bleiben unabhängig). Rohdaten:
+  [docs/wayland_always_on_top_refusal_results.md](docs/wayland_always_on_top_refusal_results.md).
+  Ein echter Mutter-Wayland-Compositor-Lauf steht weiterhin aus.
 
 ### Overlay-Verifikation (nächster Schritt: reale Messung)
 

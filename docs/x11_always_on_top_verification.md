@@ -283,12 +283,20 @@ Edge-Case.
 
 ### F.4 Wayland/GNOME (Gegentest)
 
-Nicht in dieser Messung gefahren (Host war X11). Erwartetes,
-protokollseitig dokumentiertes Ergebnis: der Controller verweigert
-die Aktivierung. Log-Reason: `always-on-top special path is
-X11-only; current session=wayland — no-op by design`. Das ist **das
-gewünschte Verhalten** (siehe
-[`linux_always_on_top_decision.md`](./linux_always_on_top_decision.md)).
+Echte GNOME/Wayland-Session auf diesem Host nicht verfügbar (Login
+war X11, kein nested Wayland-Compositor installiert). Stattdessen:
+**Env-Override-Simulation** (2026-04-22), die den Wayland-Detection-
+Zweig der Capability-Logik und den Refusal-Pfad des Controllers
+eins zu eins exerziert. Ergebnis: der Controller verweigert wie
+gewollt — `candidate=false, applied=false, observed=false,
+active=false`, reason „X11-only; current session=wayland — no-op by
+design". Rohausgaben siehe
+[`wayland_always_on_top_refusal_results.md` §4.1](./wayland_always_on_top_refusal_results.md).
+
+Der **echte** Wayland-Compositor-Lauf (Mutter-Wayland / KWin-Wayland
+/ wlroots) bleibt ausstehend und ist in
+[`wayland_always_on_top_refusal_results.md` §4.3](./wayland_always_on_top_refusal_results.md)
+als konkreter Messauftrag hinterlegt.
 
 ---
 
@@ -359,8 +367,10 @@ Diese Aussage **nicht** darüber hinaus verallgemeinern.
   Randbedingung.
 - **XWayland/GNOME.** Session-Detection, Flag-Setzung und
   tatsächliches UX-Verhalten explizit protokollieren.
-- **Wayland/GNOME-Gegentest.** Der Code verweigert hier by design;
-  der Lauf sollte trotzdem einmal protokolliert werden, damit der
-  No-op-Pfad dokumentiert ist.
+- **Wayland/GNOME-Gegentest (echtes Compositor-Setup).** Refusal-Pfad
+  per Env-Override-Simulation belegt, Rohdaten in
+  [`wayland_always_on_top_refusal_results.md`](./wayland_always_on_top_refusal_results.md).
+  Offen bleibt der Lauf gegen eine *echte* Mutter-Wayland- /
+  KWin-Wayland- / wlroots-Session.
 - **`_NET_WM_WINDOW_TYPE_DOCK`-Variante.** Erst **nach** mehr realen
   Messungen und nur bei klarem Nutzen — nicht spekulativ.
