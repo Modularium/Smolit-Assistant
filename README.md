@@ -461,6 +461,31 @@ Rechtecken) bleiben Folgearbeit. Details siehe
 und
 [docs/ui_architecture.md §9.3](docs/ui_architecture.md).
 
+### Overlay-Verifikation (nächster Schritt: reale Messung)
+
+Der nächste konkrete Arbeitsschritt auf der Overlay-Linie ist **kein
+neues Feature**, sondern **reale Verifikation** auf echten Sessions.
+Dafür gibt es jetzt zwei kleine Hilfen:
+
+- **Opt-in Runtime-Report** via `SMOLIT_WINDOW_REPORT=1`. Druckt am
+  Ende von `_ready()` genau einen konsolidierten Konsolenblock mit
+  Session, Display-Driver, XDG-Desktop, Capabilities sowie dem
+  tatsächlich erreichten Zustand von Overlay und Click-through
+  (inkl. Bounds und Zonenliste). Kein Dauer-Log, keine Scene-Logik,
+  keine IPC.
+- **Verifikations-Wrapper** unter
+  [`scripts/run_overlay_verification.sh`](scripts/run_overlay_verification.sh),
+  der die typischen Env-Kombinationen (`baseline`, `overlay`,
+  `click-through`, `probe`, `full`, `report`) mit oder ohne `--headless`
+  startet. Hilft, reproduzierbare Läufe für die Matrix in
+  [docs/linux_overlay_verification_matrix.md](docs/linux_overlay_verification_matrix.md)
+  zu erzeugen.
+
+Die Matrix deckt Baseline, Overlay-only, Overlay + Click-through,
+Probe-Pfad, Docked↔Expanded-Wechsel, Banner-Sichtbarkeit, CompactInput,
+sowie offene Hypothesen zu Fractional Scaling und XWayland ab —
+ausdrücklich als Messlinie, nicht als Produktzusage.
+
 ### Presence-Modes (Phase 3.3 MVP)
 
 Presence-State ist orthogonal zum Avatar-State und wird vom

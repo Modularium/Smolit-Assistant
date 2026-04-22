@@ -19,6 +19,7 @@ const _CapabilitiesRef := preload("res://scripts/window_behavior/window_capabili
 const _ProbeRef := preload("res://scripts/window_behavior/window_probe.gd")
 const _OverlayRef := preload("res://scripts/window_behavior/overlay_controller.gd")
 const _ClickThroughRef := preload("res://scripts/window_behavior/overlay_click_through_controller.gd")
+const _RuntimeReportRef := preload("res://scripts/window_behavior/overlay_runtime_report.gd")
 
 
 ## Cheap — nur Detection. Sicher, auch aus `_ready()` aufzurufen.
@@ -69,3 +70,15 @@ static func activate_click_through_if_requested(
 	anchor: Node, overlay_result: Dictionary
 ) -> Dictionary:
 	return _ClickThroughRef.activate_if_requested(anchor, overlay_result)
+
+
+## Opt-in Diagnostik-Konsolidierung. Rein lesender Runtime-Report über
+## Session, Capabilities, Overlay- und Click-through-Status. Kein-op,
+## solange `SMOLIT_WINDOW_REPORT=1` nicht gesetzt ist. Ausschließlich für
+## Verifikation auf realen Sessions gedacht (siehe
+## `docs/linux_overlay_verification_matrix.md`) — keine neue Nutzer-
+## funktion, keine IPC-/EventBus-Anbindung, kein Presence-Eingriff.
+static func print_runtime_report_if_enabled(
+	overlay_result: Dictionary, click_through_result: Dictionary
+) -> void:
+	_RuntimeReportRef.print_if_requested(overlay_result, click_through_result)

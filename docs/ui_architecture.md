@@ -565,6 +565,19 @@ finale Interaktionsmodell (siehe §F.3). Presence-, Avatar- und
 EventBus-State bleiben unberührt. Vollständige Einordnung siehe
 [`docs/linux_window_overlay_architecture.md` §F.3](./linux_window_overlay_architecture.md).
 
+Für die **reale Verifikation** auf einer echten Wayland-/X11-Session
+gibt es einen kleinen opt-in Diagnosebaustein im gleichen
+`window_behavior/`-Verzeichnis:
+
+- `overlay_runtime_report.gd` (neu) — rein diagnostisch. Druckt am
+  Ende von `_ready()` *einen* konsolidierten Konsolenblock mit
+  Session/Desktop, Capabilities und dem Zustand von Overlay + Click-
+  through (inkl. Bounds- und Zonenliste). Kein-op ohne
+  `SMOLIT_WINDOW_REPORT=1`, keine Scene-Logik, keine neuen Signale.
+
+Einordnung und Testfälle:
+[`docs/linux_overlay_verification_matrix.md`](./linux_overlay_verification_matrix.md).
+
 ---
 
 ## 10. Designprinzipien

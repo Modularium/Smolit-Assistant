@@ -324,9 +324,16 @@ dokumentierter Fallback.
       [docs/linux_window_overlay_architecture.md §F.1](./docs/linux_window_overlay_architecture.md)
       und
       [docs/ui_architecture.md §9.1](./docs/ui_architecture.md).
-- [ ] Forschungsspikes zu Wayland-Constraints unter GNOME 46/47
+- [~] Forschungsspikes zu Wayland-Constraints unter GNOME 46/47
       (Transparenz, Input-Region, HiDPI, Fractional Scaling,
-      Nvidia/XWayland-Edge-Cases).
+      Nvidia/XWayland-Edge-Cases). Grundlage ist jetzt der
+      **Verifikationsspike**: opt-in Runtime-Report
+      (`SMOLIT_WINDOW_REPORT=1`) +
+      [docs/linux_overlay_verification_matrix.md](./docs/linux_overlay_verification_matrix.md)
+      + [scripts/run_overlay_verification.sh](./scripts/run_overlay_verification.sh).
+      Die tatsächlichen Messläufe auf realen Wayland-/X11-Sessions
+      stehen weiterhin offen und sind nicht von diesem Harness
+      geleistet — er liefert nur die reproduzierbare Grundlage dafür.
 - [ ] Entscheidungsspike „always-on-top unter GNOME": Extension vs.
       Verzicht vs. compositor-spezifischer Pfad.
 - [ ] Entscheidungsspike „Godot-Fenster-Flags vs. GDExtension vs.

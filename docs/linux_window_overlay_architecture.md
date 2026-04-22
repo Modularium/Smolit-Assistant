@@ -695,6 +695,67 @@ Die folgenden Fragen sind explizit **Forschung**, nicht Entscheidung:
 Jeder dieser Punkte ist eine **Forschungsaufgabe**, keine
 Produktzusage.
 
+### G.1. Aktuelle Messlinie (Verifikationsspike)
+
+Der nächste konkrete Schritt in dieser Linie ist *kein* Feature,
+sondern **reale Messung**. Grundlage ist die Verifikationsmatrix in
+[`linux_overlay_verification_matrix.md`](./linux_overlay_verification_matrix.md),
+angereichert durch den opt-in Diagnostic-Report
+(`SMOLIT_WINDOW_REPORT=1`, siehe §F.2 / §F.3 und
+`ui/scripts/window_behavior/overlay_runtime_report.gd`).
+
+**Geprüfte Hypothesen / Messziele** — jeweils explizit *Fragen*, nicht
+gesetzte Aussagen:
+
+- **Passthrough-Polygon unter Mutter/GNOME-Wayland.** Respektiert
+  Mutter das von Godot gesetzte `window_set_mouse_passthrough`-Polygon
+  zuverlässig? Fallen Klicks auf leere Bereiche *außerhalb* der
+  Bounding-Box tatsächlich an das darunterliegende Fenster durch,
+  auch über App-Grenzen hinweg? Gibt es Unterschiede zwischen nativem
+  Wayland-Client und XWayland?
+- **Stabilität bei Layout-Wechsel.** Wenn ein Action-/Approval-Banner
+  auftaucht oder das DockPanel sichtbar wird, greift unser signal-
+  getriebener Refresh schnell genug, dass keine tot klickbaren Flächen
+  hängen bleiben? Wie verhält sich die Bounding-Union im realen
+  Docked→Expanded-Wechsel?
+- **Transparenz unter realen Treibern.** Liefert
+  `WINDOW_FLAG_TRANSPARENT` + `Viewport.transparent_bg` unter den
+  verbreiteten Intel-/AMD-/Nvidia-Treiberpfaden visuell stabile
+  Alphabuffer? Gibt es Compositor-/Treiber-Kombinationen, bei denen
+  der Alphakanal aussetzt oder flackert?
+- **Fractional Scaling.** Wie verhalten sich die geclampten
+  Viewport-Koordinaten des Click-through-Controllers bei GNOME-
+  Skalierung 125 %/150 %? Entstehen Off-by-<1px-Lücken am Rand der
+  Bounding-Box? Schneidet der Viewport-Clamp in Subpixel-Fällen zu
+  viel ab?
+- **Grenze der Single-Polygon-Union.** Ab wann stört Nutzer der
+  Umstand, dass Leerraum *innerhalb* der Bounding-Box klickbar bleibt?
+  Das ist der primäre Trigger für einen späteren Multi-Polygon-
+  Schritt — wir wollen Nutzung beobachten, bevor wir die Komplexität
+  eingehen.
+- **Probe vs. Overlay-Kohärenz.** Deckt sich die Probe-Aussage (setzt
+  Flag, liest zurück) unter realer Session mit dem, was der Overlay-
+  Controller später macht? Wenn nicht: wo liegt der Unterschied, und
+  ist das ein Compositor- oder ein Godot-Effekt?
+
+**Was architekturrelevant wäre**, je nach Messbefund:
+
+- Starke Compositor-Abhängigkeit → Bestätigung, dass eine
+  Capability-gesteuerte Matrix (§D) der richtige Rahmen ist.
+- Systematische Transparenz-Ausfälle unter bestimmten Treibern →
+  Opt-out-Schalter oder Fallback-Viewport-Background in §F.2
+  nachziehen.
+- Mutter-Edge-Cases bei Passthrough-Polygon → klarer Indikator für
+  Multi-Polygon-Folgearbeit (§F.3) und ggf. GDExtension-Diskussion
+  (§G).
+- Fractional-Scaling-Lücken → Hinweis auf robustere Koordinaten-
+  Transformation (Viewport-relativ ↔ Host-Window-Pixel).
+
+**Nicht-Ziele der Messlinie.** Keine Entscheidung über GDExtension
+vs. Host-Prozess, keine Festlegung auf einen Compositor-spezifischen
+Pfad (§C/§E), kein Always-on-top-Versuch. Die Messlinie liefert
+*Daten*, keine Architekturfestlegung.
+
 ---
 
 ## H. Konsequenzen für Smolit

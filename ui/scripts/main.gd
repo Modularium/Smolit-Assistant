@@ -170,6 +170,14 @@ func _ready() -> void:
 	if controller_variant is RefCounted:
 		_click_through_controller = controller_variant
 
+	# Opt-in diagnostic runtime report (SMOLIT_WINDOW_REPORT=1). Prints
+	# a consolidated block on session/capability/overlay/click-through
+	# status — diagnostic-only, no behaviour change. See
+	# `docs/linux_overlay_verification_matrix.md` for usage.
+	_WindowBehaviorRef.print_runtime_report_if_enabled(
+		overlay_result, click_through_result
+	)
+
 
 func _set_connected(ok: bool) -> void:
 	_status.text = "connected" if ok else "disconnected"
