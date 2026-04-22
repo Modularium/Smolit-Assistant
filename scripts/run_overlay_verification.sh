@@ -24,8 +24,15 @@
 # Flags (vor dem Case-Argument):
 #   --headless    — Godot headless starten (godot --headless --path ui/)
 #   --report      — zusätzlich SMOLIT_WINDOW_REPORT=1 setzen
+#   --scene       — Main-Szene als Standalone-Runtime starten statt
+#                   Editor. Nötig für reale X11-AOT-Verifikation:
+#                   die aot-x11-Fälle brauchen ein echtes Game-Fenster
+#                   mit X11-Driver, kein Editor-Fenster.
 #
-# Beispiel:
+# Beispiel (real-host Messung für docs/x11_always_on_top_verification.md):
+#   scripts/run_overlay_verification.sh --scene --report aot-x11
+#
+# Beispiel (headless smoke, jeder Case):
 #   scripts/run_overlay_verification.sh --headless --report click-through
 
 set -euo pipefail
@@ -36,6 +43,7 @@ UI_DIR="${REPO_ROOT}/ui"
 
 HEADLESS=0
 EXTRA_REPORT=0
+SCENE_RUN=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -47,8 +55,12 @@ while [[ $# -gt 0 ]]; do
       EXTRA_REPORT=1
       shift
       ;;
+    --scene)
+      SCENE_RUN=1
+      shift
+      ;;
     -h|--help)
-      sed -n '2,30p' "$0"
+      sed -n '2,40p' "$0"
       exit 0
       ;;
     *)
@@ -56,6 +68,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "${HEADLESS}" -eq 1 && "${SCENE_RUN}" -eq 1 ]]; then
+  echo "--scene and --headless together are nonsensical: scene-run requires a real X11 window" >&2
+  exit 64
+fi
 
 if [[ $# -lt 1 ]]; then
   echo "usage: $(basename "$0") [--headless] [--report] <case>" >&2
@@ -125,6 +142,11 @@ fi
 
 if [[ "${HEADLESS}" -eq 1 ]]; then
   exec godot --headless --path "${UI_DIR}" "$@"
+elif [[ "${SCENE_RUN}" -eq 1 ]]; then
+  # Main scene als Standalone-Runtime — kein Editor, damit ein bereits
+  # geöffneter Editor nicht kollidiert und der echte X11-Driver wirksam
+  # ist. Pfad ist die im Projekt als main konfigurierte Scene.
+  exec godot --path "${UI_DIR}" scenes/main.tscn "$@"
 else
   exec godot --path "${UI_DIR}" "$@"
 fi

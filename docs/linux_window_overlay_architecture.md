@@ -775,9 +775,14 @@ Kurzfassung:
 - **GNOME-Shell-Extension.** Ausdrücklich zurückgestellt (Pflege-
   aufwand, Versionsbindung, Sicherheitsmodell). Nur bei klarer,
   messbarer Nachfrage und eigenem Projektrahmen wieder auf dem Tisch.
-- **X11-Sonderpfad — jetzt umgesetzt (§F.4).** Kleiner opt-in MVP
-  über `WINDOW_FLAG_ALWAYS_ON_TOP`, capability- und session-gated,
-  ausdrücklich kein Standard-MVP und **kein Wayland/GNOME-Promise**.
+- **X11-Sonderpfad — umgesetzt (§F.4) und erstmals gemessen.** Kleiner
+  opt-in MVP über `WINDOW_FLAG_ALWAYS_ON_TOP`, capability- und
+  session-gated; erste reproduzierbare Messung auf GNOME/X11 (siehe
+  [`x11_always_on_top_verification.md`](./x11_always_on_top_verification.md)
+  §F.1) bestätigt, dass `_NET_WM_STATE_ABOVE` auf dem Fenster
+  gesetzt wird. UX-Ebene ist WM-abhängig und pro Session manuell zu
+  prüfen. Ausdrücklich kein Standard-MVP und **kein Wayland/GNOME-
+  Promise**.
 - **wlroots/layer-shell.** Dokumentierte Option, kein aktuelles Ziel.
 - **Diagnostische Probe.** Der bestehende opt-in
   `SMOLIT_WINDOW_PROBE=1`-Pfad enthält einen kurzen, reversiblen

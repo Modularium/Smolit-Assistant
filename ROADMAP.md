@@ -360,13 +360,21 @@ dokumentierter Fallback.
       und loggt, dass sichtbares Stacking-Verhalten WM-abhängig
       bleibt — ausdrücklich kein Standard-MVP und kein universelles
       Linux-AOT-Feature. Reproduzierbarer Harness-Case `aot-x11` in
-      [scripts/run_overlay_verification.sh](./scripts/run_overlay_verification.sh).
-      Details:
+      [scripts/run_overlay_verification.sh](./scripts/run_overlay_verification.sh)
+      (neu: `--scene`-Flag startet die Main-Scene als Standalone-
+      Runtime für echte X11-Messungen). Details:
       [docs/linux_window_overlay_architecture.md §F.4](./docs/linux_window_overlay_architecture.md)
       und
       [docs/linux_always_on_top_decision.md](./docs/linux_always_on_top_decision.md).
-      Offen: reale WM-Messungen (fluxbox/openbox/KDE-X11/Xfce), Feintuning
-      (z. B. `_NET_WM_WINDOW_TYPE_DOCK`) nur bei klarer Nachfrage.
+      Erste reale Messung (GNOME/X11, `_NET_WM_STATE_ABOVE` auf dem
+      Fenster gesetzt) protokolliert in
+      [docs/x11_always_on_top_verification.md §F.1](./docs/x11_always_on_top_verification.md)
+      plus Rohartefakt
+      [docs/x11_always_on_top_results.md](./docs/x11_always_on_top_results.md).
+      Offen: Messungen auf KDE/KWin (X11), Xfwm4, Openbox, Fluxbox,
+      XWayland-Sonderfall; UX-Ebene (Alt-Tab, Workspace, Fullscreen-
+      Konflikt) manuell; Feintuning (z. B. `_NET_WM_WINDOW_TYPE_DOCK`)
+      nur bei klarer Nachfrage.
 - [ ] Entscheidungsspike „Godot-Fenster-Flags vs. GDExtension vs.
       Host-Prozess mit eingebettetem Godot".
 - [ ] Window-Behavior-Abstraktion als eigene Schicht

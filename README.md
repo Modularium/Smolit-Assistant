@@ -489,12 +489,23 @@ ein sichtbares AOT-Verhalten wünschen, verwenden die GNOME-eigene
 
 Für reproduzierbare Verifikationsläufe bringt
 [scripts/run_overlay_verification.sh](scripts/run_overlay_verification.sh)
-jetzt zusätzlich einen `aot-x11`-Case (setzt
-`SMOLIT_UI_ALWAYS_ON_TOP=1` + `SMOLIT_WINDOW_REPORT=1`), der das
-Ergebnis im konsolidierten Runtime-Report ausgibt.
+einen `aot-x11`-Case (setzt `SMOLIT_UI_ALWAYS_ON_TOP=1` +
+`SMOLIT_WINDOW_REPORT=1`). Für **reale** X11-Messungen (echtes
+Fenster, kein headless) kann der Wrapper mit `--scene` die Main-
+Scene als Standalone-Runtime starten:
 
-Vollständige Begründung und Kriterien:
+```bash
+scripts/run_overlay_verification.sh --scene --report aot-x11
+```
+
+Begründung und Kriterien:
 [docs/linux_always_on_top_decision.md](docs/linux_always_on_top_decision.md).
+Messmatrix, Testfälle und reale Ergebnisse:
+[docs/x11_always_on_top_verification.md](docs/x11_always_on_top_verification.md)
+(§F.1 enthält die GNOME/X11-Messung vom Entwicklungshost —
+`_NET_WM_STATE_ABOVE` ist auf der Fenster-Properties-Ebene
+nachweislich gesetzt; UX-Ebene bleibt WM-spezifisch manuell zu
+prüfen).
 
 ### Overlay-Verifikation (nächster Schritt: reale Messung)
 

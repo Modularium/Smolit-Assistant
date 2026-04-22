@@ -321,7 +321,11 @@ opt-in X11-AOT-Sonderpfad existiert jetzt als kleiner MVP
 — keine universelle Linux-AOT-Zusage, kein Standard-MVP. Sichtbares
 Stacking-Verhalten hängt weiterhin vom jeweiligen X11-Window-
 Manager ab; Smolit dokumentiert das im Log und verkauft es nicht als
-Feature-Garantie.
+Feature-Garantie. Erste reproduzierbare Messung
+(GNOME/X11 auf dem Entwicklungshost, 2026-04-22) bestätigt, dass
+`_NET_WM_STATE_ABOVE` auf dem Godot-Fenster gesetzt wird; die
+UX-Ebene bleibt WM-abhängig und ist pro Session manuell zu prüfen —
+siehe [`x11_always_on_top_verification.md`](./x11_always_on_top_verification.md).
 
 Auf einer wlroots-Session (Sway/Hyprland/river) gelten dieselben
 produktiven Versprechen. layer-shell-Pfad ist dokumentierte Option,
