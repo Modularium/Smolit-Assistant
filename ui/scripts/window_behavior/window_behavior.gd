@@ -20,6 +20,7 @@ const _ProbeRef := preload("res://scripts/window_behavior/window_probe.gd")
 const _OverlayRef := preload("res://scripts/window_behavior/overlay_controller.gd")
 const _ClickThroughRef := preload("res://scripts/window_behavior/overlay_click_through_controller.gd")
 const _RuntimeReportRef := preload("res://scripts/window_behavior/overlay_runtime_report.gd")
+const _AlwaysOnTopRef := preload("res://scripts/window_behavior/overlay_always_on_top_controller.gd")
 
 
 ## Cheap — nur Detection. Sicher, auch aus `_ready()` aufzurufen.
@@ -72,13 +73,28 @@ static func activate_click_through_if_requested(
 	return _ClickThroughRef.activate_if_requested(anchor, overlay_result)
 
 
+## Opt-in X11-only Always-on-top-Sonderpfad. Aktiviert
+## `WINDOW_FLAG_ALWAYS_ON_TOP` nur, wenn
+## `SMOLIT_UI_ALWAYS_ON_TOP=1` gesetzt ist *und* die aktuelle Session
+## wirklich X11 ist (nicht Wayland, nicht headless, nicht unknown).
+## GNOME/Wayland bleibt ausdrücklich **ohne** AOT-Versprechen (siehe
+## `docs/linux_always_on_top_decision.md`). Unabhängig vom Overlay-
+## und vom Click-through-Pfad.
+static func activate_always_on_top_if_requested(anchor: Node) -> Dictionary:
+	return _AlwaysOnTopRef.activate_if_requested(anchor)
+
+
 ## Opt-in Diagnostik-Konsolidierung. Rein lesender Runtime-Report über
-## Session, Capabilities, Overlay- und Click-through-Status. Kein-op,
-## solange `SMOLIT_WINDOW_REPORT=1` nicht gesetzt ist. Ausschließlich für
-## Verifikation auf realen Sessions gedacht (siehe
+## Session, Capabilities, Overlay-, Click-through- und Always-on-top-
+## Status. Kein-op, solange `SMOLIT_WINDOW_REPORT=1` nicht gesetzt ist.
+## Ausschließlich für Verifikation auf realen Sessions gedacht (siehe
 ## `docs/linux_overlay_verification_matrix.md`) — keine neue Nutzer-
 ## funktion, keine IPC-/EventBus-Anbindung, kein Presence-Eingriff.
 static func print_runtime_report_if_enabled(
-	overlay_result: Dictionary, click_through_result: Dictionary
+	overlay_result: Dictionary,
+	click_through_result: Dictionary,
+	always_on_top_result: Dictionary = {},
 ) -> void:
-	_RuntimeReportRef.print_if_requested(overlay_result, click_through_result)
+	_RuntimeReportRef.print_if_requested(
+		overlay_result, click_through_result, always_on_top_result
+	)

@@ -763,8 +763,8 @@ Pfad (§C/§E), kein Always-on-top-Versuch. Die Messlinie liefert
 
 ### G.2. Entscheidungssnapshot — Always-on-top
 
-Der §G-Forschungspunkt „Always-on-top unter GNOME" ist inzwischen in
-ein eigenes Entscheidungsdokument überführt:
+Der §G-Forschungspunkt „Always-on-top unter GNOME" ist in ein eigenes
+Entscheidungsdokument überführt:
 [`linux_always_on_top_decision.md`](./linux_always_on_top_decision.md).
 
 Kurzfassung:
@@ -775,19 +775,82 @@ Kurzfassung:
 - **GNOME-Shell-Extension.** Ausdrücklich zurückgestellt (Pflege-
   aufwand, Versionsbindung, Sicherheitsmodell). Nur bei klarer,
   messbarer Nachfrage und eigenem Projektrahmen wieder auf dem Tisch.
-- **X11-Seitenpfad.** Dokumentierte Option für eine spätere,
-  opt-in Aktivierung (`_NET_WM_STATE_ABOVE` via
-  `WINDOW_FLAG_ALWAYS_ON_TOP`), capability-gesteuert, ausdrücklich
-  kein Standard-MVP.
+- **X11-Sonderpfad — jetzt umgesetzt (§F.4).** Kleiner opt-in MVP
+  über `WINDOW_FLAG_ALWAYS_ON_TOP`, capability- und session-gated,
+  ausdrücklich kein Standard-MVP und **kein Wayland/GNOME-Promise**.
 - **wlroots/layer-shell.** Dokumentierte Option, kein aktuelles Ziel.
 - **Diagnostische Probe.** Der bestehende opt-in
-  `SMOLIT_WINDOW_PROBE=1`-Pfad enthält jetzt einen kurzen,
-  reversiblen AOT-Flag-Versuch. Er liefert empirisches Material
-  („flag accepted by API — not a user-visible guarantee under
-  Mutter") und ändert den produktiven Lauf nicht.
+  `SMOLIT_WINDOW_PROBE=1`-Pfad enthält einen kurzen, reversiblen
+  AOT-Flag-Versuch. Er liefert empirisches Material („flag accepted
+  by API — not a user-visible guarantee under Mutter") und ändert
+  den produktiven Lauf nicht.
 
 Produktseitige Kurzaussage: siehe §F in
 [`linux_always_on_top_decision.md`](./linux_always_on_top_decision.md).
+
+### F.4. X11-only Always-on-top Sonderpfad (Ist, opt-in)
+
+Kleiner, bewusst eng geschnittener Produktivpfad in
+`ui/scripts/window_behavior/`:
+
+```text
+ui/scripts/window_behavior/
+└── overlay_always_on_top_controller.gd  # opt-in AOT-Sonderpfad,
+                                         # X11-only, capability-gated
+```
+
+Aktiviert **nur**, wenn alle Gates erfüllt sind:
+
+1. `SMOLIT_UI_ALWAYS_ON_TOP=1` ist gesetzt (eigenes, separates Opt-in
+   — nicht Nebeneffekt des Overlay- oder Click-through-Pfads).
+2. `session_type == "x11"`. Wayland, XWayland-Grauzone und `unknown`
+   fallen explizit raus.
+3. `display_driver != "headless"`. Headless liefert kein
+   aussagekräftiges Stacking-Verhalten.
+4. Godot kennt `WINDOW_FLAG_ALWAYS_ON_TOP`.
+5. Capability-Status für `always_on_top` ist `available`.
+
+Im Erfolgspfad setzt der Controller das Flag einmalig, liest den
+Godot-seitigen Zustand zurück und loggt:
+
+```text
+[always-on-top] requested=true session=x11 driver=x11 candidate=true applied=true observed=true active=true
+[always-on-top] capability=available (…)
+[always-on-top] reason: X11 WMs typically honour _NET_WM_STATE_ABOVE — behaviour still depends on the specific WM, not a universal guarantee
+[always-on-top] note: X11-only special path; Wayland/GNOME intentionally not targeted here (see docs/linux_always_on_top_decision.md)
+```
+
+Fallback-Semantik (alle ergeben `active=false` mit konkreter
+`reason`-Zeile):
+
+- **`SMOLIT_UI_ALWAYS_ON_TOP` nicht gesetzt.** No-op, reason
+  „always-on-top not requested".
+- **Session ist `wayland` / `unknown` / nicht `x11`.** No-op, reason
+  „always-on-top special path is X11-only; …".
+- **`display_driver == "headless"`.** No-op, reason „headless does
+  not reflect real WM stacking".
+- **Capability-Status nicht `available`.** No-op, reason „capability
+  not available on this session".
+- **`WINDOW_FLAG_ALWAYS_ON_TOP` dem Godot-Build unbekannt.** No-op,
+  reason „flag not known to this Godot build".
+- **Flag gesetzt, Rücklesewert `false`.** `applied=true observed=false`,
+  reason „flag write did not stick".
+
+Was der Pfad bewusst **nicht** tut:
+
+- **Kein produktiver Pfad unter Wayland/GNOME.** Die Entscheidung in
+  [`linux_always_on_top_decision.md`](./linux_always_on_top_decision.md)
+  wird hier nicht umgangen.
+- **Keine GNOME-Shell-Extension, kein layer-shell, keine GDExtension.**
+- **Kein Nebeneffekt von Overlay / Click-through.** Jede Linie hat ihr
+  eigenes Opt-in.
+- **Keine neue IPC-Nachricht, kein EventBus-Kanal, keine neue
+  Presence-Wahrheit.** AOT lebt ausschließlich im Hostfenster.
+- **Keine Revert-Logik beim Beenden.** Godot räumt beim Window-Close
+  selbst auf.
+- **Keine Feature-Zusage „Always-on-top unter Linux".** Was geht und
+  was nicht, steht pro WM/Compositor — der Log-`note`-Block benennt
+  das ausdrücklich.
 
 ---
 

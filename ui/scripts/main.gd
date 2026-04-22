@@ -170,12 +170,19 @@ func _ready() -> void:
 	if controller_variant is RefCounted:
 		_click_through_controller = controller_variant
 
+	# X11-only Always-on-top Sonderpfad (SMOLIT_UI_ALWAYS_ON_TOP=1).
+	# Unabhängig von Overlay und Click-through. Unter GNOME/Wayland,
+	# unknown Session oder headless ein ehrlicher No-op — siehe
+	# `docs/linux_always_on_top_decision.md`.
+	var always_on_top_result: Dictionary = \
+		_WindowBehaviorRef.activate_always_on_top_if_requested(self)
+
 	# Opt-in diagnostic runtime report (SMOLIT_WINDOW_REPORT=1). Prints
-	# a consolidated block on session/capability/overlay/click-through
-	# status — diagnostic-only, no behaviour change. See
+	# a consolidated block on session/capability/overlay/click-through/
+	# always-on-top status — diagnostic-only, no behaviour change. See
 	# `docs/linux_overlay_verification_matrix.md` for usage.
 	_WindowBehaviorRef.print_runtime_report_if_enabled(
-		overlay_result, click_through_result
+		overlay_result, click_through_result, always_on_top_result
 	)
 
 

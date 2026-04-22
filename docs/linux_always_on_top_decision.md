@@ -209,13 +209,18 @@ Präsenz wird durch den existierenden Overlay-MVP (Transparenz +
 Borderless) plus optionales Click-through gebildet — das ist der
 heutige produktive Presence-Weg, mehr versprechen wir nicht.
 
-**Sekundärer, optionaler Seitenpfad: Option 3 für X11.** Wenn sich in
-Nutzung zeigt, dass X11-Sessions ein echter, häufiger Fall sind und
-dort ein optionales AOT für Docked-Presence merklich hilft, kann ein
-schmaler X11-only Seitenpfad nachgezogen werden: capability-gesteuert,
-opt-in, dokumentierter Sonderfall — **nicht** Teil des Standard-
-MVPs. Aufwand klein, Risiko klein, passt zur bestehenden Backend-
-Matrix.
+**Sekundärer, optionaler Seitenpfad: Option 3 für X11 — inzwischen als
+kleiner opt-in MVP umgesetzt.** Ein schmaler X11-only Sonderpfad
+(`SMOLIT_UI_ALWAYS_ON_TOP=1`, implementiert in
+`ui/scripts/window_behavior/overlay_always_on_top_controller.gd`,
+beschrieben in
+[`linux_window_overlay_architecture.md` §F.4](./linux_window_overlay_architecture.md))
+setzt unter echtem X11 das `WINDOW_FLAG_ALWAYS_ON_TOP`. Er ist
+capability-gesteuert, session-geated (`session_type == "x11"`),
+respektiert headless und `unsupported`-Capabilities, protokolliert
+ehrlich — und bleibt ausdrücklich **kein** Standard-MVP und **kein**
+Wayland/GNOME-Promise. Unter der Ziel-Session (Ubuntu 24.04 / GNOME/
+Wayland) ist der Pfad im Code ein ehrlicher No-op.
 
 **Ausdrücklich zurückgestellt: Option 2 — GNOME-Shell-Extension.**
 Das wäre ein eigenes Parallelprojekt mit Kostenstruktur, die nicht
@@ -248,15 +253,26 @@ solange niemand das explizit einführt.
 - **Overlay-/Click-through-Controller.** Keine Änderung. Sie setzen
   kein AOT-Flag und dokumentieren explizit, dass sie es nicht tun.
 
-### E.2 Was kurzfristig gemacht wird
+### E.2 Was inzwischen umgesetzt ist
 
 - Dieses Entscheidungsdokument.
-- Kleine diagnostische Ergänzung im bestehenden `window_probe.gd`:
-  das AOT-Flag wird im Probe-Pfad **einmalig** gesetzt, zurückgelesen
-  und per Default wieder revertiert. Log macht ausdrücklich klar:
-  *„Flag accepted by API — this is not a user-visible guarantee under
-  Mutter."* Kein produktiver Pfad. Opt-in.
-- Updates an Roadmap, README, und der Linux-Overlay-Doku.
+- Diagnostische Ergänzung in `window_probe.gd`: reversibler AOT-Flag-
+  Versuch im bestehenden `SMOLIT_WINDOW_PROBE=1`-Pfad. Log macht
+  ausdrücklich klar: *„Flag accepted by API — this is not a user-
+  visible guarantee under Mutter."* Kein produktiver Pfad.
+- **X11-Sonderpfad als opt-in MVP gelandet** — eigenes Opt-in
+  `SMOLIT_UI_ALWAYS_ON_TOP=1`, eigener Controller
+  `overlay_always_on_top_controller.gd`, strikt gated auf
+  `session_type == "x11"`, `display_driver != "headless"` und
+  Capability `available`. Unter GNOME/Wayland No-op, siehe
+  [§F.4](./linux_window_overlay_architecture.md).
+- `scripts/run_overlay_verification.sh` hat einen `aot-x11`-Case,
+  damit der Pfad reproduzierbar gegen die Verifikationsmatrix läuft.
+- Runtime-Report (`SMOLIT_WINDOW_REPORT=1`) enthält einen
+  `always_on_top`-Abschnitt mit `requested / session / driver /
+  capability / candidate / applied / observed / active / scope /
+  reason`.
+- Roadmap, README und Linux-Overlay-Doku konsistent nachgezogen.
 
 ### E.3 Was explizit nicht gemacht wird
 
@@ -270,9 +286,10 @@ solange niemand das explizit einführt.
 
 ### E.4 Was nur bei klarer Nachfrage später wieder auf den Tisch kommt
 
-- **X11-AOT-Sonderpfad.** Wenn reale X11-Nutzung spürbar wird und AOT
-  dort merklich hilft: capability-gesteuerter opt-in Modus,
-  dokumentierter Sonderpfad, bleibt Sonderpfad.
+- **Ausbau des X11-AOT-Sonderpfads.** Der aktuelle MVP setzt das Flag
+  und loggt ehrlich. Feinere Behandlung (spezifische WM-Policies,
+  `_NET_WM_WINDOW_TYPE_DOCK`-Varianten, koordinierter Focus-Handoff)
+  bleibt Folgearbeit, nur bei realer Nachfrage.
 - **wlroots layer-shell-Pfad.** Nur wenn wlroots-Sessions ein
   relevantes Nutzersegment werden und eine eigene Phase rechtfertigen.
 - **GNOME-Extension (Option 2).** Nur wenn (1) eindeutige Nachfrage
@@ -299,8 +316,12 @@ Unter Ubuntu 24.04 / GNOME/Wayland verspricht Smolit heute:
   Rechteausweitung.
 
 Auf einer X11-Session gelten dieselben produktiven Versprechen. Ein
-späterer, opt-in X11-AOT-Sonderpfad ist dokumentierte Option, kein
-Standard.
+opt-in X11-AOT-Sonderpfad existiert jetzt als kleiner MVP
+(`SMOLIT_UI_ALWAYS_ON_TOP=1`) und bleibt ausdrücklich **Sonderpfad**
+— keine universelle Linux-AOT-Zusage, kein Standard-MVP. Sichtbares
+Stacking-Verhalten hängt weiterhin vom jeweiligen X11-Window-
+Manager ab; Smolit dokumentiert das im Log und verkauft es nicht als
+Feature-Garantie.
 
 Auf einer wlroots-Session (Sway/Hyprland/river) gelten dieselben
 produktiven Versprechen. layer-shell-Pfad ist dokumentierte Option,

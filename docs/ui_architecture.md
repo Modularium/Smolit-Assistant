@@ -571,9 +571,22 @@ gibt es einen kleinen opt-in Diagnosebaustein im gleichen
 
 - `overlay_runtime_report.gd` (neu) — rein diagnostisch. Druckt am
   Ende von `_ready()` *einen* konsolidierten Konsolenblock mit
-  Session/Desktop, Capabilities und dem Zustand von Overlay + Click-
-  through (inkl. Bounds- und Zonenliste). Kein-op ohne
-  `SMOLIT_WINDOW_REPORT=1`, keine Scene-Logik, keine neuen Signale.
+  Session/Desktop, Capabilities und dem Zustand von Overlay, Click-
+  through **und** Always-on-top (jeweils inkl. Bounds- und Zonenliste
+  bzw. X11-Session-Gate). Kein-op ohne `SMOLIT_WINDOW_REPORT=1`,
+  keine Scene-Logik, keine neuen Signale.
+
+Zusätzlich existiert ein **X11-only Always-on-top Sonderpfad** —
+eigenes Opt-in, unabhängig von Overlay und Click-through:
+
+- `overlay_always_on_top_controller.gd` (neu) — aktiv nur, wenn
+  `SMOLIT_UI_ALWAYS_ON_TOP=1` gesetzt ist *und* die Session wirklich
+  X11 ist (nicht headless, nicht Wayland, nicht unknown). Unter
+  GNOME/Wayland bleibt der Pfad ausdrücklich ein No-op mit klarem
+  Log-Grund. Keine neue Presence-Wahrheit, keine IPC-/EventBus-
+  Erweiterung, kein Nebeneffekt des Overlay- oder Click-through-
+  Pfads. Entscheidungsgrundlage:
+  [`docs/linux_always_on_top_decision.md`](./linux_always_on_top_decision.md).
 
 Einordnung und Testfälle:
 [`docs/linux_overlay_verification_matrix.md`](./linux_overlay_verification_matrix.md).

@@ -47,17 +47,21 @@ static func is_requested() -> bool:
 ## sind die Rückgabedicts der beiden Fassadenpunkte; beide können leer
 ## oder „nicht angefordert" sein — der Report geht damit sauber um.
 static func print_if_requested(
-	overlay_result: Dictionary, click_through_result: Dictionary
+	overlay_result: Dictionary,
+	click_through_result: Dictionary,
+	always_on_top_result: Dictionary = {},
 ) -> void:
 	if not is_requested():
 		return
-	print_now(overlay_result, click_through_result)
+	print_now(overlay_result, click_through_result, always_on_top_result)
 
 
 ## Für manuelle Debugsitzungen: Report auch ohne Env-Flag ausgeben.
 ## Nicht als Default-Pfad gedacht.
 static func print_now(
-	overlay_result: Dictionary, click_through_result: Dictionary
+	overlay_result: Dictionary,
+	click_through_result: Dictionary,
+	always_on_top_result: Dictionary = {},
 ) -> void:
 	var caps: Dictionary = overlay_result.get("capabilities", _CapabilitiesRef.detect())
 	var lines := PackedStringArray()
@@ -66,6 +70,7 @@ static func print_now(
 	_append_capability_lines(lines, caps)
 	_append_overlay_lines(lines, overlay_result)
 	_append_click_through_lines(lines, click_through_result)
+	_append_always_on_top_lines(lines, always_on_top_result)
 	lines.append("──────────────────────────────────────────────────────────")
 	print("\n".join(lines))
 
@@ -181,3 +186,31 @@ static func _append_click_through_lines(lines: PackedStringArray, result: Dictio
 	var reason := str(result.get("reason", ""))
 	if reason != "":
 		lines.append("[report] click_through.reason           = %s" % reason)
+
+
+# --- Section: always-on-top (X11-only special path) --------------------
+
+
+static func _append_always_on_top_lines(
+	lines: PackedStringArray, result: Dictionary
+) -> void:
+	if result.is_empty():
+		lines.append("[report] always_on_top       = (no result — not invoked?)")
+		return
+	lines.append("[report] always_on_top.requested         = %s" % bool(result.get("requested", false)))
+	lines.append("[report] always_on_top.session_type      = %s" % str(result.get("session_type", "")))
+	lines.append("[report] always_on_top.display_driver    = %s" % str(result.get("display_driver", "")))
+	var cap_status: String = str(result.get("capability_status", ""))
+	if cap_status != "":
+		lines.append("[report] always_on_top.capability        = %s (%s)" % [
+			cap_status,
+			str(result.get("capability_reason", "")),
+		])
+	lines.append("[report] always_on_top.candidate         = %s" % bool(result.get("candidate", false)))
+	lines.append("[report] always_on_top.applied           = %s" % bool(result.get("applied", false)))
+	lines.append("[report] always_on_top.observed          = %s" % bool(result.get("observed", false)))
+	lines.append("[report] always_on_top.active            = %s" % bool(result.get("active", false)))
+	lines.append("[report] always_on_top.scope             = X11-only special path; GNOME/Wayland intentionally not targeted")
+	var reason := str(result.get("reason", ""))
+	if reason != "":
+		lines.append("[report] always_on_top.reason            = %s" % reason)

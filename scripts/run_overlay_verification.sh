@@ -16,7 +16,9 @@
 #   overlay       — SMOLIT_UI_OVERLAY=1
 #   click-through — SMOLIT_UI_OVERLAY=1 + SMOLIT_UI_CLICK_THROUGH=1
 #   probe         — SMOLIT_WINDOW_PROBE=1
-#   full          — Overlay + Click-through + Probe + Report
+#   aot-x11       — SMOLIT_UI_ALWAYS_ON_TOP=1 + SMOLIT_WINDOW_REPORT=1
+#                   (X11-only Sonderpfad — no-op auf Wayland/GNOME)
+#   full          — Overlay + Click-through + Probe + AOT + Report
 #   report        — nur SMOLIT_WINDOW_REPORT=1 (Report für Baseline)
 #
 # Flags (vor dem Case-Argument):
@@ -78,10 +80,17 @@ case "${CASE}" in
   probe)
     export SMOLIT_WINDOW_PROBE=1
     ;;
+  aot-x11)
+    # X11-only special path — opt-in Always-on-top. Bewusst mit Report,
+    # weil das der einzige Weg ist, das Ergebnis ehrlich einzuordnen.
+    export SMOLIT_UI_ALWAYS_ON_TOP=1
+    export SMOLIT_WINDOW_REPORT=1
+    ;;
   full)
     export SMOLIT_UI_OVERLAY=1
     export SMOLIT_UI_CLICK_THROUGH=1
     export SMOLIT_WINDOW_PROBE=1
+    export SMOLIT_UI_ALWAYS_ON_TOP=1
     export SMOLIT_WINDOW_REPORT=1
     ;;
   report)
@@ -102,6 +111,7 @@ echo "────────────────────────�
 echo "overlay verification run: case=${CASE} headless=${HEADLESS}"
 echo "env:"
 for v in SMOLIT_UI_OVERLAY SMOLIT_UI_CLICK_THROUGH \
+         SMOLIT_UI_ALWAYS_ON_TOP \
          SMOLIT_WINDOW_PROBE SMOLIT_WINDOW_PROBE_REVERT \
          SMOLIT_WINDOW_REPORT; do
   printf "  %-28s = %s\n" "$v" "${!v-(unset)}"

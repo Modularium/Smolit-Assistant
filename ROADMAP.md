@@ -349,12 +349,24 @@ dokumentierter Fallback.
       jetzt einen kurzen, reversiblen AOT-Flag-Versuch als ehrliche
       Diagnostik („flag accepted by API — not a user-visible
       guarantee under Mutter").
-- [ ] X11-Sonderpfad für optionales Always-on-top (nur bei klarer
-      Nachfrage) — capability-gesteuerter opt-in Modus über
-      `WINDOW_FLAG_ALWAYS_ON_TOP`, dokumentierter Sonderpfad, kein
-      Standard-MVP. Aufwand klein, Risiko klein; Entscheidung dafür
-      oder dagegen erst nach realen Messungen aus der
-      Verifikationsmatrix.
+- [~] X11-Sonderpfad für optionales Always-on-top — kleiner opt-in
+      MVP gelandet. Eigenes Env-Flag `SMOLIT_UI_ALWAYS_ON_TOP=1`,
+      eigener Controller
+      `ui/scripts/window_behavior/overlay_always_on_top_controller.gd`,
+      strikt X11-only: unter Wayland/GNOME, headless und unknown
+      Session ein ehrlicher No-op mit klarer Log-Begründung.
+      Unter echtem X11 setzt der Controller
+      `WINDOW_FLAG_ALWAYS_ON_TOP` (entspricht `_NET_WM_STATE_ABOVE`)
+      und loggt, dass sichtbares Stacking-Verhalten WM-abhängig
+      bleibt — ausdrücklich kein Standard-MVP und kein universelles
+      Linux-AOT-Feature. Reproduzierbarer Harness-Case `aot-x11` in
+      [scripts/run_overlay_verification.sh](./scripts/run_overlay_verification.sh).
+      Details:
+      [docs/linux_window_overlay_architecture.md §F.4](./docs/linux_window_overlay_architecture.md)
+      und
+      [docs/linux_always_on_top_decision.md](./docs/linux_always_on_top_decision.md).
+      Offen: reale WM-Messungen (fluxbox/openbox/KDE-X11/Xfce), Feintuning
+      (z. B. `_NET_WM_WINDOW_TYPE_DOCK`) nur bei klarer Nachfrage.
 - [ ] Entscheidungsspike „Godot-Fenster-Flags vs. GDExtension vs.
       Host-Prozess mit eingebettetem Godot".
 - [ ] Window-Behavior-Abstraktion als eigene Schicht

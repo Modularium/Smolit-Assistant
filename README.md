@@ -471,17 +471,27 @@ produktive Pfad, mehr behaupten wir nicht. Nutzer, die unter GNOME
 ein sichtbares AOT-Verhalten wünschen, verwenden die GNOME-eigene
 „Always on Top"-Option im Titelleistenmenü des Compositors.
 
+- **X11-Sonderpfad (opt-in) — jetzt als kleiner MVP vorhanden.**
+  `SMOLIT_UI_ALWAYS_ON_TOP=1` setzt unter echter X11-Session
+  `WINDOW_FLAG_ALWAYS_ON_TOP` (entspricht `_NET_WM_STATE_ABOVE`).
+  Der Pfad ist strikt X11-only: unter Wayland/GNOME, unter headless
+  oder bei unbekannter Session bleibt er ein ehrlicher No-op mit
+  klarem Log-Grund. Das ist ausdrücklich **kein** universelles
+  Linux-AOT-Feature und **kein** Wayland/GNOME-Versprechen.
 - **GNOME-Shell-Extension** ist als Pfad ausdrücklich zurückgestellt
   (Pflegeaufwand, Versionsbindung, Sicherheitsmodell).
-- **X11-Sonderpfad** (`WINDOW_FLAG_ALWAYS_ON_TOP` via
-  `_NET_WM_STATE_ABOVE`) ist dokumentierte spätere Option, kein
-  Standard-MVP.
 - **wlroots / layer-shell** ist dokumentierte Möglichkeit, kein
   aktuelles Ziel.
 - **Diagnose-Probe.** Der bestehende opt-in `SMOLIT_WINDOW_PROBE=1`
-  enthält jetzt einen kurzen, reversiblen AOT-Flag-Versuch mit
+  enthält einen kurzen, reversiblen AOT-Flag-Versuch mit
   ehrlichem Log — „flag accepted by API — not a user-visible
   guarantee under Mutter". Kein produktives Feature.
+
+Für reproduzierbare Verifikationsläufe bringt
+[scripts/run_overlay_verification.sh](scripts/run_overlay_verification.sh)
+jetzt zusätzlich einen `aot-x11`-Case (setzt
+`SMOLIT_UI_ALWAYS_ON_TOP=1` + `SMOLIT_WINDOW_REPORT=1`), der das
+Ergebnis im konsolidierten Runtime-Report ausgibt.
 
 Vollständige Begründung und Kriterien:
 [docs/linux_always_on_top_decision.md](docs/linux_always_on_top_decision.md).
