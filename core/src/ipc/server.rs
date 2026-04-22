@@ -151,6 +151,12 @@ async fn dispatch(app: &Arc<App>, raw: &str) -> Vec<OutgoingMessage> {
         IncomingMessage::InteractionFocusWindow { target } => {
             app.execute_focus_window(target).await
         }
+        IncomingMessage::InteractionProbeAccessibility => {
+            app.probe_accessibility().await
+        }
+        IncomingMessage::InteractionDiscoverAccessibility { hint } => {
+            app.discover_accessibility(hint).await
+        }
         IncomingMessage::ApprovalResponse {
             approval_id,
             decision,
@@ -999,5 +1005,109 @@ mod tests {
         assert!(verification.contains(r#""type":"action_verification""#));
         let completed = recv_text(&mut ws).await;
         assert!(completed.contains(r#""type":"action_completed""#));
+    }
+
+    #[tokio::test]
+    async fn interaction_probe_accessibility_emits_probe_result_and_completed() {
+        let url = spawn_server().await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_probe_accessibility"}"#.into(),
+        ))
+        .await
+        .unwrap();
+
+        let planned = recv_text(&mut ws).await;
+        assert!(planned.contains(r#""type":"action_planned""#));
+        assert!(planned.contains(r#""action_kind":"system""#));
+        assert!(planned.contains("Probe accessibility"));
+
+        let _started = recv_text(&mut ws).await;
+        let _step = recv_text(&mut ws).await;
+
+        let verification = recv_text(&mut ws).await;
+        assert!(verification.contains(r#""type":"action_verification""#));
+        assert!(verification.contains("Probe:"));
+
+        let probe = recv_text(&mut ws).await;
+        assert!(probe.contains(r#""type":"accessibility_probe_result""#));
+        // On a typical CI runner the env is bare, so we expect an
+        // honest "unavailable" or "uncertain" — never a fake success.
+        assert!(
+            probe.contains(r#""status":"unavailable""#)
+                || probe.contains(r#""status":"uncertain""#)
+                || probe.contains(r#""status":"failed""#)
+        );
+
+        let completed = recv_text(&mut ws).await;
+        assert!(completed.contains(r#""type":"action_completed""#));
+    }
+
+    #[tokio::test]
+    async fn interaction_discover_accessibility_without_hint_reports_structured_result() {
+        let url = spawn_server().await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_discover_accessibility"}"#.into(),
+        ))
+        .await
+        .unwrap();
+
+        let planned = recv_text(&mut ws).await;
+        assert!(planned.contains(r#""type":"action_planned""#));
+        assert!(planned.contains("Discover top-level accessibles"));
+
+        let _started = recv_text(&mut ws).await;
+        let _step1 = recv_text(&mut ws).await;
+        let _step2 = recv_text(&mut ws).await;
+        let verification = recv_text(&mut ws).await;
+        assert!(verification.contains(r#""type":"action_verification""#));
+
+        let discovery = recv_text(&mut ws).await;
+        assert!(discovery.contains(r#""type":"accessibility_discovery_result""#));
+
+        // Final envelope is either completed (uncertain, plausible) or
+        // failed (unavailable) — both are honest outcomes for this
+        // spike depending on the runtime environment.
+        let terminal = recv_text(&mut ws).await;
+        assert!(
+            terminal.contains(r#""type":"action_completed""#)
+                || terminal.contains(r#""type":"action_failed""#)
+        );
+    }
+
+    #[tokio::test]
+    async fn interaction_discover_accessibility_with_hint_inspects_target() {
+        let url = spawn_server().await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_discover_accessibility","hint":"firefox"}"#.into(),
+        ))
+        .await
+        .unwrap();
+
+        let planned = recv_text(&mut ws).await;
+        assert!(planned.contains(r#""type":"action_planned""#));
+        assert!(planned.contains(r#""type":"application","name":"firefox""#));
+
+        let _started = recv_text(&mut ws).await;
+        let _step1 = recv_text(&mut ws).await;
+        let _step2 = recv_text(&mut ws).await;
+        let _verification = recv_text(&mut ws).await;
+        let discovery = recv_text(&mut ws).await;
+        assert!(discovery.contains(r#""type":"accessibility_discovery_result""#));
+        let _terminal = recv_text(&mut ws).await;
+    }
+
+    #[tokio::test]
+    async fn get_status_includes_accessibility_probe_fields() {
+        let url = spawn_server().await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(r#"{"type":"get_status"}"#.into()))
+            .await
+            .unwrap();
+        let got = recv_text(&mut ws).await;
+        assert!(got.contains(r#""accessibility_probe":"#));
+        assert!(got.contains(r#""accessibility_probe_reason":"#));
     }
 }

@@ -62,6 +62,11 @@ Interaction Layer MVP entgegen (Details in Abschnitt 2.6):
 
 - `interaction_open_application` mit Feld `application: string`.
 - `interaction_focus_window` mit Feld `target` (siehe 2.6).
+- `interaction_probe_accessibility` — Environment-Probe für den
+  Linux Accessibility Backend Spike (Details in Abschnitt 2.8).
+- `interaction_discover_accessibility` mit optionalem Feld
+  `hint: string` — symbolische Discovery-/Inspection-Anfrage für den
+  AT-SPI Spike (Details in Abschnitt 2.8).
 
 Für den Approval / Confirmation Flow (Details in Abschnitt 2.7):
 
@@ -78,18 +83,23 @@ Beispiele:
 {"type":"voice_once"}
 {"type":"interaction_open_application","application":"calendar"}
 {"type":"interaction_focus_window","target":{"type":"window","name":"calendar"}}
+{"type":"interaction_probe_accessibility"}
+{"type":"interaction_discover_accessibility"}
+{"type":"interaction_discover_accessibility","hint":"firefox"}
 ```
 
 ### 2.2 Ausgehend (Core → UI)
 
-| `type`      | Felder                       | Semantik                                                    |
-|-------------|------------------------------|-------------------------------------------------------------|
-| `pong`      | —                            | Antwort auf `ping`.                                         |
-| `status`    | `payload: StatusPayload`     | Aktueller Feature-Status (siehe 2.3).                       |
-| `thinking`  | —                            | ABrain-Anfrage läuft. Wird pro Query einmal emittiert.      |
-| `response`  | `payload: { text: string }`  | ABrain-Antworttext.                                         |
-| `heard`     | `payload: { text: string }`  | STT-Ergebnis (nur im `voice_once`-Flow).                    |
-| `error`     | `message: string`            | Fehler bei Parsing, Ausführung oder Adapter.                |
+| `type`                           | Felder                            | Semantik                                                           |
+|----------------------------------|-----------------------------------|--------------------------------------------------------------------|
+| `pong`                           | —                                 | Antwort auf `ping`.                                                |
+| `status`                         | `payload: StatusPayload`          | Aktueller Feature-Status (siehe 2.3).                              |
+| `thinking`                       | —                                 | ABrain-Anfrage läuft. Wird pro Query einmal emittiert.             |
+| `response`                       | `payload: { text: string }`       | ABrain-Antworttext.                                                |
+| `heard`                          | `payload: { text: string }`       | STT-Ergebnis (nur im `voice_once`-Flow).                           |
+| `error`                          | `message: string`                 | Fehler bei Parsing, Ausführung oder Adapter.                       |
+| `accessibility_probe_result`     | `payload: AccessibilityProbe`     | Ergebnis einer `interaction_probe_accessibility`-Anfrage (2.8).    |
+| `accessibility_discovery_result` | `payload: AccessibilityDiscovery` | Ergebnis einer `interaction_discover_accessibility`-Anfrage (2.8). |
 
 Zusätzlich emittiert der Core **Action Events** (Action Event Model v1).
 Sie sind additiv; ältere UIs, die sie nicht kennen, dürfen sie
@@ -114,15 +124,17 @@ Beispiele:
 
 ```json
 {
-  "tts_enabled":              true,
-  "tts_available":            false,
-  "stt_enabled":              true,
-  "stt_available":            false,
-  "auto_speak":               true,
-  "ipc_enabled":              true,
-  "interaction_enabled":      true,
-  "interaction_backend":      "command",
-  "approval_timeout_seconds": 20
+  "tts_enabled":                 true,
+  "tts_available":               false,
+  "stt_enabled":                 true,
+  "stt_available":               false,
+  "auto_speak":                  true,
+  "ipc_enabled":                 true,
+  "interaction_enabled":         true,
+  "interaction_backend":         "command",
+  "approval_timeout_seconds":    20,
+  "accessibility_probe":         "unavailable",
+  "accessibility_probe_reason":  "DBUS_SESSION_BUS_ADDRESS is unset"
 }
 ```
 
@@ -142,6 +154,13 @@ Semantik:
 - `approval_timeout_seconds`: Fenster, in dem die UI auf ein
   `approval_requested` mit `approval_response` antworten muss, bevor
   der Core die Aktion als `timed_out` abbricht (siehe 2.7).
+- `accessibility_probe`: Einer der Strings `"uncertain"` /
+  `"unavailable"` / `"failed"` — Ergebnis der beim Core-Start
+  ausgeführten, rein umgebungsbasierten AT-SPI-Erkennung (siehe 2.8).
+  Es handelt sich um einen Capability-Hinweis, **nicht** um eine
+  Bestätigung, dass AT-SPI tatsächlich funktioniert.
+- `accessibility_probe_reason`: Kurze, freie Begründung zum
+  `accessibility_probe`-Wert (z. B. `"DBUS_SESSION_BUS_ADDRESS is unset"`).
 
 ### 2.4 Flow-Beispiele
 
@@ -540,6 +559,119 @@ auf (die UI kann es nicht selbst senden).
   Loopback-WebSocket als Vertrauensgrenze).
 - `type_text` und `send_shortcut` bekommen keine eigene
   Approval-Semantik — sie bleiben MVP-seitig abgelehnt.
+
+---
+
+### 2.8 Linux Accessibility Backend Spike (Ist-Zustand, Spike)
+
+Der Core enthält seit dieser Phase einen ersten, bewusst kleinen
+Spike für ein Linux-spezifisches Accessibility-Backend
+(`core/src/interaction/accessibility.rs`). Das Spike sitzt als
+getrennter Capability-Pfad neben dem bestehenden `CommandBackend` im
+Interaction Layer und ist **read-only**: er probt Umgebung und
+symbolische Discovery, ohne Eingaben zu erzeugen, ohne zu klicken,
+ohne zu schreiben.
+
+Ausdrücklicher Scope:
+
+- **Probe.** Entscheidet anhand der Session-Umgebung (Linux-Check,
+  `WAYLAND_DISPLAY` / `DISPLAY`, `DBUS_SESSION_BUS_ADDRESS`,
+  optional vorhandener Unix-Socket) ob ein AT-SPI-Pfad plausibel ist.
+- **Discovery / Inspection.** Entweder Top-Level-Discovery
+  (ohne `hint`) oder Inspection eines symbolischen Targets (mit
+  `hint`). Liefert honest `uncertain`/`unavailable`/`failed`.
+- **Kein RPC.** Das Spike spricht **nicht** mit dem AT-SPI-Registry;
+  der echte RPC-Pfad (zbus/atspi) ist ausdrücklich Folgearbeit.
+
+#### Eingehend
+
+- `{"type":"interaction_probe_accessibility"}` — startet die
+  Capability-Probe. Braucht keine Parameter, braucht keine Approval,
+  verändert nichts am Desktop.
+- `{"type":"interaction_discover_accessibility"}` — Top-Level-
+  Discovery.
+- `{"type":"interaction_discover_accessibility","hint":"<name>"}` —
+  Inspection eines Targets per symbolischem Hinweis.
+
+#### Ausgehend
+
+- `accessibility_probe_result` mit `payload: AccessibilityProbe`.
+- `accessibility_discovery_result` mit
+  `payload: AccessibilityDiscovery`.
+
+Beide Payloads sind getagte Enums mit einem `"status"`-Feld:
+
+```json
+{"type":"accessibility_probe_result",
+ "payload":{"status":"uncertain","reason":"session=wayland, dbus-session-bus present, AT_SPI_BUS_ADDRESS unset (typical; resolved via registry); RPC probe not yet implemented"}}
+{"type":"accessibility_probe_result",
+ "payload":{"status":"unavailable","reason":"DBUS_SESSION_BUS_ADDRESS is unset"}}
+{"type":"accessibility_discovery_result",
+ "payload":{"status":"uncertain",
+            "reason":"… AT-SPI RPC discovery (registry root GetChildren) is not yet wired up",
+            "items":[]}}
+```
+
+`items` ist in dieser Phase typisch leer; das Schema trägt bereits
+`{kind, name, role?, hint?}` pro Item, damit eine spätere
+RPC-Implementierung additiv Inhalte einfüllen kann.
+
+#### Eventfolge (Probe, Erfolgspfad)
+
+```text
+UI   → Core: {"type":"interaction_probe_accessibility"}
+Core → UI:   {"type":"action_planned","payload":{"action_id":"act_000010","action_kind":"system","title":"Probe accessibility backend","target":{"type":"unknown"}}}
+Core → UI:   {"type":"action_started","payload":{"action_id":"act_000010","phase":"started"}}
+Core → UI:   {"type":"action_step","payload":{"action_id":"act_000010","title":"Checking session environment"}}
+Core → UI:   {"type":"action_verification","payload":{"action_id":"act_000010","title":"Probe: uncertain"}}
+Core → UI:   {"type":"accessibility_probe_result","payload":{"status":"uncertain","reason":"…"}}
+Core → UI:   {"type":"action_completed","payload":{"action_id":"act_000010","status":"completed","message":"uncertain: …"}}
+```
+
+#### Eventfolge (Discovery, unavailable-Pfad)
+
+```text
+UI   → Core: {"type":"interaction_discover_accessibility"}
+Core → UI:   {"type":"action_planned","payload":{"action_id":"act_000011","action_kind":"system","title":"Discover top-level accessibles","target":{"type":"unknown"}}}
+Core → UI:   {"type":"action_started","payload":{"action_id":"act_000011","phase":"started"}}
+Core → UI:   {"type":"action_step","payload":{"action_id":"act_000011","title":"Probing accessibility backend"}}
+Core → UI:   {"type":"action_step","payload":{"action_id":"act_000011","title":"Discovering top-level accessibles via AT-SPI probe"}}
+Core → UI:   {"type":"action_verification","payload":{"action_id":"act_000011","title":"Discovery: unavailable"}}
+Core → UI:   {"type":"accessibility_discovery_result","payload":{"status":"unavailable","reason":"no WAYLAND_DISPLAY or DISPLAY in environment"}}
+Core → UI:   {"type":"action_failed","payload":{"action_id":"act_000011","status":"failed","message":"unavailable: no WAYLAND_DISPLAY or DISPLAY in environment","error":"recovery_hint=fallback_unavailable"}}
+```
+
+#### Semantik der drei Status-Werte
+
+- **`uncertain`** — Umgebung sieht plausibel aus (Session-Typ da,
+  D-Bus-Session-Bus-Adresse gesetzt), aber der Spike hat **nicht**
+  tatsächlich per RPC verifiziert, dass AT-SPI erreichbar ist. Das
+  ist der ehrliche Default auf einem realen Linux-Desktop.
+- **`unavailable`** — Eine konkrete Voraussetzung fehlt (nicht
+  Linux, weder `DISPLAY` noch `WAYLAND_DISPLAY`, keine
+  `DBUS_SESSION_BUS_ADDRESS`, fehlender Session-Bus-Socket).
+- **`failed`** — Reserviert für unerwartete Fehler beim Proben
+  selbst. In der aktuellen environment-only-Implementierung tritt
+  das nicht auf; das Feld existiert, damit ein zukünftiger
+  RPC-basierter Probe einen eigenen Fehlerpfad bekommt.
+
+#### Scope-Grenzen des Accessibility-Spikes
+
+- **Keine** Tastatur-/Maus-Injektion.
+- **Keine** Button-/Feld-Automation, kein generisches Klicken.
+- **Keine** Form-Befüllung, keine Passwort-/Secret-Felder.
+- **Keine** Tree-Walker-UI, keine tiefe Baumstruktur.
+- **Keine** App-spezifischen Adapter (Browser, Electron, GTK, Qt,
+  Terminal — alle behandeln Accessibility unterschiedlich).
+- **Keine** OCR / Pixel-Vision.
+- **Keine** Wayland-Fokussteuerung — Window-Overlay-Themen bleiben
+  eine separate Linie (siehe
+  `docs/linux_window_overlay_architecture.md`, falls vorhanden; das
+  Accessibility-Backend ist **nicht** dasselbe wie ein Overlay).
+- **Kein** Approval-Flow für Probe/Discovery — beide sind
+  read-only und können in dieser Phase ohne Freigabe laufen. Sobald
+  ein Pfad fokussieren, schreiben oder klicken soll, muss er
+  zurück durch den bestehenden Approval-Flow (2.7).
 
 ---
 

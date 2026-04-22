@@ -690,6 +690,8 @@ kein Confirmation-Kanal existiert. Das ist der ehrliche MVP-Zustand
 
 - Echte Confirmation-UX über IPC (`interaction_confirm` / `… deny`).
 - Backend für Linux mit AT-SPI oder D-Bus (§16, erste Offene Punkte).
+  Eine erste, bewusst kleine Ausbaustufe ist bereits gelandet — siehe
+  §14c (Linux Accessibility Backend Spike).
 - Optional: Window-Probe nach `open_application` und `focus_window`,
   um von `uncertain` auf `verified` hochzustufen.
 - Reichere Ziel-Auflösung für `focus_window` (strukturierte Discovery
@@ -698,6 +700,51 @@ kein Confirmation-Kanal existiert. Das ist der ehrliche MVP-Zustand
   `target` jenseits von `application:<name>` strukturiert wird.
 - Richtige Schaltflächen im Presence Layer für „ausführen /
   abbrechen / bestätigen".
+
+---
+
+## 14c. Linux Accessibility Backend Spike (Ist-Zustand, klein)
+
+Ab der Accessibility-Spike-Phase enthält der Core einen eigenen
+Capability-Pfad im Interaction Layer
+(`core/src/interaction/accessibility.rs`). Dieser Pfad ist:
+
+- **Read-only.** Er klickt nicht, tippt nicht, fokussiert nicht.
+- **Environment-basiert.** Er prüft Session-Typ, `DISPLAY` /
+  `WAYLAND_DISPLAY`, `DBUS_SESSION_BUS_ADDRESS` und — wo möglich —
+  den Session-Bus-Socket im Dateisystem.
+- **Honest by construction.** Er liefert einen der drei Status-Werte
+  `uncertain` / `unavailable` / `failed` mit einer Begründung; nie
+  einen Fake-`available`.
+- **Getrennt vom `CommandBackend`.** Der Command-Pfad
+  (`open_application`, `focus_window`) bleibt unverändert. Das
+  Accessibility-Spike ergänzt ihn, ersetzt ihn nicht.
+
+IPC-Oberfläche (Details in [api.md](./api.md), §2.8):
+
+- `interaction_probe_accessibility` — startet die Probe.
+- `interaction_discover_accessibility` — optionaler `hint`.
+- Ergebnisse als `accessibility_probe_result` /
+  `accessibility_discovery_result` zusätzlich zu den bekannten
+  Action Events.
+
+Was im Spike bewusst **nicht** drin ist:
+
+- Kein AT-SPI-RPC, kein Tree-Walking, keine App-spezifischen
+  Adapter. Der nächste Schritt ist eine echte zbus/atspi-Anbindung
+  an das Registry-Root (z. B. `GetChildren`); erst dann können
+  `items` inhaltlich gefüllt werden.
+- Kein Fokus-, Klick- oder Eingabe-Pfad — das bleibt dem bestehenden
+  Command-Backend (und späteren Portal-/Compositor-Pfaden)
+  vorbehalten.
+- Kein Approval. Probe und symbolische Discovery sind strikt
+  lesend; sobald ein accessibility-getriebener Pfad schreibend
+  würde, muss er durch den bestehenden Approval-Flow (§14b.3 bzw.
+  `api.md` §2.7).
+
+Damit ist Accessibility in Smolit heute ein **strukturierter,
+ehrlicher Discovery-Pfad**, nicht mehr und nicht weniger. Discovery
+ist ausdrücklich nicht dasselbe wie Automation.
 
 ---
 

@@ -186,7 +186,26 @@ Eingehende IPC-Nachrichten:
 ```json
 {"type":"interaction_open_application","application":"firefox"}
 {"type":"interaction_focus_window","target":{"type":"window","name":"calendar"}}
+{"type":"interaction_probe_accessibility"}
+{"type":"interaction_discover_accessibility","hint":"Files"}
 ```
+
+Zusätzlich ist ein **Linux Accessibility Backend Spike** gelandet
+(Phase 8b, read-only). `interaction_probe_accessibility` liefert ein
+getaggtes Ergebnis `uncertain` / `unavailable` / `failed` (mit Grund)
+aus Session-Umgebung (`DBUS_SESSION_BUS_ADDRESS`, `WAYLAND_DISPLAY` /
+`DISPLAY`, `AT_SPI_BUS_ADDRESS`) und einer Unix-Socket-Vorprüfung —
+ohne echten AT-SPI-RPC. `interaction_discover_accessibility`
+(optional mit `hint`) reicht dieses Verdikt an eine
+Discovery-/Inspection-Oberfläche durch und gibt ein strukturiertes
+`accessibility_discovery_result`-Envelope zurück (`items` bleibt in
+dieser Phase leer; das Schema ist für die spätere RPC-Füllung
+vorbereitet). Das Ergebnis läuft regulär durch das Action Event Model
+(`action_planned` → … → `action_completed` / `action_failed` mit
+`recovery_hint=fallback_unavailable`). Kein Klicken, kein
+`type_text`-Pfad, keine Passwort-/Secret-Interaktion. Details in
+[docs/api.md §2.8](docs/api.md) und
+[docs/linux_interaction_backends_research.md](docs/linux_interaction_backends_research.md).
 
 Aktionen mit `requires_confirmation=true` (heute: jede
 `interaction_open_application` und jede `interaction_focus_window`)

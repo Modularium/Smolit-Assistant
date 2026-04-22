@@ -19,6 +19,7 @@
 
 #![allow(dead_code)]
 
+pub mod accessibility;
 pub mod action;
 pub mod backend;
 pub mod executor;
@@ -26,6 +27,11 @@ pub mod recovery;
 pub mod types;
 pub mod verifier;
 
+#[allow(unused_imports)]
+pub use accessibility::{
+    AccessibilityDiscovery, AccessibilityItem, AccessibilityProbe, discover_top_level,
+    inspect_target,
+};
 #[allow(unused_imports)]
 pub use action::{InteractionAction, InteractionKind, InteractionPayload};
 #[allow(unused_imports)]

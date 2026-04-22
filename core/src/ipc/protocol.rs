@@ -6,6 +6,7 @@ use crate::actions::{
 };
 use crate::app::StatusPayload;
 use crate::approvals::{ApprovalRequest, ApprovalResolvedPayload, IncomingApprovalDecision};
+use crate::interaction::{AccessibilityDiscovery, AccessibilityProbe};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -24,6 +25,19 @@ pub enum IncomingMessage {
     },
     InteractionFocusWindow {
         target: InteractionFocusTarget,
+    },
+    /// Environment-based AT-SPI capability probe. Read-only: reports
+    /// whether an accessibility-based pathway looks plausible in the
+    /// current session. Does not touch the desktop.
+    InteractionProbeAccessibility,
+    /// Symbolic accessibility discovery spike. Attempts to list
+    /// top-level accessible items when a `hint` is absent, or to
+    /// inspect a target by name when one is provided. Honestly
+    /// returns `unavailable` / `uncertain` until the full AT-SPI RPC
+    /// client lands.
+    InteractionDiscoverAccessibility {
+        #[serde(default)]
+        hint: Option<String>,
     },
     ApprovalResponse {
         approval_id: String,
@@ -75,6 +89,8 @@ pub enum OutgoingMessage {
     ActionCancelled { payload: ActionCancelledPayload },
     ApprovalRequested { payload: ApprovalRequest },
     ApprovalResolved { payload: ApprovalResolvedPayload },
+    AccessibilityProbeResult { payload: AccessibilityProbe },
+    AccessibilityDiscoveryResult { payload: AccessibilityDiscovery },
 }
 
 #[derive(Debug, Clone, Serialize)]

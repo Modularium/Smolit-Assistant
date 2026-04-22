@@ -208,8 +208,16 @@ Die UI kennt drei Zustandsquellen:
 
 1. **Transportzustand** (`connected` / `disconnected`) — von `IpcClient`.
 2. **Statuspayload** (`status_received`) — zuletzt gemeldetes Core-Status-Dict.
-3. **Event-Strom** (`thinking`, `response`, `heard`, `error`, `pong`) — rein
-   reaktiv, wird vom `EventBus` verteilt.
+   Seit der Accessibility-Spike-Phase enthält dieses Dict zusätzlich die
+   rein informativen Felder `accessibility_probe` und
+   `accessibility_probe_reason`. Die UI darf sie anzeigen, aber **nicht**
+   interpretieren (keine Logik-Abhängigkeit).
+3. **Event-Strom** (`thinking`, `response`, `heard`, `error`, `pong`,
+   sowie optional `accessibility_probe_result` /
+   `accessibility_discovery_result`) — rein reaktiv, wird vom `EventBus`
+   verteilt. Accessibility-Payloads sind für die UI reine Darstellungsdaten
+   (status + reason + optionale symbolische items); es gibt keinen
+   UI-seitigen Discovery-Entscheidungszweig.
 
 Es gibt **keinen** von der UI gehaltenen Dialogzustand. Jede neue
 Conversation-Turn startet mit einem `submit_text` oder `voice_once`.

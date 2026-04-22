@@ -362,8 +362,24 @@ UI-Phasen geführt und noch **nicht** begonnen.
       aus der Automation-Schicht)
 - [ ] Avatar-Zustände für Interaktionsphasen (`targeting`,
       `executing`, `verifying`, `recovered`, `aborted`)
-- [ ] Linux-Backends: Accessibility (AT-SPI / D-Bus), Umgang mit
-      Wayland vs. X11
+- [x] Linux Accessibility Backend Spike (AT-SPI Capability Probe +
+      read-only Discovery/Inspection-Schema): `AccessibilityProbe`
+      (`uncertain` / `unavailable` / `failed` + Grund) aus Umgebungs-
+      und Unix-Socket-Vorprüfung, Schema für `AccessibilityItem`,
+      IPC-Nachrichten `interaction_probe_accessibility` /
+      `interaction_discover_accessibility`, Action-Event-Integration
+      mit zusätzlichen Envelopes `accessibility_probe_result` /
+      `accessibility_discovery_result`, optionale
+      `StatusPayload`-Felder `accessibility_probe` /
+      `accessibility_probe_reason`. Bewusst dependency-frei; echter
+      zbus-/`atspi-connection`-RPC-Probe, Registry-`GetChildren` und
+      Namens-/Rollen-Lookup bleiben nächste Stufe. Siehe
+      [docs/linux_interaction_backends_research.md](./docs/linux_interaction_backends_research.md)
+      §2 und [docs/api.md §2.8](./docs/api.md).
+- [ ] Linux-Backends (Folgestufen): echter AT-SPI-RPC-Pfad (zbus /
+      atspi-connection), Registry-Root-Discovery, Namens-/Rollen-
+      basierte Inspection, Toolkit-Vergleich (GTK / Qt / Electron /
+      Terminal), Umgang mit Wayland vs. X11 beim Fokus-/Write-Pfad
 - [ ] OCR-/Template-Erkennung und Pixel-Fallback mit Safe Sandboxing
 - [ ] Performance Profiles (low / balanced / high fidelity)
       konfigurierbar und mit Presence/Visual Action gekoppelt
@@ -456,3 +472,17 @@ Zusätzlich begonnen: **Phase 3b Linux Window & Overlay Architecture**
 als parallele Architekturlinie. Das Dokument legt Wayland/X11-Trennung,
 Capability-Matrix und eine noch nicht implementierte Window-Behavior-
 Abstraktion fest — bewusst ohne Codeänderungen.
+
+Ebenfalls gelandet: **Linux Accessibility Backend Spike** (Phase 8b).
+`AccessibilityProbe::detect()` liefert aus Session-Umgebung und
+Unix-Socket-Vorprüfung ein getaggtes
+`uncertain` / `unavailable` / `failed` mit Grund; die neuen
+IPC-Nachrichten `interaction_probe_accessibility` und
+`interaction_discover_accessibility` laufen über das Action Event
+Model und emittieren zusätzliche `accessibility_probe_result`- bzw.
+`accessibility_discovery_result`-Envelopes. `AccessibilityItem` ist
+als Schema vorbereitet, aber die Discovery-Füllung fehlt bewusst —
+die echte RPC-Stufe (zbus / `atspi-connection`, Registry-
+`GetChildren`, Namens-Lookup) ist die nächste Ausbaustufe. Details in
+[docs/linux_interaction_backends_research.md](./docs/linux_interaction_backends_research.md)
+und [docs/api.md §2.8](./docs/api.md).

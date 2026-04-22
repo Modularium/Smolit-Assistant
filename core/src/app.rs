@@ -8,7 +8,11 @@ use tokio::sync::broadcast;
 use tokio::time::timeout;
 use tracing::{info, warn};
 
-use crate::actions::{ActionCancelledPayload, ActionStatus};
+use crate::actions::{
+    ActionCancelledPayload, ActionCompletedPayload, ActionFailedPayload, ActionKind, ActionPhase,
+    ActionPlannedPayload, ActionStartedPayload, ActionStatus, ActionStepPayload, ActionTarget,
+    ActionVerificationPayload,
+};
 use crate::adapters::abrain;
 use crate::approvals::{
     ApprovalDecision, ApprovalRequest, ApprovalResolvedPayload, PendingApprovalError,
@@ -17,8 +21,9 @@ use crate::approvals::{
 use crate::audio::{SttService, TtsService};
 use crate::config::Config;
 use crate::interaction::{
-    CommandBackend, CommandBackendConfig, InteractionAction, InteractionExecutor, InteractionKind,
-    InteractionPolicy,
+    AccessibilityDiscovery, AccessibilityProbe, CommandBackend, CommandBackendConfig,
+    InteractionAction, InteractionExecutor, InteractionKind, InteractionPolicy, discover_top_level,
+    inspect_target,
 };
 use crate::ipc::protocol::{InteractionFocusTarget, OutgoingMessage};
 
@@ -46,6 +51,13 @@ pub struct StatusPayload {
     pub interaction_enabled: bool,
     pub interaction_backend: String,
     pub approval_timeout_seconds: u64,
+    /// Honest, environment-based verdict from the AT-SPI spike at
+    /// core start-up. One of `"uncertain"`, `"unavailable"`,
+    /// `"failed"`. See
+    /// [`crate::interaction::AccessibilityProbe`] for semantics.
+    pub accessibility_probe: String,
+    /// Short free-form reason accompanying `accessibility_probe`.
+    pub accessibility_probe_reason: String,
 }
 
 impl App {
@@ -275,6 +287,125 @@ impl App {
         self.dispatch_interaction(action).await
     }
 
+    /// Run the environment-based accessibility probe and wrap the
+    /// result into a small Action-Event sequence plus a dedicated
+    /// `accessibility_probe_result` envelope. Emission is read-only
+    /// and does not require approval — the probe never touches the
+    /// user's desktop.
+    pub async fn probe_accessibility(self: &Arc<Self>) -> Vec<OutgoingMessage> {
+        let action_id = self.next_action_id();
+        let probe = AccessibilityProbe::detect();
+        let reason = probe.reason().to_string();
+        let status = probe.status_str();
+
+        let mut out = Vec::with_capacity(6);
+        out.push(planned(
+            &action_id,
+            ActionKind::System,
+            "Probe accessibility backend",
+            ActionTarget::unknown(),
+        ));
+        out.push(started(&action_id));
+        out.push(step(&action_id, "Checking session environment"));
+        out.push(OutgoingMessage::ActionVerification {
+            payload: ActionVerificationPayload {
+                action_id: action_id.clone(),
+                title: format!("Probe: {status}"),
+            },
+        });
+        out.push(OutgoingMessage::AccessibilityProbeResult {
+            payload: probe.clone(),
+        });
+        out.push(OutgoingMessage::ActionCompleted {
+            payload: ActionCompletedPayload {
+                action_id,
+                status: ActionStatus::Completed,
+                message: Some(format!("{status}: {reason}")),
+            },
+        });
+        out
+    }
+
+    /// Run the accessibility discovery / inspection spike. When `hint`
+    /// is provided the spike inspects that symbolic target; otherwise
+    /// it attempts a top-level discovery. In both cases the actual
+    /// RPC walk is not yet wired up, so honest `uncertain` /
+    /// `unavailable` results are expected.
+    pub async fn discover_accessibility(
+        self: &Arc<Self>,
+        hint: Option<String>,
+    ) -> Vec<OutgoingMessage> {
+        let action_id = self.next_action_id();
+        let trimmed_hint = hint
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+
+        let (title, step_label) = match &trimmed_hint {
+            Some(name) => (
+                format!("Inspect accessible target `{name}`"),
+                format!("Inspecting `{name}` via accessibility probe"),
+            ),
+            None => (
+                "Discover top-level accessibles".to_string(),
+                "Discovering top-level accessibles via AT-SPI probe".to_string(),
+            ),
+        };
+
+        let target = match &trimmed_hint {
+            Some(name) => ActionTarget::application(name.clone()),
+            None => ActionTarget::unknown(),
+        };
+
+        let result = match &trimmed_hint {
+            Some(name) => inspect_target(name),
+            None => discover_top_level(),
+        };
+
+        let status = result.status_str();
+        let reason = result.reason().to_string();
+
+        let mut out = Vec::with_capacity(7);
+        out.push(planned(&action_id, ActionKind::System, &title, target));
+        out.push(started(&action_id));
+        out.push(step(&action_id, "Probing accessibility backend"));
+        out.push(step(&action_id, &step_label));
+        out.push(OutgoingMessage::ActionVerification {
+            payload: ActionVerificationPayload {
+                action_id: action_id.clone(),
+                title: format!("Discovery: {status}"),
+            },
+        });
+        out.push(OutgoingMessage::AccessibilityDiscoveryResult {
+            payload: result.clone(),
+        });
+
+        match &result {
+            AccessibilityDiscovery::Uncertain { .. } => {
+                out.push(OutgoingMessage::ActionCompleted {
+                    payload: ActionCompletedPayload {
+                        action_id,
+                        status: ActionStatus::Completed,
+                        message: Some(format!("{status}: {reason}")),
+                    },
+                });
+            }
+            AccessibilityDiscovery::Unavailable { .. }
+            | AccessibilityDiscovery::Failed { .. } => {
+                out.push(OutgoingMessage::ActionFailed {
+                    payload: ActionFailedPayload {
+                        action_id,
+                        status: ActionStatus::Failed,
+                        message: format!("{status}: {reason}"),
+                        error: Some("recovery_hint=fallback_unavailable".to_string()),
+                    },
+                });
+            }
+        }
+        out
+    }
+
     pub async fn execute_focus_window(
         self: &Arc<Self>,
         target: InteractionFocusTarget,
@@ -296,6 +427,7 @@ impl App {
     pub fn build_status_payload(&self) -> StatusPayload {
         let tts = self.tts.state();
         let stt = self.stt.state();
+        let probe = AccessibilityProbe::detect();
         StatusPayload {
             tts_enabled: tts.enabled,
             tts_available: tts.available,
@@ -306,7 +438,46 @@ impl App {
             interaction_enabled: self.config.interaction.enabled,
             interaction_backend: self.config.interaction.backend.clone(),
             approval_timeout_seconds: self.config.approval.timeout_seconds,
+            accessibility_probe: probe.status_str().to_string(),
+            accessibility_probe_reason: probe.reason().to_string(),
         }
+    }
+}
+
+fn planned(
+    action_id: &str,
+    kind: ActionKind,
+    title: &str,
+    target: ActionTarget,
+) -> OutgoingMessage {
+    OutgoingMessage::ActionPlanned {
+        payload: ActionPlannedPayload {
+            action_id: action_id.to_string(),
+            action_kind: kind,
+            title: title.to_string(),
+            description: None,
+            target,
+            mapping: None,
+        },
+    }
+}
+
+fn started(action_id: &str) -> OutgoingMessage {
+    OutgoingMessage::ActionStarted {
+        payload: ActionStartedPayload {
+            action_id: action_id.to_string(),
+            phase: ActionPhase::Started,
+        },
+    }
+}
+
+fn step(action_id: &str, title: &str) -> OutgoingMessage {
+    OutgoingMessage::ActionStep {
+        payload: ActionStepPayload {
+            action_id: action_id.to_string(),
+            title: title.to_string(),
+            description: None,
+        },
     }
 }
 
