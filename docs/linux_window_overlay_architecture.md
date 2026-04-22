@@ -499,11 +499,161 @@ Einordnung gegenüber Phase B aus §E:
 Offene Punkte, die ausdrücklich **nicht** Teil dieses Schrittes sind
 (siehe §G und ROADMAP.md Phase 3b):
 
-- interaktive Zonen / Passthrough-Polygone,
 - wlroots `layer-shell`-Pfad,
 - Snap-to-Edge / Idle-Movement,
 - Multi-Monitor-Heuristik,
 - compositor-spezifische Always-on-top-Strategien,
+- Packaging / Autostart.
+
+Interaktive Zonen / Passthrough-Polygone sind inzwischen als kleiner
+opt-in Folgeschritt gelandet — siehe §F.3.
+
+### F.3. Overlay Click-through Folgeschritt (Ist, opt-in)
+
+Auf dem Overlay-MVP aus §F.2 sitzt ein **zweiter opt-in Schritt**, der
+produktives Click-through mit definierten interaktiven Zonen einführt.
+Er ist bewusst so geschnitten, dass er nur auf einer bereits aktiven
+Overlay-Hülle aufsetzt und ansonsten ehrlich in den normalen Overlay-
+Modus zurückfällt.
+
+Neue Komponente:
+
+```text
+ui/scripts/window_behavior/
+├── overlay_click_through_controller.gd  # opt-in Click-through-Aktivierung
+│                                        # mit interaktiven Zonen,
+│                                        # capability-gesteuert,
+│                                        # fallback-sicher
+└── …                                    # Fassade, Capabilities, Probe,
+                                         # Overlay-Controller bleiben
+```
+
+**Zwei Opt-ins, nie still verkettet.** Click-through wird *ausschließlich*
+aktiv, wenn beide Env-Variablen gesetzt sind:
+
+- `SMOLIT_UI_OVERLAY=1` — Voraussetzung aus §F.2 (transparent + borderless
+  Hülle).
+- `SMOLIT_UI_CLICK_THROUGH=1` — eigene Opt-in-Grenze für den
+  Passthrough-Schritt. Ohne diese Variable läuft der Overlay-MVP wie
+  bisher, ganz ohne Click-through.
+
+**Interaktive Zonen (explizite Allowlist).** Der Controller trägt eine
+bewusst geführte Liste klickbar zu haltender Knoten; nicht-gelistete
+Container und „zufällig sichtbare" Layout-Reste werden *nicht* in die
+Passthrough-Schutzregion aufgenommen:
+
+| Knoten                 | Zweck                                           |
+|------------------------|-------------------------------------------------|
+| `Avatar`               | Klickbare Presence-Figur (immer gebraucht).     |
+| `VBox/HeaderRow`       | Status-Zeile / ggf. spätere Header-Controls.    |
+| `VBox/ActionBanner`    | Action-/Target-Mapping-Anzeige während Action.  |
+| `VBox/ApprovalBanner`  | Approve/Deny-Buttons während Approval.          |
+| `VBox/DiscoveryPanel`  | Discovery-Liste inkl. Select/Clear-Buttons.     |
+| `VBox/DockPanel`       | Log + Volltext-Eingabe im Expanded-Modus.       |
+| `CompactInputPanel`    | Compact-Quick-Input am Docked-Avatar.           |
+
+Pro Knoten durchläuft das Rect vor der Aufnahme eine kleine
+Validierungskette:
+
+1. Knoten muss `is_visible_in_tree()` sein.
+2. Rohsize muss `> 0` sein (Layout-noch-nicht-stabil-Fälle fallen
+   heraus).
+3. Rect wird an die Viewport-Bounds geclamt (`Rect2.intersection`);
+   off-screen-Anteile werden abgeschnitten.
+4. Die geclamte Größe muss die Mindestkantenlänge überschreiten
+   (`_MIN_ZONE_DIMENSION`, aktuell 2 px) — sonst wird die Zone als
+   degeneriert verworfen.
+
+Erst gültige Zonen landen in der Bounding-Rect-Union.
+
+**Single-Polygon-Grenze des Godot-API.** Godots
+`DisplayServer.window_set_mouse_passthrough(region)` erwartet pro
+Fenster genau *einen* Polygonpfad. Mehrere disjunkte interaktive
+Zonen werden im aktuellen MVP daher zur **Bounding-Rect-Union** aller
+gültigen Zonen vereinigt und als einzelnes Rechteckpolygon an den
+DisplayServer übergeben. Leerer Raum *innerhalb* dieser Union bleibt
+klickbar — das ist bewusst noch nicht das finale Interaktionsmodell,
+sondern ein ehrlich grobes MVP. Ein echter Multi-Polygon-Schritt
+(XShape-Multirect unter X11 bzw. `wl_surface.set_input_region` mit
+mehreren Rechtecken unter Wayland) bleibt Folgearbeit.
+
+**Refresh-Lifecycle.** Der Controller verbindet beim Aktivieren
+genau einmal `visibility_changed` und `resized` auf jeden getrackten
+Knoten sowie `resized` auf den Anker. Zusätzlich schedult er
+*einmalig* einen `call_deferred("_initial_refresh")`, um den Fall zu
+fangen, dass einzelne Panel-Größen zu `_ready()`-Zeit noch nicht
+final stabil sind (ein call_deferred läuft am Ende des aktuellen
+Idle-Frames, also nach dem ersten Layout-Pass). Spätere Änderungen
+(neues Banner erscheint, Window resized) laufen über die Signale ins
+zentrale `_refresh_region()`. Kein Polling, kein Timer-Loop.
+
+Der Refresh-Pfad dedupliziert: feuert mehrere Signale in derselben
+Frame-Tranche und ergibt sich aus den neuen Zonen *dieselbe* Bounding-
+Box wie zuletzt, passiert nichts — weder API-Call noch Log. Erst eine
+echte Änderung (neue Box-Position oder Box-Größe) triggert einen
+erneuten `window_set_mouse_passthrough`. Fallen alle Zonen vorübergehend
+weg, räumt der Controller die Region leer und setzt sich auf
+`active=false`, damit kein Halb-Zustand hängt. Das sind die einzigen
+Scene-seitigen Berührungspunkte — keine neuen Signale im EventBus,
+keine Änderung an Presence- oder Avatar-States.
+
+Capability-/Fallback-Semantik im Click-through-Controller:
+
+- **`SMOLIT_UI_OVERLAY` nicht gesetzt.** No-op, Controller wird nicht
+  persistiert. Log-Grund: „overlay not requested".
+- **Overlay gesetzt, Click-through nicht gesetzt.** Overlay wie in
+  §F.2. Log-Grund: „click-through not requested".
+- **Click-through gesetzt, Overlay aber nicht aktiv.** Kein
+  Passthrough. Log-Grund: „overlay inactive — click-through would
+  leave avatar over an opaque window".
+- **Click-through gesetzt, Capability `available` / `experimental`,
+  gültige Zonen vorhanden.** Passthrough aktiv auf Bounding-Union der
+  Zonen; Log enthält die Phasen-Zusammenfassung, Bounds und Zonenliste.
+  Bei `experimental` zusätzlich eine honest warning.
+- **Click-through gesetzt, Capability `unsupported` / `unknown`.** Kein
+  Passthrough. Log-Grund: „click-through capability … — …".
+- **Click-through gesetzt, Capability tragfähig, aber keine gültigen
+  Zonen ableitbar (alles unsichtbar, alle Rects degeneriert, oder
+  Layout noch nicht stabil).** Kein Passthrough; Controller wartet
+  jedoch auf Signale und deferred-Refresh. Log-Grund: „no valid
+  interactive zones yet — waiting for first stable layout".
+
+Jeder Pfad erzeugt **eine** Phasen-Zusammenfassung mit den Achsen
+`requested / overlay_requested / overlay_active / capable /
+zones_derived / zones_valid / active`, optional gefolgt von Capability-
+Details, Bounds, Zonenliste und einer `reason`-Zeile. Refreshes loggen
+nur bei echter Bounds-Änderung (Dedup).
+
+Keine stillen Umschaltungen.
+
+Was der Folgeschritt bewusst **nicht** tut:
+
+- **Kein neuer IPC-Kanal, kein neuer EventBus-Signalpfad, keine neue
+  Presence-Wahrheit.** Click-through lebt ausschließlich in der
+  Fensterhülle; Presence, Avatar und Scenes kennen den Controller
+  nicht.
+- **Keine compositor-spezifischen Pfade.** Kein layer-shell, keine
+  GNOME-Extension, keine GDExtension. Nur Godots DisplayServer-API.
+- **Kein Always-on-top.** Weiter ausdrücklich nicht versprochen; siehe
+  §C.1 / §E.
+- **Keine Multi-Polygon-Shapes, kein XShape-Feintuning.** Eine einzelne
+  Bounding-Box pro Snapshot ist die bewusste MVP-Grenze.
+- **Kein Snap-to-Edge, keine Multi-Monitor-Heuristik.** Gehören
+  frühestens in Phase C (§E).
+- **Keine stillschweigende Aktivierung.** Ein fehlendes Env-Flag, eine
+  unsupported-Capability, ein nicht aktiver Overlay-Modus oder eine
+  leere Zonenableitung führen immer zu einer ehrlichen Log-Zeile mit
+  `active=false` und Grund.
+
+Offene Punkte, die ausdrücklich **nicht** Teil dieses Folgeschritts
+sind:
+
+- Multi-Polygon-Passthrough (mehrere disjunkte Rechtecke statt
+  Bounding-Union).
+- Backend-spezifische, robustere Zonenableitung (z. B. echte
+  Screen-Geometrie pro Monitor, HiDPI-bewusste Koordinatenumrechnung
+  außerhalb eines Root-Controls).
+- wlroots `layer-shell` und GNOME-Extension-Pfade.
 - Packaging / Autostart.
 
 ---

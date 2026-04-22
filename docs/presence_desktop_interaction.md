@@ -252,11 +252,25 @@ als selbstverständlich an.
 Als erster technischer Träger für den Docked-/Presence-Modus ist ein
 **opt-in Overlay-MVP Phase B** gelandet: `SMOLIT_UI_OVERLAY=1` aktiviert
 einen transparenten, borderlosen Presence-Modus mit capability-
-gesteuertem Fallback. Always-on-top und produktives Click-through sind
-bewusst **nicht** Teil dieses Schrittes — die Presence-Modi oben bleiben
-gültig, die äußere Fensterhülle ist nur ehrlicher geworden. Siehe
+gesteuertem Fallback. Always-on-top ist bewusst **nicht** Teil dieses
+Schrittes — die Presence-Modi oben bleiben gültig, die äußere
+Fensterhülle ist nur ehrlicher geworden. Siehe
 [`docs/linux_window_overlay_architecture.md` §F.2](./linux_window_overlay_architecture.md)
 und [`docs/ui_architecture.md` §9.2](./ui_architecture.md).
+
+Click-through mit definierten interaktiven Zonen existiert inzwischen
+als **zweiter opt-in Folgeschritt** — zusätzlich zum Overlay per
+`SMOLIT_UI_CLICK_THROUGH=1`. Avatar und sichtbare UI-Panels bleiben
+klickbar; Klicks außerhalb dieser Zonen fallen durch auf das
+darunterliegende Fenster. Der Schritt bleibt bewusst ein MVP: Godots
+DisplayServer-API erlaubt pro Fenster nur *einen* Passthrough-Polygon,
+der Controller fasst daher alle gültigen Zonen zu einer Bounding-Rect-
+Union zusammen, innerhalb derer Leerraum noch klickbar bleibt. Auch
+hier **kein** Always-on-top, **kein** compositor-spezifischer Pfad,
+**keine** neue Presence-Wahrheit — die Presence-Achsen oben bleiben
+unverändert, nur die Fensterhülle ist durchlässig geworden. Siehe
+[`docs/linux_window_overlay_architecture.md` §F.3](./linux_window_overlay_architecture.md)
+und [`docs/ui_architecture.md` §9.3](./ui_architecture.md).
 
 ---
 

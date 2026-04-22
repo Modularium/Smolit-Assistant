@@ -496,8 +496,9 @@ Im Erfolgspfad passiert exakt dies:
 Fallback-sicher: ohne Opt-in ist der Einstieg ein No-op; wenn die
 Capability-Detection Transparenz als `unsupported` oder `unknown`
 meldet, bleibt das Fenster im normalen Modus und der Grund landet
-im Log. Kein Always-on-top, kein produktives Click-through, keine
-Scene-Eingriffe, keine neuen EventBus-Signale.
+im Log. Kein Always-on-top, kein stilles Click-through, keine
+Scene-Eingriffe, keine neuen EventBus-Signale. (Für produktives
+Click-through mit definierten interaktiven Zonen siehe §9.3.)
 
 Sichtbarer Effekt auf der UI: die PanelContainer-Flächen
 (Action-/Approval-/Discovery-/Dock-/Compact-Input-Panel) behalten
@@ -510,6 +511,59 @@ weiterhin als kompakter opaker Block — kein Re-Design nötig.
 
 Vollständige Einordnung inklusive Phase-B/C-Grenzen siehe
 [`docs/linux_window_overlay_architecture.md` §F.2](./linux_window_overlay_architecture.md).
+
+### 9.3 Overlay Click-through (opt-in Folgeschritt auf §9.2)
+
+Aufbauend auf dem Overlay-MVP sitzt ein **zweiter opt-in Schritt** in
+`window_behavior/` — produktives Click-through mit definierten
+interaktiven Zonen. Die Scene-Ebene bleibt unverändert; es wird nur
+die äußere Fensterhülle um eine Passthrough-Region ergänzt.
+
+Komponenten:
+
+- `overlay_click_through_controller.gd` (neu) — trägt eine explizite
+  Allowlist interaktiver Anker (Avatar, Header, Action-/Approval-/
+  Discovery-Banner, DockPanel, CompactInputPanel), validiert pro Zone
+  (`is_visible_in_tree()`, Rohsize > 0, Viewport-Clamp,
+  Mindestkantenlänge), baut daraus eine **Bounding-Rect-Union** und
+  ruft `DisplayServer.window_set_mouse_passthrough(region)` mit einem
+  einzelnen Rechteckpolygon auf. Godots API erlaubt pro Fenster genau
+  *einen* Polygonpfad — echte Multi-Polygon-Shapes bleiben Folgearbeit,
+  und leerer Raum *innerhalb* der Union bleibt klickbar.
+- `window_behavior.gd` (erweitert) — trägt
+  `activate_click_through_if_requested(anchor, overlay_result)` als
+  Fassaden-Einstieg, kettenbar auf
+  `activate_overlay_if_requested(anchor)`.
+- `main.gd` (minimale Erweiterung) — ruft die beiden Fassadenpunkte am
+  Ende von `_ready()` nacheinander auf und hält eine Referenz auf den
+  Controller, damit seine Signal-Subscriptions (`visibility_changed` pro
+  Zone, `resized` am Anker) und der einmalige `call_deferred`-Refresh
+  für die Scene-Lebenszeit leben. Die UI hat sonst keinerlei Kopplung
+  zur Click-through-Schicht.
+
+Zwei ausdrückliche Opt-ins, nie still verkettet:
+
+- `SMOLIT_UI_OVERLAY=1` — Voraussetzung aus §9.2.
+- `SMOLIT_UI_CLICK_THROUGH=1` — eigene Opt-in-Grenze. Ohne diese
+  Variable bleibt der Overlay-MVP genau wie bisher, ganz ohne
+  Passthrough.
+
+Fallback-sicher: ist Overlay nicht angefordert / nicht aktiv, oder
+meldet die Capability-Detection Click-through als `unsupported` /
+`unknown`, oder lässt sich aus dem aktuellen Layout keine gültige Zone
+ableiten, bleibt das Fenster vollständig interaktiv und der Grund landet
+im Log. Logging ist pro Aktivierung auf *eine* Phasen-Zusammenfassung
+mit `requested / overlay_requested / overlay_active / capable /
+zones_derived / zones_valid / active` konsolidiert; Refreshes loggen
+nur bei echter Bounds-Änderung (Dedup).
+
+Sichtbarer Effekt auf der UI: der Avatar und die sichtbaren Panels
+bleiben klickbar; Klicks außerhalb dieser Bounding-Box fallen durch
+auf das darunterliegende Fenster. Leerer Raum *innerhalb* der Box
+bleibt im aktuellen MVP noch klickbar — das ist bewusst nicht das
+finale Interaktionsmodell (siehe §F.3). Presence-, Avatar- und
+EventBus-State bleiben unberührt. Vollständige Einordnung siehe
+[`docs/linux_window_overlay_architecture.md` §F.3](./linux_window_overlay_architecture.md).
 
 ---
 

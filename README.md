@@ -415,6 +415,52 @@ Grund landet im Log. Keine stillen Umschaltungen. Details siehe
 und
 [docs/ui_architecture.md §9.2](docs/ui_architecture.md).
 
+### Overlay Click-through (opt-in, setzt auf Phase B auf)
+
+Für produktives Click-through — Avatar und sichtbare Panels bleiben
+klickbar, der leere Rest des Fensters wird passthrough — gibt es einen
+zweiten, eigenen Opt-in:
+
+```bash
+SMOLIT_UI_OVERLAY=1 SMOLIT_UI_CLICK_THROUGH=1 <godot-run>
+```
+
+Der Folgeschritt aktiviert sich **ausschließlich**, wenn *alle* vier
+Bedingungen erfüllt sind:
+
+- `SMOLIT_UI_OVERLAY=1` ist gesetzt,
+- `SMOLIT_UI_CLICK_THROUGH=1` ist gesetzt,
+- der Overlay-MVP meldet sich als wirklich aktiv (Transparenz
+  tragfähig),
+- mindestens eine *gültige* interaktive Zone lässt sich aus dem
+  aktuellen Layout ableiten. Zonen stammen aus einer expliziten
+  Allowlist (Avatar, Header, Action-/Approval-/Discovery-Banner,
+  DockPanel, CompactInputPanel), müssen im Tree sichtbar sein, eine
+  Rohsize `> 0` haben, werden am Viewport geclamt und müssen nach dem
+  Clamp eine Mindestkantenlänge überschreiten (degenerierte Rects
+  fallen raus).
+
+Sonst bleibt das Fenster vollständig interaktiv; der Controller
+protokolliert einen **einheitlichen Phasen-Report** mit den Achsen
+`requested / overlay_requested / overlay_active / capable /
+zones_derived / zones_valid / active`, gefolgt von Bounds, Zonenliste
+und einer `reason`-Zeile (z. B. `overlay not requested`,
+`click-through not requested`, `overlay inactive`, `capability
+unsupported/unknown` oder `no valid interactive zones yet`). Refresh-
+Zeilen loggen nur bei echter Bounds-Änderung (Dedup). Keine stillen
+Aktivierungen.
+
+**MVP-Grenze.** Godots `DisplayServer.window_set_mouse_passthrough`
+kennt pro Fenster genau einen Polygonpfad. Der Controller fasst daher
+alle gültigen Zonen zu einer einzelnen Bounding-Rect-Union zusammen;
+leerer Raum innerhalb dieser Union bleibt klickbar. Das ist bewusst
+noch nicht das finale Interaktionsmodell — echte Multi-Polygon-Shapes
+(XShape-Multirect / `wl_surface.set_input_region` mit mehreren
+Rechtecken) bleiben Folgearbeit. Details siehe
+[docs/linux_window_overlay_architecture.md §F.3](docs/linux_window_overlay_architecture.md)
+und
+[docs/ui_architecture.md §9.3](docs/ui_architecture.md).
+
 ### Presence-Modes (Phase 3.3 MVP)
 
 Presence-State ist orthogonal zum Avatar-State und wird vom

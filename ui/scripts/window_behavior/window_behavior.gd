@@ -18,6 +18,7 @@ class_name SmolitWindowBehavior
 const _CapabilitiesRef := preload("res://scripts/window_behavior/window_capabilities.gd")
 const _ProbeRef := preload("res://scripts/window_behavior/window_probe.gd")
 const _OverlayRef := preload("res://scripts/window_behavior/overlay_controller.gd")
+const _ClickThroughRef := preload("res://scripts/window_behavior/overlay_click_through_controller.gd")
 
 
 ## Cheap — nur Detection. Sicher, auch aus `_ready()` aufzurufen.
@@ -50,3 +51,21 @@ static func activate_overlay_if_requested(anchor: Node) -> Dictionary:
 ## den Overlay-Modus. Nicht als Default-Pfad gedacht.
 static func activate_overlay_now(anchor: Node) -> Dictionary:
 	return _OverlayRef.activate_now(anchor)
+
+
+## Opt-in Click-through-Folgeschritt auf den Overlay-MVP. Aktiviert
+## Mouse-Passthrough außerhalb definierter interaktiver Zonen — nur,
+## wenn `SMOLIT_UI_OVERLAY=1` *und* `SMOLIT_UI_CLICK_THROUGH=1` gesetzt
+## sind, der übergebene `overlay_result` einen aktiven Overlay-Modus
+## beschreibt und die Click-through-Capability tragfähig ist. Ohne
+## Opt-in, ohne aktives Overlay oder ohne sinnvolle Zonen passiert
+## nichts; der Grund landet im Log.
+##
+## `overlay_result` ist genau der Rückgabewert von
+## `activate_overlay_if_requested` / `activate_overlay_now` — die
+## Funktionen sind so entworfen, dass sie kettenbar sind, ohne dass
+## `main.gd` irgendein Overlay-Detailwissen aufbauen muss.
+static func activate_click_through_if_requested(
+	anchor: Node, overlay_result: Dictionary
+) -> Dictionary:
+	return _ClickThroughRef.activate_if_requested(anchor, overlay_result)

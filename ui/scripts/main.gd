@@ -13,6 +13,12 @@ extends Control
 const PresenceStateRef := preload("res://scripts/presence/presence_state.gd")
 const _WindowBehaviorRef := preload("res://scripts/window_behavior/window_behavior.gd")
 
+## Wird gesetzt, wenn der opt-in Click-through-Folgeschritt wirklich aktiv
+## geworden ist. Reiner Lifetime-Anker — `main.gd` spricht den Controller
+## nicht an, er hält nur seine eigene Signal-Subscription am Leben. Ohne
+## diesen Verweis würde das `RefCounted` sofort nach `_ready()` freigegeben.
+var _click_through_controller: RefCounted = null
+
 @onready var _presence: Node = $PresenceController
 
 @onready var _status: Label = $VBox/HeaderRow/StatusLabel
@@ -151,7 +157,18 @@ func _ready() -> void:
 	# unless `SMOLIT_UI_OVERLAY=1` is set and the current session
 	# advertises transparency as available/experimental. Honest fallback
 	# to the normal window otherwise; no scene or presence change.
-	_WindowBehaviorRef.activate_overlay_if_requested(self)
+	var overlay_result: Dictionary = _WindowBehaviorRef.activate_overlay_if_requested(self)
+
+	# Overlay click-through follow-up. Additional opt-in via
+	# `SMOLIT_UI_CLICK_THROUGH=1`; only takes effect on top of an
+	# already-active overlay, and only when interactive zones can be
+	# derived from the current layout. Honest no-op in every other
+	# case — reason goes to the log.
+	var click_through_result: Dictionary = \
+		_WindowBehaviorRef.activate_click_through_if_requested(self, overlay_result)
+	var controller_variant: Variant = click_through_result.get("controller", null)
+	if controller_variant is RefCounted:
+		_click_through_controller = controller_variant
 
 
 func _set_connected(ok: bool) -> void:

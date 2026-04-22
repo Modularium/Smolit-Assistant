@@ -339,20 +339,37 @@ dokumentierter Fallback.
 - [ ] Backends als getrennte Familie einordnen: `backend_x11`,
       `backend_wayland_mutter`, `backend_wayland_wlroots`,
       `backend_noop` (first-class Fallback).
-- [~] Overlay-MVP Phase B (opt-in): transparent + borderless
+- [x] Overlay-MVP Phase B (opt-in): transparent + borderless
       Presence-Fenster per `SMOLIT_UI_OVERLAY=1`, capability-gesteuert
       mit ehrlichem Fallback; **ohne** Always-on-top-Zusicherung unter
-      GNOME/Wayland und **ohne** produktives Click-through
-      (interaktive Zonen / Passthrough-Polygone sind Folgearbeit).
-      Siehe
+      GNOME/Wayland. Produktives Click-through hat seinen eigenen
+      Folgepunkt (siehe nächsten Eintrag), ist nicht stillschweigend in
+      Phase B enthalten. Siehe
       [docs/linux_window_overlay_architecture.md §F.2](./docs/linux_window_overlay_architecture.md)
       und
       [docs/ui_architecture.md §9.2](./docs/ui_architecture.md).
-- [ ] Click-through mit definierten interaktiven Zonen
-      (Avatar + Banner bleiben klickbar) als Folgeschritt auf Phase B —
-      X11 via XShape/`WINDOW_FLAG_MOUSE_PASSTHROUGH` + Passthrough-
-      Polygon, Wayland via `wl_surface.set_input_region` plus
-      Input-Region pro interaktiver Zone.
+- [~] Click-through mit definierten interaktiven Zonen (opt-in
+      Folgeschritt auf Phase B) — Zwischenstand, ausdrücklich noch
+      **nicht** das finale Interaktionsmodell. Aktiv nur, wenn
+      `SMOLIT_UI_CLICK_THROUGH=1` gesetzt ist, Overlay wirklich aktiv
+      ist, Click-through-Capability tragfähig ist und mindestens eine
+      *gültige* Zone (Allowlist, Visible, Rohsize > 0, Viewport-Clamp,
+      Mindestkantenlänge) ableitbar ist. Aktueller MVP nutzt Godots
+      `DisplayServer.window_set_mouse_passthrough` mit *einem*
+      Polygonpfad und fasst alle gültigen Zonen (Avatar, Header,
+      Banner, DockPanel, CompactInputPanel) zu einer **einzigen
+      Bounding-Rect-Union** zusammen — leerer Raum *innerhalb* dieser
+      Box bleibt klickbar. Refresh läuft über `visibility_changed` /
+      `resized`-Signale und einen einmaligen `call_deferred`-Post-
+      Layout-Refresh; Refresh-Logs sind dedupliziert. Ausdrücklich
+      offen bis zur Ablösung dieses Zwischenstandes:
+      Multi-Polygon-Passthrough-Shapes (XShape-Multirect unter X11
+      bzw. `wl_surface.set_input_region` mit mehreren Rechtecken
+      unter Wayland), präzisere Input-Regionen statt Bounding-Union,
+      robustere HiDPI-/Mehrfenster-Koordinaten. Siehe
+      [docs/linux_window_overlay_architecture.md §F.3](./docs/linux_window_overlay_architecture.md)
+      und
+      [docs/ui_architecture.md §9.3](./docs/ui_architecture.md).
 - [ ] Compositor-spezifische Pfade (wlroots layer-shell,
       optional GNOME-Extension) erst in Phase C, falls
       Nutzungsnachfrage da ist.
