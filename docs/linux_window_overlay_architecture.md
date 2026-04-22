@@ -377,7 +377,7 @@ ui/scripts/window_behavior/
 ├── backend_noop.gd                           # first-class Fallback für unknown Sessions
 ├── backend_x11.gd                            # X11-Delegations-Backend
 ├── backend_wayland_mutter.gd                 # Wayland/GNOME — delegiert, keine GNOME-Extension
-├── backend_wayland_wlroots.gd                # Wayland/wlroots-Familie — delegiert, keine layer-shell
+├── backend_wayland_wlroots.gd                # Wayland/wlroots-Familie — delegiert + experimental stance marker (siehe docs/wlroots_overlay_path.md)
 ├── backend_xwayland.gd                       # Wayland-Session + X11-Driver (XWayland-Sonderfall)
 ├── backend_wayland_generic.gd                # Wayland-Fallback (unbekannter Compositor, z. B. KDE/Wayland)
 └── backend_resolver.gd                       # Session + Desktop → Backend-Auswahl
@@ -397,6 +397,11 @@ Verifikation der Backend-Zuordnung (welches Backend wählt der
 Resolver unter welchen Bedingungen, und wie belastbar ist das heute
 gemessen): siehe
 [`window_behavior_backend_verification.md`](./window_behavior_backend_verification.md).
+Erster **experimenteller Sonderpfad** der Familie ist
+`backend_wayland_wlroots` — benannter Platzhalter für einen
+späteren `wlr-layer-shell-unstable-v1`-Pfad, heute keine
+Aktivierung. Forschungs-/Decision-Dokument:
+[`wlroots_overlay_path.md`](./wlroots_overlay_path.md).
 Der opt-in Runtime-Report (`SMOLIT_WINDOW_REPORT=1`) zeigt die
 gewählte `backend.id` + `backend.description` in einem eigenen
 Block; der Resolver-Klassifikations-Smoketest

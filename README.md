@@ -369,7 +369,11 @@ ausgewählt über `backend_resolver.gd`; gewählte `backend.id` wird
 im opt-in Runtime-Report sichtbar gemacht, Zuordnung via
 `scripts/resolver_classification_smoke.gd` empirisch geprüft,
 Evidenzmatrix in
-[docs/window_behavior_backend_verification.md](docs/window_behavior_backend_verification.md)).
+[docs/window_behavior_backend_verification.md](docs/window_behavior_backend_verification.md);
+`backend_wayland_wlroots` trägt als *einziges* Backend einen
+`experimental_stance`-Marker für einen späteren
+`wlr-layer-shell`-Pfad — heute keine Aktivierung, siehe
+[docs/wlroots_overlay_path.md](docs/wlroots_overlay_path.md)).
 Alle Aktivierungspfade teilen ein gemeinsames Ergebnis-Vokabular
 (`requested / capable / applied / observed / active / reason`,
 siehe `window_behavior_result.gd`). Einziger Einstiegspunkt aus

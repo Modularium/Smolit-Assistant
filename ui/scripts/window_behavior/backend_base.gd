@@ -50,6 +50,15 @@ var backend_id: String = "base"
 var backend_description: String = "default delegating base"
 
 
+## Optionaler Einzeiler, der angibt, ob dieses Backend einen
+## **experimentellen** Sonderpfad trägt, der noch nicht produktiv
+## aktiv ist (z. B. `wlroots`-Spezialvorbereitung). Leer bei
+## Backends, die einfach delegieren und keinen Sonderstatus
+## beanspruchen. Der Runtime-Report zeigt diesen String nur, wenn
+## er gesetzt ist — kein Default-Log-Spam.
+var experimental_stance: String = ""
+
+
 ## Führt die Overlay-Aktivierung durch. Default-Implementierung ist
 ## identisch zum bisherigen Fassadenpfad: sie ruft den existierenden
 ## Overlay-Controller auf und gibt dessen Status-Dict weiter.

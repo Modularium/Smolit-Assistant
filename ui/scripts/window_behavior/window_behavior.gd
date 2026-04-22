@@ -157,6 +157,7 @@ static func apply_all(anchor: Node) -> Dictionary:
 	var backend_info := {
 		"id": backend.backend_id,
 		"description": backend.backend_description,
+		"experimental_stance": backend.experimental_stance,
 	}
 	_RuntimeReportRef.print_if_requested(
 		overlay_result, click_through_result, always_on_top_result, backend_info

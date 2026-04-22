@@ -427,6 +427,21 @@ dokumentierter Fallback.
       Architekturdokuments genannten Setter-/Positionsoperationen
       sind noch offen, ebenso echte Compositor-Läufe auf realen
       Mutter-Wayland-/KDE-Wayland-/wlroots-Sessions.
+- [~] Experimenteller wlroots-Vorbereitungspfad —
+      `backend_wayland_wlroots` trägt jetzt als **einziges** Backend
+      einen `experimental_stance`-Marker und ergänzt die
+      Aktivierungs-Ergebnis-Dicts additiv um einen
+      `wlroots_research`-Block (`state = "prepared, not
+      implemented"`). Runtime-Report druckt `backend.experimental =
+      experimental seat for a future wlr-layer-shell-unstable-v1
+      path …`, wenn dieses Backend gewählt wurde. Verhalten
+      unverändert: keine layer-shell-Integration, keine neue
+      Aktivierung, kein Nutzerversprechen unter wlroots. Forschungs-
+      und Decision-Grundlage:
+      [docs/wlroots_overlay_path.md](./docs/wlroots_overlay_path.md).
+      Offen: echter Spike mit `wlr-layer-shell-unstable-v1`,
+      Godot-/GDExtension-/Host-Prozess-Frage aus §F des
+      Architekturdokuments, echte Sway-/Hyprland-Messung.
 - [x] Overlay-MVP Phase B (opt-in): transparent + borderless
       Presence-Fenster per `SMOLIT_UI_OVERLAY=1`, capability-gesteuert
       mit ehrlichem Fallback; **ohne** Always-on-top-Zusicherung unter

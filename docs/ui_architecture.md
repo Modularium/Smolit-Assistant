@@ -510,6 +510,18 @@ halbparallele Sonderpfade neben einander baut:
   Snapshots. Messmatrix und Evidenzniveau pro Backend stehen in
   [`docs/window_behavior_backend_verification.md`](./window_behavior_backend_verification.md).
 
+  **Experimenteller Sonderpfad.** Backends dürfen optional einen
+  `experimental_stance`-String tragen; der Runtime-Report zeigt
+  ihn als zusätzliche Zeile `backend.experimental = …`. Aktuell
+  ist das **ausschließlich** `backend_wayland_wlroots.gd` —
+  benannter Platzhalter für einen späteren
+  `wlr-layer-shell-unstable-v1`-Pfad. Kein produktiver Code, keine
+  Aktivierung, kein Compositor-spezifischer Effekt heute; die
+  Aktivierungs-Ergebnis-Dicts enthalten additiv einen
+  `wlroots_research`-Marker (`state = "prepared, not implemented"`).
+  Forschungs- und Decision-Dokument:
+  [`docs/wlroots_overlay_path.md`](./wlroots_overlay_path.md).
+
 `main.gd` ruft in `_ready()` nur noch `SmolitWindowBehavior.apply_all(
 self)` auf und hält den Click-through-Controller (falls aktiv) als
 Lifetime-Anker, damit dessen Signal-Subscriptions bestehen bleiben.

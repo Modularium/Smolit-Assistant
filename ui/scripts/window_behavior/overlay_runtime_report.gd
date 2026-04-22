@@ -98,6 +98,13 @@ static func _append_backend_lines(
 	var description: String = str(backend_info.get("description", ""))
 	if description != "":
 		lines.append("[report] backend.description        = %s" % description)
+	# Experimentelle Sonderpfade (z. B. backend_wayland_wlroots) dürfen
+	# hier eine einzelne `stance`-Zeile anhängen. Leerer String → keine
+	# Zeile, damit Standard-Backends (x11, wayland-mutter, …) das
+	# bisherige Report-Format unverändert lassen.
+	var stance: String = str(backend_info.get("experimental_stance", ""))
+	if stance != "":
+		lines.append("[report] backend.experimental       = %s" % stance)
 
 
 # --- Section: session / display driver ----------------------------------
