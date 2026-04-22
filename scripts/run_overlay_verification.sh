@@ -50,6 +50,11 @@
 #                   (ui/scripts/dev_controls/): Phase-Namen,
 #                   Theme/Profile-Round-Trips, 4x3x3 Appearance-
 #                   Matrix, Identity-Invarianz. Exit 0 = alle PASS.
+#   avatar-preferences-smoke
+#                 — Führt scripts/avatar_preferences_smoke.gd aus.
+#                   Prüft Load/Save/Fallback-Reihenfolge, invalide
+#                   Werte, partielle Dateien, Fremd-Sektions-
+#                   Erhaltung und Intensity-Clamping. Exit 0 = alle PASS.
 #   resolver-wayland-mutter
 #                 — Env-Override (Wayland + GNOME) + Report. Zeigt, dass
 #                   der Resolver backend_wayland_mutter wählt und der
@@ -206,6 +211,13 @@ case "${CASE}" in
     # Theme/Profile-Round-Trips, make_appearance-Matrix, Identity).
     exec godot --headless --path "${UI_DIR}" \
       --script "${REPO_ROOT}/scripts/dev_controls_smoke.gd"
+    ;;
+  avatar-preferences-smoke)
+    # Spezialfall: Persistenz-Smoke für ui/scripts/avatar/avatar_preferences.gd.
+    # Prüft Load/Save/Fallback-Reihenfolge, invalide Einträge,
+    # partielle Dateien, Fremd-Sektions-Erhaltung und Intensity-Clamping.
+    exec godot --headless --path "${UI_DIR}" \
+      --script "${REPO_ROOT}/scripts/avatar_preferences_smoke.gd"
     ;;
   resolver-wayland-mutter)
     export SMOLIT_WINDOW_REPORT=1

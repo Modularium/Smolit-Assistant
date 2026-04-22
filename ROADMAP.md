@@ -444,8 +444,12 @@ und Theme:
 - visuelle Intensität
 
 Overrides sind additiv zum Theme und persistieren als reine
-UI-Präferenz (Ort und Form der Persistenz sind in dieser Phase
-nicht festgelegt).
+UI-Präferenz. Im Ist-Zustand landet das in einer sehr kleinen
+lokalen ConfigFile (`user://smolit_ui.cfg`, Sektion
+`[avatar_appearance]`); siehe
+[`docs/ui_architecture.md` §8b.7](./docs/ui_architecture.md). Eine
+größere Persistenz-/Nutzerprofil-Architektur ist in dieser Phase
+bewusst *nicht* Teil des Scopes.
 
 ### 4b.4 Behavior Profiles (UI-Ebene)
 
@@ -476,16 +480,28 @@ Stufe A ist implementiert; B und C bleiben Ziel-Zustand.
   `SMOLIT_AVATAR_INTENSITY`) und zusätzlich über die kleine
   env-gated Dev-Steuerung
   (`SMOLIT_UI_DEV_CONTROLS=1`, Theme/Profile/Intensity live in der
-  UI schaltbar — keine Persistenz, keine Settings-Architektur;
-  siehe
+  UI schaltbar; siehe
   [`docs/ui_architecture.md` §8c](./docs/ui_architecture.md)).
+  Seit diesem PR zusätzlich eine **kleine lokale UI-Persistenz**
+  (`ui/scripts/avatar/avatar_preferences.gd`, Datei
+  `user://smolit_ui.cfg`, Sektion `[avatar_appearance]`) — die
+  Dev-Steuerung bekommt einen `Save as default`-Button,
+  ausdrücklich **kein** Auto-Save, **kein** Settings-System, **kein**
+  Nutzerprofil. Prioritätsreihenfolge beim Laden ist feldweise und
+  bindend: `Env > gespeicherte Preferences > harte Defaults`. Ohne
+  Env und ohne Preferences-Datei bleibt das Startverhalten byte-
+  identisch zum vor-PR-Stand (alle 8 Harness-Cases diff-sauber).
   Identitätsgarantie (DEFAULT + CALM + Unity-Overrides == vor-PR-
   Verhalten) durch den Smoketest
   `scripts/avatar_appearance_smoke.gd` belegt (32 Assertions
   PASS; Harness-Case `avatar-appearance-smoke`). Zusätzlich
   deckt `scripts/dev_controls_smoke.gd` die Übersetzungslogik
   zwischen Panel und Controllern ab (15 Assertions PASS;
-  Harness-Case `dev-controls-smoke`). Details siehe
+  Harness-Case `dev-controls-smoke`), und der neue
+  `scripts/avatar_preferences_smoke.gd` prüft Load/Save/Fallback-
+  Reihenfolge, invalide Einträge, partielle Dateien und Intensity-
+  Clamping (22 Assertions PASS; Harness-Case
+  `avatar-preferences-smoke`). Details siehe
   [`docs/ui_architecture.md` §8b.7](./docs/ui_architecture.md).
 - **Stufe B — Kuratierte Templates (Ziel-Zustand).** Alternative
   Figuren (Roboter, Mensch, Tier, abstrakte Effekte) als vom

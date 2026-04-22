@@ -35,16 +35,17 @@ extends Control
 
 const AvatarStateRef := preload("res://scripts/avatar/avatar_state.gd")
 const AvatarAppearanceRef := preload("res://scripts/avatar/avatar_appearance.gd")
+const AvatarPreferencesRef := preload("res://scripts/avatar/avatar_preferences.gd")
 
 signal clicked
 signal toggle_dock
 signal moved(position: Vector2)
 
-## Optionale Env-Variablen für Avatar Appearance Phase A. Werden in
-## `_ready()` einmalig gelesen und sind bewusst der einzige
-## Konfigurationspfad für diesen MVP — kein Settings-Bereich, keine
-## Persistenz, keine Laufzeit-Umschalter. Unbekannte Werte fallen
-## still auf Default / Clamping zurück (siehe avatar_appearance.gd).
+## Optionale Env-Variablen für Avatar Appearance Phase A. Sie haben
+## die höchste Priorität — wer sie setzt, übersteuert gespeicherte
+## Preferences und harten Default. Unbekannte / leere Werte werden
+## behandelt, als wären sie nicht gesetzt (der nächste Schritt in der
+## Kette greift: Preferences, dann Default).
 const ENV_APPEARANCE_THEME: String = "SMOLIT_AVATAR_THEME"
 const ENV_APPEARANCE_PROFILE: String = "SMOLIT_AVATAR_PROFILE"
 const ENV_APPEARANCE_INTENSITY: String = "SMOLIT_AVATAR_INTENSITY"
@@ -135,7 +136,7 @@ var _appearance: Dictionary = AvatarAppearanceRef.new_appearance()
 
 
 func _ready() -> void:
-	_load_appearance_from_env()
+	_load_appearance()
 	# Root-Scale einmalig auf den Appearance-Scale setzen. Hover-Pops
 	# und State-Pulse bauen darauf auf (siehe `_apply_hover_visual`
 	# und `_start_breath_tween`).
@@ -522,6 +523,21 @@ func _appearance_tint(base_color: Color) -> Color:
 	return AvatarAppearanceRef.resolved_tint(_appearance, base_color)
 
 
+## Persistiert Theme / Profile / Intensity des aktuellen Appearance-
+## Dicts in `user://smolit_ui.cfg` (Sektion `[avatar_appearance]`).
+## Dünner Wrapper um den Preferences-Helper — so kann die kleine Dev-
+## Steuerung persistieren, ohne selbst eine zweite Wahrheit über den
+## Pfad oder die Sanitisierungsregeln zu halten. Gibt den
+## `ConfigFile.save`-Statuscode zurück (OK bei Erfolg).
+func save_current_preferences() -> int:
+	var overrides: Dictionary = _appearance.get("overrides", {})
+	return AvatarPreferencesRef.save_preferences(
+		int(_appearance.get("theme", AvatarAppearanceRef.DEFAULT_THEME)),
+		int(_appearance.get("profile", AvatarAppearanceRef.DEFAULT_PROFILE)),
+		float(overrides.get("intensity", 1.0)),
+	)
+
+
 ## Liefert eine flache Kopie des aktuellen Appearance-Dicts. Primär
 ## für Dev-/Preview-Steuerungen gedacht (siehe
 ## `ui/scripts/dev_controls/`) — der Rückgabewert ist eine Kopie,
@@ -562,39 +578,75 @@ func set_appearance(new_appearance: Dictionary) -> void:
 	_apply_state_visuals()
 
 
-## Liest die drei opt-in Env-Variablen für Phase-A-Personalisierung
-## und baut daraus einmalig `_appearance`. Unbekannte oder leere
-## Werte fallen auf Default/Clamping zurück — kein Crash, kein
-## Log-Spam. Der Identitätspfad (keine Env gesetzt) erzeugt
-## *exakt* das vor-PR-Verhalten: DEFAULT-Theme + CALM-Profile +
-## Unity-Overrides.
-func _load_appearance_from_env() -> void:
-	var theme_raw := OS.get_environment(ENV_APPEARANCE_THEME)
-	var profile_raw := OS.get_environment(ENV_APPEARANCE_PROFILE)
-	var intensity_raw := OS.get_environment(ENV_APPEARANCE_INTENSITY).strip_edges()
+## Baut `_appearance` nach der Prioritätskette
+##   Env > gespeicherte UI-Preferences > harter Default
+## pro Feld (theme / profile / intensity) auf. Die Kette ist
+## absichtlich feldweise, nicht blockweise: wer nur `SMOLIT_AVATAR_THEME`
+## setzt, bekommt das Env-Theme **plus** die gespeicherten Werte für
+## Profile und Intensity (sofern vorhanden).
+##
+## Ohne Env und ohne gespeicherte Datei reproduziert diese Funktion
+## *exakt* das vor-PR-Verhalten — DEFAULT-Theme + CALM-Profile +
+## Unity-Overrides, kein Log-Output, byte-kompatibel zu den bisherigen
+## Harness-Cases.
+func _load_appearance() -> void:
+	var theme_env := OS.get_environment(ENV_APPEARANCE_THEME).strip_edges()
+	var profile_env := OS.get_environment(ENV_APPEARANCE_PROFILE).strip_edges()
+	var intensity_env := OS.get_environment(ENV_APPEARANCE_INTENSITY).strip_edges()
 
-	var theme: int = AvatarAppearanceRef.theme_from_string(theme_raw)
-	var profile: int = AvatarAppearanceRef.profile_from_string(profile_raw)
+	var prefs: Dictionary = AvatarPreferencesRef.load_preferences()
+
+	var theme: int = AvatarAppearanceRef.DEFAULT_THEME
+	var theme_source := "default"
+	if theme_env != "":
+		theme = AvatarAppearanceRef.theme_from_string(theme_env)
+		theme_source = "env"
+	elif prefs.has(AvatarPreferencesRef.KEY_THEME):
+		theme = int(prefs[AvatarPreferencesRef.KEY_THEME])
+		theme_source = "prefs"
+
+	var profile: int = AvatarAppearanceRef.DEFAULT_PROFILE
+	var profile_source := "default"
+	if profile_env != "":
+		profile = AvatarAppearanceRef.profile_from_string(profile_env)
+		profile_source = "env"
+	elif prefs.has(AvatarPreferencesRef.KEY_PROFILE):
+		profile = int(prefs[AvatarPreferencesRef.KEY_PROFILE])
+		profile_source = "prefs"
+
 	var intensity: float = 1.0
-	if intensity_raw != "":
-		if intensity_raw.is_valid_float():
-			intensity = float(intensity_raw)
+	var intensity_source := "default"
+	if intensity_env != "":
+		if intensity_env.is_valid_float():
+			intensity = float(intensity_env)
+			intensity_source = "env"
 		else:
-			push_warning("avatar_appearance: SMOLIT_AVATAR_INTENSITY is not a number — falling back to 1.0.")
+			push_warning("avatar_appearance: SMOLIT_AVATAR_INTENSITY is not a number — falling back.")
+			if prefs.has(AvatarPreferencesRef.KEY_INTENSITY):
+				intensity = float(prefs[AvatarPreferencesRef.KEY_INTENSITY])
+				intensity_source = "prefs"
+	elif prefs.has(AvatarPreferencesRef.KEY_INTENSITY):
+		intensity = float(prefs[AvatarPreferencesRef.KEY_INTENSITY])
+		intensity_source = "prefs"
 
-	_appearance = AvatarAppearanceRef.make_appearance(theme, profile, Color(1, 1, 1, 1), intensity, 1.0)
+	_appearance = AvatarAppearanceRef.make_appearance(
+		theme, profile, Color(1, 1, 1, 1), intensity, 1.0,
+	)
 
-	# Nur loggen, wenn explizit konfiguriert wurde — Default-Lauf
-	# bleibt byte-kompatibel still.
-	var env_touched: bool = theme_raw.strip_edges() != "" \
-		or profile_raw.strip_edges() != "" \
-		or intensity_raw != ""
-	if env_touched:
+	# Nur loggen, wenn irgendetwas aktiv gesetzt wurde — der pure
+	# Default-Start bleibt byte-kompatibel stumm.
+	var touched: bool = theme_source != "default" \
+		or profile_source != "default" \
+		or intensity_source != "default"
+	if touched:
 		var overrides: Dictionary = _appearance["overrides"]
-		print("[avatar-appearance] identity=%s theme=%s profile=%s intensity=%.2f scale=%.2f" % [
+		print("[avatar-appearance] identity=%s theme=%s(%s) profile=%s(%s) intensity=%.2f(%s) scale=%.2f" % [
 			str(_appearance.get("identity", "smolit_salamander")),
 			AvatarAppearanceRef.theme_name(int(_appearance["theme"])),
+			theme_source,
 			AvatarAppearanceRef.profile_name(int(_appearance["profile"])),
+			profile_source,
 			float(overrides["intensity"]),
+			intensity_source,
 			float(overrides["scale"]),
 		])

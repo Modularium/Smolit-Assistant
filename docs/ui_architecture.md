@@ -795,41 +795,79 @@ eine** Identity realisiert:
 
 **Steuerung** (pragmatisch, MVP-Niveau):
 
-Drei opt-in Umgebungsvariablen. Ohne Env-Setup ist das
-Appearance-System als No-op aktiv (Identitätsgarantie, siehe
-unten).
+Drei Eingabepfade, streng priorisiert:
 
-- `SMOLIT_AVATAR_THEME` — `default` / `soft` / `tech` / `minimal`.
-  Unbekannte Werte → `default`.
-- `SMOLIT_AVATAR_PROFILE` — `calm` / `lively` / `reserved`.
-  Unbekannte Werte → `calm`.
-- `SMOLIT_AVATAR_INTENSITY` — Float, geclampt auf 0.5–1.5.
-  Unparsebare Werte → 1.0 plus eine `push_warning`-Zeile.
+1. **Env-Variablen** (höchste Priorität). Gesetzte Env übersteuert
+   immer — sinnvoll für CI, Entwickler-Shells und Debug-Runs.
+   - `SMOLIT_AVATAR_THEME` — `default` / `soft` / `tech` / `minimal`.
+     Unbekannte Werte → `default`.
+   - `SMOLIT_AVATAR_PROFILE` — `calm` / `lively` / `reserved`.
+     Unbekannte Werte → `calm`.
+   - `SMOLIT_AVATAR_INTENSITY` — Float, geclampt auf 0.5–1.5.
+     Unparsebare Werte → nächster Schritt in der Kette (Prefs /
+     Default), plus eine `push_warning`-Zeile.
+2. **Lokal gespeicherte UI-Preferences** in `user://smolit_ui.cfg`,
+   Abschnitt `[avatar_appearance]`. Nur dann aktiv, wenn das
+   entsprechende Feld nicht per Env gesetzt ist — die Kette greift
+   feldweise, nicht blockweise. Ohne Datei: diese Stufe ist
+   vollständig transparent.
+3. **Harte Defaults** — `ThemePreset.DEFAULT` / `BehaviorProfile.CALM`
+   / `intensity=1.0` (Identitätswerte, Phase-A-Referenzlinie).
 
-Beispiel (Entwickler-Lauf):
+Beispiel (Entwickler-Lauf mit Env-Override):
 
 ```bash
 SMOLIT_AVATAR_THEME=tech SMOLIT_AVATAR_PROFILE=lively \
 SMOLIT_AVATAR_INTENSITY=1.2 godot --path ui
 ```
 
-Bei gesetzter Env-Konfiguration gibt der Avatar-Controller einmalig
-eine Diagnose-Log-Zeile aus:
+Beispiel (gespeicherte Preferences, kein Env):
 
-```text
-[avatar-appearance] identity=smolit_salamander theme=tech profile=lively intensity=1.20 scale=1.00
+```ini
+; ~/.local/share/godot/app_userdata/…/smolit_ui.cfg
+[avatar]
+x=1740.0
+y=980.0
+
+[avatar_appearance]
+theme="tech"
+profile="lively"
+intensity=1.2
 ```
 
-Ohne gesetzte Env bleibt der Start-Log **byte-identisch** zum
-vor-PR-Stand — der Standard-Lauf hat keinen neuen Log-Output.
+Bei irgendeiner aktiven Quelle (Env oder Prefs) gibt der Controller
+einmalig eine Diagnose-Log-Zeile aus, die pro Feld kennzeichnet,
+woher der Wert kam:
+
+```text
+[avatar-appearance] identity=smolit_salamander theme=tech(env) profile=lively(prefs) intensity=1.20(env) scale=1.00
+```
+
+Ohne gesetzte Env **und** ohne Preferences-Datei bleibt der Start-Log
+**byte-identisch** zum vor-PR-Stand — der Standard-Lauf hat keinen
+neuen Log-Output.
+
+**Preferences-Semantik.** Die UI-Preferences sind ausdrücklich ein
+kleiner, lokaler, UI-naher Persistenzpfad — kein Settings-System,
+kein Nutzerprofil, kein Account. Sie teilen sich die Datei
+`user://smolit_ui.cfg` mit der Avatar-Position (Sektion `[avatar]
+x/y`), ohne dass sich die beiden Sektionen beim Schreiben in die
+Quere kommen. Invalide Einträge (falscher Typ, unbekannter Name,
+Intensity außerhalb 0.5–1.5) werden beim Laden verworfen und durch
+`push_warning` dokumentiert; der Aufrufer fällt dann auf Env oder
+Default zurück. Beim Speichern werden alle drei Felder sanitisiert
+(Enum-Clamping, `clampf(intensity, 0.5, 1.5)`), damit selbst eine
+absichtlich korrupte Datei nicht durch die UI-API geschleust werden
+kann.
 
 **Datei-Layout:**
 
 ```text
 ui/scripts/avatar/
-├── avatar_state.gd        # (unverändert)
-├── avatar_controller.gd   # liest Env → _appearance, wrapt Konstanten
-└── avatar_appearance.gd   # NEU: Enums, Presets, resolve-Helfer
+├── avatar_state.gd         # (unverändert)
+├── avatar_controller.gd    # Env > Prefs > Default, wrapt Konstanten
+├── avatar_appearance.gd    # Enums, Presets, resolve-Helfer
+└── avatar_preferences.gd   # NEU: kleine lokale UI-Persistenz
 ```
 
 **Identitätsgarantie (geprüft im Smoketest).** `DEFAULT`-Theme +
@@ -867,8 +905,10 @@ Theme-Effekten ab (insgesamt 32 Assertions, alle PASS unter
   siehe §8b.1.
 - Kein Template-Marktplatz, kein User-Upload-Pfad — siehe §8b.4
   (Stufe C bleibt Ziel-Zustand).
-- Keine Persistenz (Config-Datei, Nutzerprofil). Wird auf
-  Env-Setup beschränkt, bis Stufe B ansteht.
+- Kein Nutzerprofil, kein Account, keine Cloud-Sync. Die lokalen
+  UI-Preferences sind bewusst auf die drei Phase-A-Felder begrenzt
+  und landen in derselben ConfigFile, die schon die Avatar-Position
+  hält.
 - Keine neuen Events, keine IPC-Nachrichten, keine neue Core-API,
   keine Presence-Mode-Änderung.
 - Keine visuellen Stil-Explosionen: alle Themes bleiben erkennbar
@@ -922,7 +962,14 @@ nicht verdeckt.
    das Appearance-Dict ersetzt, die Root-Scale aktualisiert und
    `_apply_state_visuals()` neu startet. Kein Identity-Wechsel (der
    Avatar bleibt Smolit Salamander — `set_appearance` erzwingt das
-   intern).
+   intern). Ein kleiner **„Save as default"**-Button persistiert
+   die aktuellen drei Werte via
+   `avatar_controller.save_current_preferences()` in
+   `user://smolit_ui.cfg` (Sektion `[avatar_appearance]`); jede
+   anschließende Änderung am Picker/Slider entfernt wieder die
+   „saved"-Statusanzeige, damit der Panel-Zustand ehrlich bleibt.
+   Standardverhalten ist weiter **session-only** — der Save-Klick
+   ist eine explizite, einmalige Geste, nicht Auto-Save.
 2. **Workflow-Overlay-Preview.** Sechs Preview-Knöpfe (`Hidden`,
    `Planned`, `Active`, `Completed`, `Failed`, `Cancelled`). Sie
    rufen `workflow_overlay_controller.preview_phase(name)` auf, das

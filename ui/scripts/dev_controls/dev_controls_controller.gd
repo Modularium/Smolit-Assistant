@@ -69,6 +69,8 @@ var _theme_picker: OptionButton = null
 var _profile_picker: OptionButton = null
 var _intensity_slider: HSlider = null
 var _intensity_value: Label = null
+var _save_button: Button = null
+var _save_status: Label = null
 var _phase_buttons: Array = []
 
 
@@ -178,6 +180,24 @@ func _build_avatar_section() -> Control:
 	_intensity_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	intensity_row.add_child(_intensity_value)
 
+	# Persist-Row: ein einziger "Save as default"-Button. Bewusst kein
+	# Save/Reset/Profile-Menü — das wäre schon Scope-Creep im Sinne der
+	# PR-Leitplanken. Persistiert werden nur die drei Appearance-Felder
+	# in `user://smolit_ui.cfg` (Sektion `[avatar_appearance]`).
+	var save_row := HBoxContainer.new()
+	save_row.add_theme_constant_override("separation", 6)
+	box.add_child(save_row)
+	_save_button = Button.new()
+	_save_button.text = "Save as default"
+	_save_button.tooltip_text = "Persist current theme / profile / intensity as the local UI default (user://smolit_ui.cfg)."
+	_save_button.pressed.connect(_on_save_pressed)
+	save_row.add_child(_save_button)
+	_save_status = Label.new()
+	_save_status.text = ""
+	_save_status.modulate = Color(1, 1, 1, 0.55)
+	_save_status.add_theme_font_size_override("font_size", 9)
+	save_row.add_child(_save_status)
+
 	return box
 
 
@@ -245,17 +265,26 @@ static func _select_by_id(picker: OptionButton, id: int) -> void:
 
 
 func _on_theme_selected(_index: int) -> void:
+	_clear_save_status()
 	_apply_current_appearance()
 
 
 func _on_profile_selected(_index: int) -> void:
+	_clear_save_status()
 	_apply_current_appearance()
 
 
 func _on_intensity_changed(value: float) -> void:
 	if _intensity_value != null:
 		_intensity_value.text = "%.2f" % value
+	_clear_save_status()
 	_apply_current_appearance()
+
+
+func _clear_save_status() -> void:
+	if _save_status == null:
+		return
+	_save_status.text = ""
 
 
 func _apply_current_appearance() -> void:
@@ -276,6 +305,29 @@ func _apply_current_appearance() -> void:
 		_AppearanceRef.profile_name(profile_id),
 		intensity,
 	])
+
+
+func _on_save_pressed() -> void:
+	if _avatar == null or not _avatar.has_method("save_current_preferences"):
+		_show_save_status("unavailable", Color(1, 0.6, 0.6, 0.8))
+		return
+	# `_apply_current_appearance` wurde bei jeder Änderung schon auf den
+	# Avatar gepusht; wir speichern daher einfach den aktuellen
+	# Avatar-Zustand. Kein paralleler Persistenz-Zustand im Panel.
+	var err: int = int(_avatar.call("save_current_preferences"))
+	if err == OK:
+		_show_save_status("saved", Color(0.7, 1, 0.7, 0.8))
+		print("[dev-controls] preferences saved (user://smolit_ui.cfg)")
+	else:
+		_show_save_status("error %d" % err, Color(1, 0.6, 0.6, 0.8))
+		push_warning("[dev-controls] save_current_preferences failed with error %d" % err)
+
+
+func _show_save_status(text: String, color: Color) -> void:
+	if _save_status == null:
+		return
+	_save_status.text = text
+	_save_status.modulate = color
 
 
 func _on_phase_preview_pressed(phase_name: String) -> void:
