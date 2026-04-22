@@ -4,6 +4,7 @@
 [ext_resource type="PackedScene" path="res://scenes/avatar/avatar_root.tscn" id="2_avatar"]
 [ext_resource type="Script" uid="uid://cm25rv0s348px" path="res://scripts/presence/presence_controller.gd" id="3_presence"]
 [ext_resource type="Theme" path="res://themes/compact_panel.tres" id="4_theme"]
+[ext_resource type="PackedScene" path="res://scenes/workflow_overlay/workflow_overlay_root.tscn" id="5_workflow_overlay"]
 
 [node name="Main" type="Control" unique_id=748218674]
 layout_mode = 3
@@ -290,3 +291,11 @@ offset_left = 18.0
 offset_top = 46.0
 offset_right = 122.0
 offset_bottom = 150.0
+
+[node name="WorkflowOverlay" parent="." instance=ExtResource("5_workflow_overlay")]
+z_index = 40
+layout_mode = 0
+offset_left = 18.0
+offset_top = 162.0
+offset_right = 346.0
+offset_bottom = 210.0

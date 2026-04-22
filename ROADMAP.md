@@ -83,16 +83,22 @@ Action Events; das Protokoll kennt zusätzlich
 `send_shortcut` und `focus_window` sind als Hooks modelliert, liefern
 aber `BackendUnsupported`.
 
-**Workflow-Overlay / Visual Action Flow (Ziel-Zustand, heute nicht
-implementiert).** Architektonisch vorgesehen ist ein sichtbares,
-read-only Workflow-Overlay links der Präsenzfigur bzw. als linker
-Flügel innerhalb derselben Presence-Hülle. Es soll auf Basis der
-bestehenden Action Events (`action_planned` / `action_started` /
-`action_step` / `action_completed` / `action_failed`) einen
-symbolischen Ablauf verständlich machen. Es ist **kein** Workflow-
-Builder, **kein** Desktop-Executor, **keine** zweite Wahrheit neben
-dem Core. Heute existiert weder der Renderer noch das entsprechende
-Szenen-Material im Repo — siehe Subeinheit 3.4 unten sowie
+**Workflow-Overlay / Visual Action Flow (MVP-Spike, Ist-Zustand).**
+Ein erster kleiner MVP-Spike ist eingebaut. Unter
+`ui/scripts/workflow_overlay/` liegen die vier Scripts (State,
+Controller, Node-View, Edge-View), unter
+`ui/scenes/workflow_overlay/` die Szene
+`workflow_overlay_root.tscn`. Der Overlay ist in `main.tscn`
+unterhalb des Avatars eingebettet (x=18..346, y=162..210,
+z_index=40) und konsumiert ausschließlich die bestehenden Action
+Events (`action_planned` / `action_started` / `action_step` /
+`action_completed` / `action_failed`) über den `EventBus`. Er ist
+read-only, sendet keine neuen IPC-Nachrichten, ist mouse-pass-through
+(fängt keine Klicks), versteckt sich standardmäßig und zeigt sich
+erst, wenn ein Flow läuft. Drei feste Rollen (Trigger → Action →
+Result) — **kein** Workflow-Builder, **kein** Desktop-Executor,
+**keine** zweite Wahrheit neben dem Core. Details: siehe
+Subeinheit 3.4 unten sowie
 [docs/ui_architecture.md §6a/§8a](./docs/ui_architecture.md) und
 [docs/api.md „UI-Projektion: Workflow Overlay"](./docs/api.md).
 
@@ -243,11 +249,16 @@ Szenen-Material im Repo — siehe Subeinheit 3.4 unten sowie
 - [ ] Kill-Switch / Stop-Aktion im Banner (setzt Core-seitige
       Cancel-API voraus)
 
-### Subeinheit 3.4 – Workflow Overlay / Visual Action Flow (Ziel-Zustand)
+### Subeinheit 3.4 – Workflow Overlay / Visual Action Flow (MVP-Spike)
 
-Ziel-Zustand, **heute nicht implementiert**. Keine `.gd`/`.tscn`-
-Artefakte, kein Renderer, keine Szenen. Die Subeinheit beschreibt
-*was entstehen soll*, nicht *was existiert*.
+Erster, bewusst kleiner MVP-Spike gelandet:
+`ui/scenes/workflow_overlay/workflow_overlay_root.tscn` und die vier
+Scripts unter `ui/scripts/workflow_overlay/` sind im Repo, im
+`main.tscn` unterhalb des Avatars instanziiert, read-only, per
+EventBus an die bestehenden Action Events angebunden. Die Subeinheit
+beschreibt weiterhin den gewünschten Zustand und grenzt ab, was
+*bewusst nicht* enthalten ist — der Spike ist eine Kurzprojektion,
+kein Workflow-Builder.
 
 **1. Kurzbeschreibung.** Ein transparentes, leichtgewichtiges
 visuelles Flow-Overlay, das links vom Avatar/Icon bzw. als linker

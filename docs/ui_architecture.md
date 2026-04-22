@@ -118,12 +118,18 @@ ui/
 Scenes hängen ausschließlich am `EventBus`. Der Transport (`IpcClient`) ist
 damit austauschbar, ohne Scene-Code anzufassen.
 
-### Ziel-Zustand – Workflow-Overlay-Erweiterung
+### Workflow-Overlay-Erweiterung (MVP-Spike, Ist-Zustand)
 
-Dieser Block beschreibt die **geplante** Erweiterung der Projekt-
-struktur um einen Workflow-Overlay-Renderer. Er ist **noch nicht
-implementiert**; die Dateinamen sind architektonische Platzhalter,
-keine API-Zusage.
+Ein erster kleiner Spike des Workflow-Overlays ist jetzt im Repo
+verankert. Er ist bewusst minimal: drei feste UI-Knoten (Trigger →
+Action → Result), zwei Kanten, dezente Aktivierungsanimation,
+read-only, core-driven. Keine Persistenz, keine neuen IPC-Events,
+keine neuen Protokoll-Pflichten — die Kurzprojektion entsteht aus
+den bestehenden Action Events. Die ursprüngliche Platzhalter-
+Dateiliste hat sich dadurch zur **tatsächlich existierenden**
+Struktur verfestigt (`workflow_overlay_layout.gd` aus der ersten
+Doku-Skizze ist bewusst entfallen — das MVP braucht keinen
+separaten Layout-Algorithmus, der HBoxContainer reicht):
 
 ```text
 ui/
@@ -135,23 +141,48 @@ ui/
 │   ├── main.gd
 │   └── workflow_overlay/
 │       ├── workflow_overlay_controller.gd
-│       ├── workflow_overlay_layout.gd
 │       ├── workflow_overlay_state.gd
 │       ├── workflow_node_view.gd
 │       └── workflow_edge_view.gd
 ```
 
-Wichtig:
+Wichtige Grenzen des MVP:
 
-- Zielstruktur, **heute nicht zwingend implementiert**. Weder die
-  Szene `workflow_overlay_root.tscn` noch die genannten Scripts
-  existieren derzeit im Repo.
-- Die Namen sind architektonische Platzhalter für spätere Arbeit.
-  Keine davon darf als fixierte API interpretiert werden.
-- Das Overlay lebt innerhalb derselben Presence-/Overlay-Hülle
-  (siehe [`linux_window_overlay_architecture.md`](./linux_window_overlay_architecture.md)),
-  kein separates Toplevel-Fenster, kein neues Multiwindow-System
-  im MVP.
+- **Read-only / core-driven.** Der Controller konsumiert
+  ausschließlich `EventBus`-Signale (`action_planned`,
+  `action_started`, `action_step`, `action_completed`,
+  `action_failed`, `action_cancelled`) und sendet **keine**
+  neuen IPC-Nachrichten.
+- **Drei feste Rollen.** Trigger, Action, Result. Kein Graph-
+  Framework, keine dynamische Knotenzahl, keine freie Verkabelung.
+- **Sichtbarkeit an den Flow gebunden.** Der Overlay zeigt sich
+  erst, wenn ein `action_planned` gesehen wurde; er versteckt sich
+  wieder bei `ipc_disconnected`. Presence-/Docked-Logik wird
+  dadurch nicht angefasst — es gibt **keine** zweite globale
+  Presence-State-Maschine.
+- **Keine fixen Markenfarben als API.** Zustandsfarben sind
+  Tönungen (`modulate`) auf den Panel-Views, keine veröffentlichte
+  Palette.
+- **Keine Kollision mit Approval-/Action-/Discovery-Bannern.** Der
+  Overlay sitzt absolut positioniert unterhalb des Avatars
+  (x=18..346, y=162..210) und liegt per `z_index=40` unter dem
+  Compact-Input-Panel (z=50) und dem Avatar (z=100); Banner im
+  VBox-Stack verwendet z=0 und wird bei Bedarf vom Overlay
+  *oberhalb* überlagert, ohne Interaktion zu stören (Overlay ist
+  `mouse_filter = IGNORE`).
+
+Was bewusst offen bleibt:
+
+- **Keine Step-ID-Korrelation.** Der MVP nimmt jedes
+  `action_planned` als neuen Flow an, unabhängig vom
+  `action_id`-Feld — Multi-Action-Sequenzen werden also nicht
+  visuell unterschieden, sondern überschrieben.
+- **Kein Rewind, kein History-Scroller.** Nach einem
+  `action_completed`/`action_failed` bleibt der Endzustand stehen,
+  bis ein neuer Flow startet.
+- **Kein Docked-vs-Expanded-Fallback im Layout.** Visibility ist
+  rein flow-getrieben; eine spätere Feinanpassung pro Presence-
+  Mode ist möglich, aber nicht Teil dieses Spike.
 
 ---
 
@@ -181,11 +212,16 @@ autoritative Quelle; diese Datei dupliziert das Schema nicht.
 
 ---
 
-## 6a. Workflow Overlay als passiver Action-Readout (Ziel-Zustand)
+## 6a. Workflow Overlay als passiver Action-Readout (MVP-Spike, Ist-Zustand)
 
-Dieser Abschnitt beschreibt die geplante Rolle des Workflow-Overlays
-an der Schnittstelle zum Event-Strom. Er ist **Ziel-Zustand**; der
-Renderer existiert heute nicht im Repo.
+Dieser Abschnitt beschreibt die Rolle des Workflow-Overlays an der
+Schnittstelle zum Event-Strom. Seit dem MVP-Spike existiert der
+Renderer im Repo
+(`ui/scripts/workflow_overlay/`,
+`ui/scenes/workflow_overlay/workflow_overlay_root.tscn`,
+eingebettet in `main.tscn` unterhalb des Avatars). Die Leitlinien
+unten gelten unverändert für den Spike — er ist bewusst klein und
+ergänzt §8a um ein konkretes erstes Rendering.
 
 - **Definition.** Rein visuelle, read-only Darstellung von Core-
   Zuständen. Das Overlay ist keine zweite Session-Logik, sondern
@@ -471,13 +507,19 @@ Abgrenzungen (wichtig):
 
 ---
 
-## 8a. Workflow-Overlay-System (Ziel-Zustand)
+## 8a. Workflow-Overlay-System (MVP-Spike, Ist-Zustand)
 
 Dieser Abschnitt beschreibt das Workflow-Overlay als eigenständigen
-UI-Baustein. Er ist **Ziel-Zustand**: keine der genannten Klassen,
-Szenen oder Zustände existiert heute im Repo. Die Nummer §8a
-markiert einen Ziel-Zustand-Nachtrag zu §8 (dort: Ist-Zustand) und
-kollidiert nicht mit bestehenden Cross-References auf §8/§9/§10/§11.
+UI-Baustein. Seit dem ersten MVP-Spike existieren die drei
+Renderer-Scripts (`workflow_overlay_controller.gd`,
+`workflow_overlay_state.gd`, `workflow_node_view.gd`,
+`workflow_edge_view.gd`) und die Szene
+(`workflow_overlay_root.tscn`) im Repo. Die Nummer §8a markiert
+einen zusätzlichen Abschnitt neben §8 (Zustands- und Eventmodell
+Ist-Zustand) und kollidiert nicht mit bestehenden Cross-References
+auf §8/§9/§10/§11. Die ursprünglich in der Planungsphase geschriebenen
+Regeln (unten) gelten weiterhin; wo der Spike Feinentscheidungen
+getroffen hat, sind sie benannt.
 
 ### 8a.1 Rolle
 
