@@ -522,6 +522,46 @@ func _appearance_tint(base_color: Color) -> Color:
 	return AvatarAppearanceRef.resolved_tint(_appearance, base_color)
 
 
+## Liefert eine flache Kopie des aktuellen Appearance-Dicts. Primär
+## für Dev-/Preview-Steuerungen gedacht (siehe
+## `ui/scripts/dev_controls/`) — der Rückgabewert ist eine Kopie,
+## damit Konsumenten den State nicht versehentlich mutieren.
+func get_appearance() -> Dictionary:
+	# Dictionary.duplicate(true) liefert eine tiefe Kopie inkl.
+	# verschachteltem `overrides`-Dict. Für Color-Werte ist das
+	# unkritisch (Color ist value-type in GDScript).
+	return _appearance.duplicate(true)
+
+
+## Dev-/Preview-Hook für die kleine MVP-Steuerung. Ersetzt die
+## aktuelle Appearance zur Laufzeit, aktualisiert Root-Scale und
+## startet die State-Visuals neu, damit Theme-Tints und Profile-
+## Animationen sofort sichtbar werden. Kein Speichern, keine
+## Persistenz — die Änderung gilt nur für die laufende Session.
+##
+## Nicht-Ziele:
+##   * Keine Core-/IPC-Kommunikation.
+##   * Keine Identity-Änderung — `new_appearance["identity"]` muss
+##     weiterhin `smolit_salamander` sein; Phase A bleibt brand-safe.
+##   * Keine Auswirkung auf die Avatar-State-Maschine, auf Events,
+##     auf Presence oder auf Approval/Action-Banner.
+func set_appearance(new_appearance: Dictionary) -> void:
+	if new_appearance.is_empty():
+		return
+	# Identity ist in Phase A implizit fix. Falls Aufrufer ein
+	# abweichendes Feld mitschickt, ignorieren wir es still — keine
+	# alternative Figur im MVP.
+	new_appearance["identity"] = "smolit_salamander"
+	_appearance = new_appearance
+	# Root-Scale sofort an den Override anpassen (Hover-Tween bleibt
+	# relativer Puff auf dem neuen Ausgangspunkt).
+	scale = AvatarAppearanceRef.resolved_scale(_appearance, BASE_SCALE)
+	# State-Visuals neu applizieren, damit Theme-Tint und Profile-
+	# Animationen sofort greifen, statt erst beim nächsten State-
+	# Wechsel.
+	_apply_state_visuals()
+
+
 ## Liest die drei opt-in Env-Variablen für Phase-A-Personalisierung
 ## und baut daraus einmalig `_appearance`. Unbekannte oder leere
 ## Werte fallen auf Default/Clamping zurück — kein Crash, kein

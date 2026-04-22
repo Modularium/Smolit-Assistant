@@ -354,3 +354,120 @@ func _apply_node_view(view: PanelContainer, index: int, mode: int) -> void:
 func _apply_visibility() -> void:
 	var phase := int(_flow.get("phase", _StateRef.Phase.HIDDEN))
 	visible = (phase != _StateRef.Phase.HIDDEN)
+
+
+# --- Dev-/Preview-Hooks (kein Produktpfad) -------------------------------
+
+
+## Dev-/Preview-Hook. Setzt den internen Flow-Zustand direkt auf eine
+## der bekannten Phasen, ohne dafür irgendwelche Action Events zu
+## emittieren. **Keine** EventBus-Injection, **keine** Fake-Actions
+## für andere Subscriber (insbesondere der Avatar reagiert nicht auf
+## Previews). Das ist bewusst getrennt gehalten: der Workflow-Overlay
+## bleibt read-only, das Preview beeinflusst nur seine eigene
+## Darstellung.
+##
+## Labels für Trigger / Action / Result sind generische
+## „Preview …"-Texte, damit die Vorschau nie mit echten Flows
+## verwechselt wird.
+##
+## `phase_name` ist einer der case-insensitiven Strings:
+## `hidden` / `planned` / `active` / `completed` / `failed` /
+## `cancelled`. Unbekannte Eingaben fallen auf `hidden` zurück.
+func preview_phase(phase_name: String) -> void:
+	var name := phase_name.strip_edges().to_lower()
+	var flow := _StateRef.new_flow()
+	# Generische, klar als „Preview" erkennbare Labels.
+	var trigger_label := "Preview trigger"
+	var action_label := "Preview action"
+	match name:
+		"hidden":
+			# Flow im HIDDEN-Zustand belassen (alle IDLE). Overlay
+			# verschwindet.
+			pass
+		"planned":
+			flow["phase"] = _StateRef.Phase.PLANNED
+			_preview_set_nodes(flow, _StateRef.NodeState.PLANNED,
+				trigger_label, action_label, "")
+		"active":
+			flow["phase"] = _StateRef.Phase.ACTIVE
+			_preview_set_states(flow,
+				_StateRef.NodeState.COMPLETED,
+				_StateRef.NodeState.ACTIVE,
+				_StateRef.NodeState.PLANNED)
+			_preview_set_labels(flow, trigger_label, action_label, "")
+			_preview_set_edges(flow, true, false)
+		"completed":
+			flow["phase"] = _StateRef.Phase.COMPLETED
+			_preview_set_states(flow,
+				_StateRef.NodeState.COMPLETED,
+				_StateRef.NodeState.COMPLETED,
+				_StateRef.NodeState.COMPLETED)
+			_preview_set_labels(flow, trigger_label, action_label, "Preview done")
+			_preview_set_edges(flow, false, true)
+		"failed":
+			flow["phase"] = _StateRef.Phase.FAILED
+			_preview_set_states(flow,
+				_StateRef.NodeState.COMPLETED,
+				_StateRef.NodeState.FAILED,
+				_StateRef.NodeState.FAILED)
+			_preview_set_labels(flow, trigger_label, action_label, "Preview failed")
+			_preview_set_edges(flow, false, false)
+		"cancelled":
+			flow["phase"] = _StateRef.Phase.UNKNOWN
+			_preview_set_states(flow,
+				_StateRef.NodeState.COMPLETED,
+				_StateRef.NodeState.UNKNOWN,
+				_StateRef.NodeState.UNKNOWN)
+			_preview_set_labels(flow, trigger_label, action_label, "Preview cancelled")
+			_preview_set_edges(flow, false, false)
+		_:
+			# Unbekannter Name → HIDDEN (kein Crash, keine
+			# Fake-Darstellung).
+			pass
+	_flow = flow
+	_flow["last_reason"] = "dev preview: " + name
+	_refresh_display_mode()
+	_apply_flow_to_views()
+	_apply_visibility()
+
+
+static func _preview_set_nodes(flow: Dictionary, state: int,
+		trigger_label: String, action_label: String, result_label: String) -> void:
+	var nodes: Array = flow["nodes"]
+	var entry_t: Dictionary = nodes[0]
+	entry_t["state"] = state
+	entry_t["label"] = trigger_label
+	nodes[0] = entry_t
+	var entry_a: Dictionary = nodes[1]
+	entry_a["state"] = state
+	entry_a["label"] = action_label
+	nodes[1] = entry_a
+	var entry_r: Dictionary = nodes[2]
+	entry_r["state"] = state
+	entry_r["label"] = result_label
+	nodes[2] = entry_r
+
+
+static func _preview_set_states(flow: Dictionary,
+		trigger_state: int, action_state: int, result_state: int) -> void:
+	var nodes: Array = flow["nodes"]
+	var et: Dictionary = nodes[0]; et["state"] = trigger_state; nodes[0] = et
+	var ea: Dictionary = nodes[1]; ea["state"] = action_state;  nodes[1] = ea
+	var er: Dictionary = nodes[2]; er["state"] = result_state;  nodes[2] = er
+
+
+static func _preview_set_labels(flow: Dictionary,
+		trigger_label: String, action_label: String, result_label: String) -> void:
+	var nodes: Array = flow["nodes"]
+	var et: Dictionary = nodes[0]; et["label"] = trigger_label; nodes[0] = et
+	var ea: Dictionary = nodes[1]; ea["label"] = action_label;  nodes[1] = ea
+	var er: Dictionary = nodes[2]; er["label"] = result_label;  nodes[2] = er
+
+
+static func _preview_set_edges(flow: Dictionary, a_active: bool, b_active: bool) -> void:
+	var edges: Array = flow["edges"]
+	if edges.size() >= 1:
+		var e0: Dictionary = edges[0]; e0["active"] = a_active; edges[0] = e0
+	if edges.size() >= 2:
+		var e1: Dictionary = edges[1]; e1["active"] = b_active; edges[1] = e1

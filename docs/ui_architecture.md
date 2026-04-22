@@ -880,6 +880,88 @@ Theme-Effekten ab (insgesamt 32 Assertions, alle PASS unter
 
 ---
 
+## 8c. Dev-/MVP-Steuerung für Workflow-Overlay und Avatar-Appearance
+
+Kleine, dev-/preview-orientierte Hilfsschicht. Ausdrücklich **kein**
+Settings-System, **kein** Customization-Marktplatz, **kein**
+Persistenzsystem — sie macht nur die beiden bestehenden UI-Linien
+(Workflow-Overlay, Avatar-Appearance Phase A) zur Laufzeit
+beobachtbar und umschaltbar.
+
+**Gating.** Das Panel ist standardmäßig unsichtbar und stumm.
+Sichtbar wird es ausschließlich mit
+`SMOLIT_UI_DEV_CONTROLS=1`. Ohne Opt-in:
+
+- kein `[dev-controls]`-Log,
+- kein Input-Steal,
+- keine Änderung am bestehenden Startverhalten.
+
+Die 8 bestehenden Harness-Cases bleiben byte-identisch.
+
+**Datei-Layout.**
+
+```text
+ui/
+├── scenes/
+│   └── dev_controls/
+│       └── dev_controls_panel.tscn
+└── scripts/
+    └── dev_controls/
+        └── dev_controls_controller.gd
+```
+
+Das Panel ist in `main.tscn` bottom-right verankert (z_index=120,
+über Compact-Input und Workflow-Overlay), damit es bestehende UI
+nicht verdeckt.
+
+**Was die Steuerung kann.** Zwei klar getrennte Bereiche.
+
+1. **Avatar-Appearance (Phase A).** Theme-OptionButton (4 Optionen),
+   Profile-OptionButton (3 Optionen), Intensity-Slider (0.5 .. 1.5).
+   Änderungen rufen `avatar_controller.set_appearance()` auf, das
+   das Appearance-Dict ersetzt, die Root-Scale aktualisiert und
+   `_apply_state_visuals()` neu startet. Kein Identity-Wechsel (der
+   Avatar bleibt Smolit Salamander — `set_appearance` erzwingt das
+   intern).
+2. **Workflow-Overlay-Preview.** Sechs Preview-Knöpfe (`Hidden`,
+   `Planned`, `Active`, `Completed`, `Failed`, `Cancelled`). Sie
+   rufen `workflow_overlay_controller.preview_phase(name)` auf, das
+   einen synthetischen Flow direkt im Overlay setzt — **ohne**
+   Action Events an den EventBus zu emittieren. Andere Subscriber
+   (insbesondere der Avatar) reagieren nicht; die Preview ist
+   lokal an die Overlay-Darstellung gebunden.
+
+**Warum `preview_phase` statt EventBus-Injection.** Synthetische
+`action_*`-Events auf dem EventBus würden durch den Avatar-
+Controller und jeden anderen Konsumenten laufen — das wäre eine
+Fake-Action-Wahrheit in der UI, und genau das hat der PR-Scope
+ausgeschlossen. Der direkte Preview-Hook bleibt read-only und
+beeinflusst nur den Overlay-Renderer.
+
+**Was die Steuerung bewusst nicht tut.**
+
+- Keine Persistenz — Änderungen gelten nur für die laufende
+  Session. Keine ConfigFile-Writes, kein Nutzerprofil, kein
+  Sync mit dem Core.
+- Keine neuen Protokolle, keine neuen IPC-Nachrichten, keine
+  Core-/ABrain-/Policy-Kopplung.
+- Kein Workflow-Authoring, kein Graph-Editor, kein Action-
+  Auslöser. Die sechs Preview-Phasen sind canned Snapshots, keine
+  Event-Erzeugung.
+- Kein alternatives Avatar-Template, kein User-Upload, kein 3D-
+  Editor — Phase A bleibt Smolit Salamander only.
+- Keine Auswirkung auf Presence-Controller, Approval-/Action-/
+  Discovery-Banner, Compact-Input, Overlay/Click-through/AOT,
+  Window-Behavior-Backend-Familie.
+
+**Verifikation.** `scripts/dev_controls_smoke.gd` (15 Assertions,
+alle PASS): Panel-Phase-Namen gegen State-Modul gematcht,
+Theme-/Profile-Round-Trips, 4×3×3-`make_appearance`-Matrix auf
+Identität und Konsistenz geprüft, Identity-Invarianz bestätigt.
+Harness-Case `dev-controls-smoke` läuft den Test.
+
+---
+
 ## 9. Always-on-top- und Overlay-Verhalten (Ziel-Zustand)
 
 Phase 3.3 liefert das **Presence-MVP** in-window: die Modi

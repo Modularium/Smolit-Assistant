@@ -44,6 +44,12 @@
 #                   Prüft Themes / Profiles / Overrides / Clamping
 #                   und die Identitätsgarantie (Default+CALM+unity
 #                   == pre-PR-Verhalten). Exit 0 = alle PASS.
+#   dev-controls-smoke
+#                 — Führt scripts/dev_controls_smoke.gd aus.
+#                   Assertions für die kleine MVP-Dev-Steuerung
+#                   (ui/scripts/dev_controls/): Phase-Namen,
+#                   Theme/Profile-Round-Trips, 4x3x3 Appearance-
+#                   Matrix, Identity-Invarianz. Exit 0 = alle PASS.
 #   resolver-wayland-mutter
 #                 — Env-Override (Wayland + GNOME) + Report. Zeigt, dass
 #                   der Resolver backend_wayland_mutter wählt und der
@@ -192,6 +198,14 @@ case "${CASE}" in
     # Pre-PR-Werte.
     exec godot --headless --path "${UI_DIR}" \
       --script "${REPO_ROOT}/scripts/avatar_appearance_smoke.gd"
+    ;;
+  dev-controls-smoke)
+    # Spezialfall: Assertions für die kleine MVP-Dev-Steuerung aus
+    # ui/scripts/dev_controls/. Prüft die Übersetzungslogik zwischen
+    # Panel und Avatar-/Workflow-Controller (Phase-Namen,
+    # Theme/Profile-Round-Trips, make_appearance-Matrix, Identity).
+    exec godot --headless --path "${UI_DIR}" \
+      --script "${REPO_ROOT}/scripts/dev_controls_smoke.gd"
     ;;
   resolver-wayland-mutter)
     export SMOLIT_WINDOW_REPORT=1

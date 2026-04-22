@@ -291,6 +291,15 @@ Was bewusst **nicht** Teil von PR 2 ist:
 - keine Änderung an Window-Behavior, Avatar, Presence, Banner,
   Discovery-Panel, Compact-Input.
 
+**PR 4 (Dev-Steuerung).** Zusätzlich zur produktiven Workflow-
+Overlay-Logik gibt es jetzt einen kleinen, opt-in Dev-Hook
+`workflow_overlay_controller.preview_phase(name)` — siehe
+`docs/ui_architecture.md` §8c. Der Hook setzt den internen Flow-
+Zustand direkt auf eine der bekannten Phasen, ohne EventBus-
+Injection, ohne Action-Event-Erzeugung, und wird nur aus dem
+env-gategten Dev-Panel (`SMOLIT_UI_DEV_CONTROLS=1`) aufgerufen.
+Read-only-Charakter des Overlays bleibt erhalten.
+
 **1. Kurzbeschreibung.** Ein transparentes, leichtgewichtiges
 visuelles Flow-Overlay, das links vom Avatar/Icon bzw. als linker
 Flügel innerhalb derselben Presence-Hülle erscheint. Es zeigt auf
@@ -464,10 +473,19 @@ Stufe A ist implementiert; B und C bleiben Ziel-Zustand.
   `ui/scripts/avatar/avatar_appearance.gd`; Integration im
   bestehenden `avatar_controller.gd`; Steuerung via drei opt-in
   Env-Variablen (`SMOLIT_AVATAR_THEME` / `SMOLIT_AVATAR_PROFILE` /
-  `SMOLIT_AVATAR_INTENSITY`). Identitätsgarantie (DEFAULT + CALM +
-  Unity-Overrides == vor-PR-Verhalten) durch den Smoketest
+  `SMOLIT_AVATAR_INTENSITY`) und zusätzlich über die kleine
+  env-gated Dev-Steuerung
+  (`SMOLIT_UI_DEV_CONTROLS=1`, Theme/Profile/Intensity live in der
+  UI schaltbar — keine Persistenz, keine Settings-Architektur;
+  siehe
+  [`docs/ui_architecture.md` §8c](./docs/ui_architecture.md)).
+  Identitätsgarantie (DEFAULT + CALM + Unity-Overrides == vor-PR-
+  Verhalten) durch den Smoketest
   `scripts/avatar_appearance_smoke.gd` belegt (32 Assertions
-  PASS; Harness-Case `avatar-appearance-smoke`). Details siehe
+  PASS; Harness-Case `avatar-appearance-smoke`). Zusätzlich
+  deckt `scripts/dev_controls_smoke.gd` die Übersetzungslogik
+  zwischen Panel und Controllern ab (15 Assertions PASS;
+  Harness-Case `dev-controls-smoke`). Details siehe
   [`docs/ui_architecture.md` §8b.7](./docs/ui_architecture.md).
 - **Stufe B — Kuratierte Templates (Ziel-Zustand).** Alternative
   Figuren (Roboter, Mensch, Tier, abstrakte Effekte) als vom
