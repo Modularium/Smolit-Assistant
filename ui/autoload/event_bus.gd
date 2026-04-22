@@ -13,3 +13,23 @@ signal thinking_received
 signal response_received(text: String)
 signal heard_received(text: String)
 signal error_received(message: String)
+
+## Action Event Model v1 (see docs/api.md §2.5). Payload shapes match the
+## core emission 1:1; scenes may read any field they need. Unknown
+## variants degrade gracefully — the UI only reads fields it knows.
+signal action_planned_received(payload: Dictionary)
+signal action_started_received(payload: Dictionary)
+signal action_progress_received(payload: Dictionary)
+signal action_step_received(payload: Dictionary)
+signal action_verification_received(payload: Dictionary)
+signal action_completed_received(payload: Dictionary)
+signal action_failed_received(payload: Dictionary)
+signal action_cancelled_received(payload: Dictionary)
+
+## Approval / Confirmation Flow (see docs/api.md). Core emits
+## `approval_requested` when an action is gated by confirmation and
+## `approval_resolved` once the decision is final (approved, denied,
+## cancelled, or timed_out). The UI reacts to both and sends an
+## `approval_response` frame via IpcClient.send_approval_response().
+signal approval_requested_received(payload: Dictionary)
+signal approval_resolved_received(payload: Dictionary)

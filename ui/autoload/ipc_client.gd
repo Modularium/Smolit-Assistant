@@ -53,6 +53,16 @@ func voice_once() -> void:
 	_send({"type": "voice_once"})
 
 
+## Replies to a pending `approval_requested` from the core.
+## `decision` must be one of "approved", "denied", "cancelled".
+func send_approval_response(approval_id: String, decision: String) -> void:
+	_send({
+		"type": "approval_response",
+		"approval_id": approval_id,
+		"decision": decision,
+	})
+
+
 func _load_config() -> void:
 	var cfg := ConfigFile.new()
 	var err := cfg.load(_CONFIG_PATH)
@@ -142,9 +152,36 @@ func _handle_frame(raw: String) -> void:
 			EventBus.heard_received.emit(_extract_text(parsed))
 		"error":
 			EventBus.error_received.emit(str(parsed.get("message", "unknown error")))
+		"action_planned":
+			EventBus.action_planned_received.emit(_extract_payload(parsed))
+		"action_started":
+			EventBus.action_started_received.emit(_extract_payload(parsed))
+		"action_progress":
+			EventBus.action_progress_received.emit(_extract_payload(parsed))
+		"action_step":
+			EventBus.action_step_received.emit(_extract_payload(parsed))
+		"action_verification":
+			EventBus.action_verification_received.emit(_extract_payload(parsed))
+		"action_completed":
+			EventBus.action_completed_received.emit(_extract_payload(parsed))
+		"action_failed":
+			EventBus.action_failed_received.emit(_extract_payload(parsed))
+		"action_cancelled":
+			EventBus.action_cancelled_received.emit(_extract_payload(parsed))
+		"approval_requested":
+			EventBus.approval_requested_received.emit(_extract_payload(parsed))
+		"approval_resolved":
+			EventBus.approval_resolved_received.emit(_extract_payload(parsed))
 		_:
 			if _debug:
 				push_warning("[ipc] unknown message type: %s" % type)
+
+
+func _extract_payload(parsed: Dictionary) -> Dictionary:
+	var payload: Variant = parsed.get("payload", {})
+	if typeof(payload) == TYPE_DICTIONARY:
+		return payload
+	return {}
 
 
 func _extract_text(parsed: Dictionary) -> String:

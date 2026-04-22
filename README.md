@@ -39,6 +39,14 @@ SMOLIT_TTS_TIMEOUT_SECONDS=20
 
 SMOLIT_IPC_ENABLED=true
 SMOLIT_IPC_BIND=127.0.0.1:8787
+
+SMOLIT_INTERACTION_ENABLED=true
+SMOLIT_INTERACTION_BACKEND=command
+SMOLIT_INTERACTION_ALLOW_OPEN_APP=true
+SMOLIT_INTERACTION_ALLOW_TYPE_TEXT=false
+SMOLIT_INTERACTION_ALLOW_SHORTCUTS=false
+SMOLIT_INTERACTION_REQUIRE_CONFIRMATION=true
+SMOLIT_INTERACTION_OPEN_APP_CMD=
 ```
 
 ## Run
@@ -137,14 +145,74 @@ Ausgehend (Core → UI):
 
 Ungültige JSON-Payloads führen zu einer `error`-Antwort, nicht zu einem Crash.
 
-## UI (Godot, Phase 3.2 Avatar MVP)
+Zusätzlich emittiert der Core **standardisierte Action Events**
+(`action_planned`, `action_started`, `action_step`,
+`action_completed`, `action_failed`) additiv zu den klassischen
+Events — als Grundlage für spätere Avatar-/Präsenz-Reaktionen, Logs
+und die Desktop-Interaction-Schicht. Details in
+[docs/api.md](docs/api.md) §2.5.
+
+## Desktop Interaction Layer (MVP)
+
+Der Core enthält unter [core/src/interaction/](core/src/interaction/)
+einen dünnen, explizit konservativen Desktop-Interaction-Layer. Er
+modelliert Interaction-Aktionen (`InteractionAction`,
+`InteractionKind`, `InteractionPayload`), exekutiert über ein
+`InteractionBackend`-Trait und integriert sich ausschließlich über das
+Action Event Model v1 (`action_planned` → `action_started` →
+`action_step` → `action_verification` → `action_completed` /
+`action_failed`). Fehler werden über `RecoveryHint`
+(`retry` / `abort` / `ask_user` / `fallback_unavailable`) klassifiziert
+und im `action_failed.error`-Feld als `recovery_hint=<x>` übertragen.
+
+Im MVP sind `open_application` und — seit dem aktuellen Spike —
+`focus_window` wirklich implementiert (`CommandBackend`,
+konfigurierbare Kommando-Templates wie `gtk-launch {name}` /
+`xdg-open {name}` für Open-App und z. B. `wmctrl -a {name}` für
+Focus-Window). `type_text` und `send_shortcut` sind weiterhin nur als
+Hooks vorhanden, liefern `BackendUnsupported`. Defaults sind bewusst
+restriktiv: `allow_focus_window=false`, `allow_type_text=false`,
+`allow_shortcuts=false`, `require_confirmation=true`, leeres
+`SMOLIT_INTERACTION_OPEN_APP_CMD` / `…_FOCUS_WINDOW_CMD` meldet
+ehrlich „Preconditions not met" bzw. `BackendUnsupported`. Kein OCR,
+keine A11y-Traversierung, keine Pixel-Erkennung, keine globalen
+Input-Grabs, keine Wayland-Fokus-Sonderpfade — siehe
+[docs/api.md](docs/api.md) §2.6 und
+[docs/presence_desktop_interaction.md](docs/presence_desktop_interaction.md)
+§14b.
+
+Eingehende IPC-Nachrichten:
+
+```json
+{"type":"interaction_open_application","application":"firefox"}
+{"type":"interaction_focus_window","target":{"type":"window","name":"calendar"}}
+```
+
+Aktionen mit `requires_confirmation=true` (heute: jede
+`interaction_open_application` und jede `interaction_focus_window`)
+gehen durch den **Approval / Confirmation Flow**: der Core sendet `approval_requested`, die UI
+zeigt einen Banner mit Approve/Deny, und ein
+`approval_response`-Frame settelt die Aktion. Ohne Antwort innerhalb
+von `SMOLIT_APPROVAL_TIMEOUT_SECONDS` (Default 20) emittiert der Core
+`approval_resolved` mit `decision="timed_out"` und anschließend
+`action_cancelled`. Details: [docs/api.md §2.7](docs/api.md).
+
+## UI (Godot, Phase 3.3 Presence MVP)
 
 Unter [ui/](ui/) liegt ein Godot-4-Projekt, das die Core-Bridge als lokaler
-Client konsumiert. Phase 3.2 ergänzt einen ersten Avatar-MVP: ein
-Platzhalter-Avatar mit den Zuständen `idle` / `thinking` / `talking`
-(plus `disconnected` / `error`), rein auf Basis vorhandener Core-Events.
-Kein Always-on-top, keine echte Charakteranimation, keine Business-Logik
-in der UI.
+Client konsumiert. Phase 3.3 erweitert den Avatar-MVP um ein **Presence- und
+Overlay-MVP**: die UI unterscheidet zwischen einem ruhigen Docked-Modus,
+einem Expanded-Modus (Log + Text-Eingabe sichtbar) und einem Action-Modus,
+der auf standardisierte Action Events des Cores reagiert und symbolische
+Target-Informationen in einem Banner anzeigt.
+
+Presence (wie viel UI) und Avatar-State (wie der Avatar wirkt) laufen bewusst
+als zwei unabhängige Achsen — siehe
+[docs/presence_desktop_interaction.md](docs/presence_desktop_interaction.md).
+Native Always-on-top, Click-through, transparenter Desktop-Overlay und echte
+Pixel-/OCR-Interaktion sind **noch nicht** Teil dieses MVPs; die Architektur
+ist aber so vorbereitet, dass ein späteres GDExtension-Overlay ohne
+Umschreiben der Presence-Logik andocken kann.
 
 ### Starten
 
@@ -153,10 +221,13 @@ in der UI.
    (`SMOLIT_IPC_ENABLED=true`, Default-Bind `127.0.0.1:8787`).
 3. Godot-Szene ausführen. Es erscheint ein Fenster mit:
 
-   - Statuszeile (`connected` / `disconnected`)
+   - Header: Status (`connected` / `disconnected`), aktueller Presence-Mode,
+     Toggle-Button `Expand` / `Dock`
+   - Action Banner (nur sichtbar, wenn eine Action läuft) mit Titel, Step,
+     symbolischem Target-Text und Status (completed / failed / cancelled)
    - Avatar-Bereich mit State-Label und Debug-State-Anzeige
-   - Event-Log (RichTextLabel, farbcodiert)
-   - Eingabezeile + „Send" / „Ping"-Buttons
+   - Event-Log (RichTextLabel, farbcodiert) — nur im Expanded-Modus sichtbar
+   - Eingabezeile + „Send" / „Ping"-Buttons — nur im Expanded-Modus sichtbar
 
 ### Aufbau
 
@@ -168,11 +239,14 @@ ui/
 │   ├── event_bus.gd           # Signal-Hub (keine Logik)
 │   └── ipc_client.gd          # WebSocketPeer-Wrapper mit Reconnect
 ├── scenes/
-│   ├── main.tscn              # Composition Root: Status, Avatar, Log, Input
+│   ├── main.tscn              # Composition Root: Header, Banner, Avatar, Log, Input
 │   └── avatar/
 │       └── avatar_root.tscn   # eigenständige Avatar-Szene
 ├── scripts/
-│   ├── main.gd                # Scene-Controller (Log + Input)
+│   ├── main.gd                # Scene-Controller (Presence-Wiring, Log, Input)
+│   ├── presence/
+│   │   ├── presence_state.gd        # Mode-Enum + Helpers
+│   │   └── presence_controller.gd   # Presence-State-Maschine (Action-Events)
 │   └── avatar/
 │       ├── avatar_state.gd    # State-Enum + Name-Mapping
 │       └── avatar_controller.gd  # State-Mapping + Rendering
@@ -190,6 +264,29 @@ ui/
   Avatar eine neutrale Farbe.
 - `error` → kurzer Fehlerzustand nach `error`-Event, fällt auf `idle`
   bzw. `disconnected` zurück.
+- `acting` → während `action_started` / `action_step` (nur wenn der Avatar
+  nicht gerade `thinking` / `talking` ist), mit eigenem Farbton und
+  Aktivitätsindikator. Fällt nach `action_completed` / `action_failed` /
+  `action_cancelled` sauber zurück.
+
+### Presence-Modes (Phase 3.3 MVP)
+
+Presence-State ist orthogonal zum Avatar-State und wird vom
+`PresenceController` verwaltet:
+
+- `docked` → ruhige, kompakte Präsenz; Log und Eingabezeile ausgeblendet.
+- `expanded` → volle Interaktion; Log + Eingabezeile sichtbar. Umschalten
+  über den Toggle-Button.
+- `action` → automatisch aktiv, sobald der Core `action_started` /
+  `action_step` sendet. Der Action-Banner zeigt Titel, aktuellen Step und
+  symbolischen Target-Text. Nach `action_completed` / `action_failed` /
+  `action_cancelled` hält die Presence kurz als „Nachhall" den Status und
+  fällt dann zurück in den zuletzt gewählten Base-Modus.
+- `disconnected` → Core nicht erreichbar; Toggle deaktiviert.
+
+Die UI interpretiert Inhalte nicht — sie rendert ausschließlich, was der
+Core über das Action Event Model v1 als nächsten sichtbaren Zustand
+signalisiert.
 
 Der Avatar hört ausschließlich am `EventBus`. Keine zweite
 Core-Verbindung, keine UI-seitige Interpretation von Inhalten.

@@ -9,9 +9,17 @@ Desktop:
 - **Godot UI** — Avatar, Interaktion, Rendering.
 - **ABrain** — Reasoning, Lernen.
 
-Siehe [docs/VISION.md](./docs/VISION.md) für die Produktperspektive und
+Siehe [docs/VISION.md](./docs/VISION.md) für die Produktperspektive,
 [docs/ui_architecture.md](./docs/ui_architecture.md) /
-[docs/api.md](./docs/api.md) für die technische Detailebene.
+[docs/api.md](./docs/api.md) für die technische Detailebene,
+[docs/presence_desktop_interaction.md](./docs/presence_desktop_interaction.md)
+für das Presence- und Desktop-Interaction-Modell (Avatar-Präsenz,
+Automation-Schicht, Modusachsen, Sicherheits- und Performancegrenzen)
+und
+[docs/linux_window_overlay_architecture.md](./docs/linux_window_overlay_architecture.md)
+für die Linux-spezifische Fenster-/Overlay-Architektur (Wayland/X11,
+Compositor-Abhängigkeiten, Capability-Matrix, Window-Behavior-
+Abstraktion).
 
 ---
 
@@ -25,7 +33,7 @@ Siehe [docs/VISION.md](./docs/VISION.md) für die Produktperspektive und
 
 ---
 
-## Ist-Zustand (Stand Phase 3.2)
+## Ist-Zustand (Stand Phase 3.3 MVP)
 
 Produktiv im Repo vorhanden und durch Tests gedeckt:
 
@@ -38,13 +46,42 @@ Produktiv im Repo vorhanden und durch Tests gedeckt:
 - Godot-UI-Bootstrap (`ui/`) mit Autoloads `EventBus` + `IpcClient`,
   Status-/Event-Log, Reconnect 500 ms → 5 s.
 - Avatar-MVP (`ui/scenes/avatar/`, `ui/scripts/avatar/`) mit
-  State-Mapping `idle` / `thinking` / `talking` (+ `disconnected` /
-  `error`), deterministischem Rückfall auf `idle` und Platzhalter-
-  Rendering (ColorRect-Body, Gesicht, Mouth-Tween, Thinking-Indicator).
+  State-Mapping `idle` / `thinking` / `talking` / `acting`
+  (+ `disconnected` / `error`), deterministischem Rückfall auf `idle`
+  und Platzhalter-Rendering (ColorRect-Body, Gesicht, Mouth-Tween,
+  Thinking-Indicator).
+- Presence-MVP (`ui/scripts/presence/`) mit Modi
+  `docked` / `expanded` / `action` / `disconnected`, manuellem Toggle,
+  automatischem Wechsel bei Action Events und Action-Banner mit
+  symbolischem Target-Text. Orthogonal zum Avatar-State geführt.
 
 Was noch **nicht** existiert: echte Charakteranimation, Always-on-top /
 transparenter Hintergrund, Emotion-Mapping, Personality, natives
 ABrain-API, Multimodalität, Tool-Orchestrierung.
+
+Zusätzlich im Core: **Action Event Model v1** (siehe
+[docs/api.md](./docs/api.md), §2.5; `core/src/actions/`). Der Core
+emittiert standardisierte Action Events (`action_planned`,
+`action_started`, `action_step`, `action_completed`, `action_failed`)
+parallel zu den bestehenden `thinking`/`response`/`heard`/`error`-
+Nachrichten. Dieses Modell ist die gemeinsame Grundlage für spätere
+Avatar-Synchronisierung, Logs/Replay und die Desktop-Interaction-
+Linie.
+
+Ebenfalls im Core: **Desktop Interaction Layer MVP**
+(`core/src/interaction/`, siehe [docs/api.md](./docs/api.md) §2.6 und
+[docs/presence_desktop_interaction.md](./docs/presence_desktop_interaction.md)
+§14b). Der Layer modelliert Interaction-Aktionen
+(`InteractionAction` / `InteractionKind` / `InteractionPayload`),
+exekutiert über ein `InteractionBackend`-Trait (MVP: `CommandBackend`
+mit `open_application`), kennt Verifikation (`VerificationResult`,
+Confidence `verified`/`uncertain`/`failed`) und klassifiziert
+Fehler über `RecoveryHint` (`retry` / `abort` / `ask_user` /
+`fallback_unavailable`). Integration verläuft ausschließlich über
+Action Events; das Protokoll kennt zusätzlich
+`interaction_open_application` als eingehende Nachricht. `type_text`,
+`send_shortcut` und `focus_window` sind als Hooks modelliert, liefern
+aber `BackendUnsupported`.
 
 ---
 
@@ -86,12 +123,20 @@ ABrain-API, Multimodalität, Tool-Orchestrierung.
 - [x] Events: `thinking`, `response`, `heard`, `error`
 - [x] `get_status`-Endpoint
 - [x] Robuste Fehlerbehandlung (kein Crash bei ungültigem JSON)
+- [x] **Action Event Model v1** (`core/src/actions/`,
+      `action_planned` / `action_started` / `action_step` /
+      `action_completed` / `action_failed` additiv in
+      `submit_text` / `voice_once` / `speak_text`)
 
 ### Offen (Phase 2)
 
 - [ ] Server-seitige Reconnect-/Keepalive-Politik ausbauen
 - [ ] Event-Erweiterungen (TTS-Start/-Ende)
 - [ ] Streaming-Support
+- [ ] aktive Emission von `action_progress` / `action_verification` /
+      `action_cancelled` (Typen sind bereits vorgesehen)
+- [ ] strukturierte Targets (derzeit emittieren alle Flows
+      `target: unknown`)
 
 ---
 
@@ -124,12 +169,47 @@ ABrain-API, Multimodalität, Tool-Orchestrierung.
 - [ ] Speech-Bubble für `response` und `heard`
 - [ ] Speech-Sync via TTS-Lebenszyklus-Events (setzt Protokollerweiterung
       `speaking_started` / `speaking_ended` voraus)
+- [x] Avatar-State-Mapping auf Action Events (neuer `acting`-State,
+      `action_started` / `action_step` / `action_completed` /
+      `action_failed` / `action_cancelled` respektieren bestehende
+      `thinking` / `talking`-Zustände)
 
-### Subeinheit 3.3 – Fenster-Präsenz
+### Subeinheit 3.3 – Presence & Overlay MVP ✅
 
-- [ ] Always-on-top-Fenster
-- [ ] transparenter Hintergrund
-- [ ] Click-through (togglebar)
+- [x] Presence-State-Modell (`ui/scripts/presence/presence_state.gd`)
+      mit den Modi `docked` / `expanded` / `action` / `disconnected`
+- [x] Presence-Controller (`ui/scripts/presence/presence_controller.gd`)
+      als EventBus-Konsument; Hold-Timer für Completed/Failed/Cancelled,
+      automatischer Übergang in den Action-Modus bei `action_started` /
+      `action_step`
+- [x] Main-Layout mit Header (Status + Presence-Label + Toggle),
+      Action-Banner (Titel / Step / symbolisches Target / Status) und
+      docked/expanded-Umschaltung von Log und Eingabezeile
+- [x] Separation Presence-State (UI-Umfang) vs. Avatar-State
+      (visueller Ausdruck) — zwei unabhängige Achsen
+- [x] Symbolisches Target-Mapping (`→ Anwendung` / `→ Fenstertitel` /
+      `→ Label (Rolle)` / `→ Region`) — keine Pixelgeometrie
+
+### Offen (Phase 3.3)
+
+- [ ] Randloses, always-on-top Fenster (native) — unter Wayland
+      (GNOME/Mutter) **nicht** über Standard-Toplevel-Hints machbar,
+      siehe
+      [docs/linux_window_overlay_architecture.md](./docs/linux_window_overlay_architecture.md)
+      §C.1 / §D
+- [ ] Transparenter Hintergrund / echter Desktop-Overlay — unter beiden
+      Protokollen realistisch, Compositor-Edge-Cases beachten
+- [ ] Click-through-Modus (togglebar) — X11 via XShape, Wayland via
+      `wl_surface.set_input_region`, siehe
+      [docs/linux_window_overlay_architecture.md](./docs/linux_window_overlay_architecture.md)
+      §C.3
+- [ ] Snap-to-Edge, Screen-Positionierung, Multi-Monitor-Heuristik —
+      unter Wayland nicht client-seitig; frühestens in Phase C der
+      Overlay-Strategie
+- [ ] Visual Action Modes (minimal feedback / guided / theatrical) als
+      Benutzerpräferenz
+- [ ] Kill-Switch / Stop-Aktion im Banner (setzt Core-seitige
+      Cancel-API voraus)
 
 ---
 
@@ -157,6 +237,16 @@ ABrain-API, Multimodalität, Tool-Orchestrierung.
 
 ## Phase 6 – Presence System (V0.7)
 
+Ziel: Umsetzung des Presence-Modells aus
+[docs/presence_desktop_interaction.md](./docs/presence_desktop_interaction.md),
+§5–§7 (Presence Modes, Docked/Expanded/Action Mode, Visual Action
+Modes). Noch **nicht** implementiert.
+
+- [ ] Presence Modes konfigurierbar (Off / Icon only / Light avatar /
+      Full avatar)
+- [ ] Zustände Docked / Expanded / Action Mode im Overlay
+- [ ] Visual Action Modes (none / minimal feedback / guided movement /
+      full theatrical)
 - [ ] Screen-Movement
 - [ ] Idle-Behavior-Cycles
 - [ ] Attention-System
@@ -182,6 +272,94 @@ ABrain-API, Multimodalität, Tool-Orchestrierung.
 - [ ] Tool-Call-Routing
 - [ ] Plugin-System (basic)
 - [ ] Tool → UI-Feedback
+
+---
+
+## Phase 3b – Linux Window & Overlay Architecture (parallele Linie)
+
+Plattformgrundlage für spätere Overlay-Arbeit. Bewusst **keine
+Implementierung in diesem Schritt**, sondern Architektur- und
+Forschungslinie. Vollständige Grundlage in
+[docs/linux_window_overlay_architecture.md](./docs/linux_window_overlay_architecture.md).
+
+Ziel-Session: Ubuntu 24.04 / Wayland (GNOME/Mutter), X11 als
+dokumentierter Fallback.
+
+- [x] Architekturdokument Linux Window & Overlay
+      ([docs/linux_window_overlay_architecture.md](./docs/linux_window_overlay_architecture.md))
+      mit Wayland/X11-Trennung, Capability-Matrix und Phasen A/B/C.
+- [ ] Forschungsspikes zu Wayland-Constraints unter GNOME 46/47
+      (Transparenz, Input-Region, HiDPI, Fractional Scaling,
+      Nvidia/XWayland-Edge-Cases).
+- [ ] Entscheidungsspike „always-on-top unter GNOME": Extension vs.
+      Verzicht vs. compositor-spezifischer Pfad.
+- [ ] Entscheidungsspike „Godot-Fenster-Flags vs. GDExtension vs.
+      Host-Prozess mit eingebettetem Godot".
+- [ ] Window-Behavior-Abstraktion als eigene Schicht
+      (`window_behavior/`) entwerfen — Trait/Interface mit
+      `set_always_on_top`, `set_transparent`, `set_click_through`,
+      `request_position`, `current_capabilities`.
+- [ ] Backends als getrennte Familie einordnen: `backend_x11`,
+      `backend_wayland_mutter`, `backend_wayland_wlroots`,
+      `backend_noop` (first-class Fallback).
+- [ ] Overlay-MVP Phase B (opt-in): transparent + click-through +
+      interaktive Zone — **ohne** Always-on-top-Zusicherung unter
+      GNOME/Wayland.
+- [ ] Compositor-spezifische Pfade (wlroots layer-shell,
+      optional GNOME-Extension) erst in Phase C, falls
+      Nutzungsnachfrage da ist.
+- [ ] XDG-Portal-Strategie festlegen (Screenshot, Screen-Cast,
+      GlobalShortcuts, OpenURI) für spätere Desktop-Interaktion.
+
+---
+
+## Phase 8b – Desktop Interaction Layer (parallele Linie)
+
+Architektonisch eigene, von der UI entkoppelte Schicht gemäß
+[docs/presence_desktop_interaction.md](./docs/presence_desktop_interaction.md),
+§3, §4 und §10. Diese Phase ist bewusst **parallel** zu den
+UI-Phasen geführt und noch **nicht** begonnen.
+
+- [ ] Desktop Interaction Layer als eigene Adapterfamilie (nicht in
+      Godot)
+- [ ] Interaction Fidelity Modes (native-first / hybrid /
+      pixel-guided / experimental)
+- [ ] Interaction Stack v1: App Discovery → UI Targeting → Action
+      Execution → Verification → Recovery
+- [ ] Standardaktionen `open` / `focus` / `click` / `type` /
+      `shortcut` / `scroll`
+- [ ] Verifikations- und Recovery-Schicht
+- [ ] Desktop Automation Modes (none / assist only / confirm before
+      action / allowed trusted actions only)
+- [ ] Trust-Modell für Anwendungen und Fenster
+- [x] Approval / Confirmation Flow MVP zwischen Core und UI (Banner,
+      `approval_requested` / `approval_response` / `approval_resolved`,
+      Timeout über `SMOLIT_APPROVAL_TIMEOUT_SECONDS`; siehe
+      [docs/api.md §2.7](./docs/api.md))
+- [x] `focus_window` Interaction-Spike: Policy-Gate
+      (`SMOLIT_INTERACTION_ALLOW_FOCUS_WINDOW`), command-basiertes
+      MVP-Backend mit Template (`SMOLIT_INTERACTION_FOCUS_WINDOW_CMD`),
+      Approval-Integration, ehrliches `uncertain` statt Pseudo-
+      Verifikation, `BackendUnsupported` wenn kein Template (z. B.
+      Wayland). IPC-Nachricht `interaction_focus_window` additiv.
+- [ ] Confirmation- und Approval-UX für weitere Action Kinds
+      (`type_text`, `send_shortcut`, Multi-Step-Flows, persistente
+      Trust-Entscheidungen)
+- [ ] Reicheres `focus_window`-Backend jenseits command-basiertem
+      Spike (Portal / compositor-spezifische Pfade, Fokus-Probe zur
+      `verified`-Hochstufung)
+- [ ] Kill switch / Stop-Mechanik
+- [ ] Action-/Verification-/Failure-Events additiv in
+      [docs/api.md](./docs/api.md) (Basis steht seit Action Event
+      Model v1; offen sind aktive Emission und strukturierte Targets
+      aus der Automation-Schicht)
+- [ ] Avatar-Zustände für Interaktionsphasen (`targeting`,
+      `executing`, `verifying`, `recovered`, `aborted`)
+- [ ] Linux-Backends: Accessibility (AT-SPI / D-Bus), Umgang mit
+      Wayland vs. X11
+- [ ] OCR-/Template-Erkennung und Pixel-Fallback mit Safe Sandboxing
+- [ ] Performance Profiles (low / balanced / high fidelity)
+      konfigurierbar und mit Presence/Visual Action gekoppelt
 
 ---
 
@@ -240,6 +418,34 @@ sondern Merge-Kriterium.
 
 ## Aktueller Fokus
 
-→ **Phase 3.3** – Fenster-Präsenz (randloses Fenster, transparenter
-Hintergrund, Click-through togglebar). Avatar-MVP aus 3.2 steht; echte
-Charakteranimation und Speech-Sync bleiben offene Folgearbeiten.
+→ **Phase 3.3 Presence MVP** steht: Presence-State, Action-Banner und
+docked/expanded-Umschaltung laufen auf Basis der Action Events. Nächste
+Schritte sind das echte Desktop-Overlay (randloses, transparentes,
+optional click-through-fähiges Fenster) auf Basis der neuen Linux-
+Window-/Overlay-Architektur (Phase 3b, siehe
+[docs/linux_window_overlay_architecture.md](./docs/linux_window_overlay_architecture.md))
+und die strukturierten Targets aus einer Desktop-Interaction-Schicht
+(Phase 8b). Avatar-seitig bleiben echte Charakteranimation und
+Speech-Sync offene Folgearbeiten.
+
+Für den Desktop Interaction Layer läuft jetzt ein konkreter
+**Approval / Confirmation Flow MVP**: freigabepflichtige Aktionen
+(aktuell `open_application`) werden vom Core nicht mehr stumm
+abgelehnt, sondern über `approval_requested` / `approval_response` /
+`approval_resolved` an die UI gespiegelt und bei Timeout sauber
+`action_cancelled`. Details in [docs/api.md §2.7](./docs/api.md).
+
+Zusätzlich ist der erste **Interaction-Backend-Spike für
+`focus_window`** im Core gelandet: neuer IPC-Call
+`interaction_focus_window`, Policy-Gate
+`SMOLIT_INTERACTION_ALLOW_FOCUS_WINDOW` (konservativ off),
+command-basiertes Backend mit Template
+`SMOLIT_INTERACTION_FOCUS_WINDOW_CMD`, vollständige Einbindung in
+den Approval-Flow. Verifikation bleibt ehrlich `uncertain`; ohne
+Template (typisch Wayland) meldet der Core
+`BackendUnsupported("focus_window")` statt Pseudo-Erfolg.
+
+Zusätzlich begonnen: **Phase 3b Linux Window & Overlay Architecture**
+als parallele Architekturlinie. Das Dokument legt Wayland/X11-Trennung,
+Capability-Matrix und eine noch nicht implementierte Window-Behavior-
+Abstraktion fest — bewusst ohne Codeänderungen.

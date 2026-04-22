@@ -1,16 +1,24 @@
+mod actions;
 mod app;
 pub mod adapters {
     pub mod abrain;
 }
+mod approvals;
+mod audio;
 mod config;
 mod event_loop;
+mod interaction;
+mod ipc;
+
+use std::sync::Arc;
 
 use anyhow::Result;
-use tracing::debug;
+use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
 
 use crate::app::App;
 use crate::config::Config;
+use crate::event_loop::EventLoop;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -18,7 +26,21 @@ async fn main() -> Result<()> {
     init_tracing(&config.log_level);
     debug!(config = %config.as_json(), "configuration loaded");
 
-    App::new(config).run().await
+    let app = Arc::new(App::new(config));
+
+    if app.config.ipc.enabled {
+        let bind = app.config.ipc.bind.clone();
+        let ipc_app = Arc::clone(&app);
+        tokio::spawn(async move {
+            if let Err(err) = ipc::serve(ipc_app, &bind).await {
+                error!(error = %err, "IPC server stopped");
+            }
+        });
+    } else {
+        info!("IPC disabled via SMOLIT_IPC_ENABLED");
+    }
+
+    EventLoop::new(app).run().await
 }
 
 fn init_tracing(log_level: &str) {
