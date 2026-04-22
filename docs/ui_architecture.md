@@ -587,6 +587,74 @@ getroffen hat, sind sie benannt.
   wiederverwendbare Graph-Infrastruktur, keine Plug-in-Architektur
   für fremde Graphen, kein Export.
 
+### 8a.6 Darstellungsmodi (Collapse / Expand) — PR 2
+
+Seit PR 2 kennt das Overlay zwei bewusst kleine Darstellungsstufen.
+Sie werden **automatisch** aus der aktuellen Phase abgeleitet
+(siehe `workflow_overlay_state.display_mode_for_phase`) — es gibt
+keinen Nutzerschalter, keine neue Presence-State-Maschine und keine
+zweite State-Quelle:
+
+- **`COLLAPSED`** — sehr kompakte Kurzprojektion. Wird bei
+  `PLANNED` (und defensiv bei `HIDDEN`) verwendet. Kleinere
+  Mindestgrößen der Node-Kapseln, kürzere Schrift, schmalere
+  Kanten, knappere Zeilenseparation.
+- **`EXPANDED`** — lesbarere Kurzprojektion. Wird bei `ACTIVE`,
+  `COMPLETED`, `FAILED`, `UNKNOWN` verwendet. Größere
+  Mindestgrößen, etwas mehr Schrift, optionale zusätzliche Hint-
+  Zeile.
+
+Zweck: in der ruhigen Planungsphase bleibt das Overlay klein und
+unauffällig; sobald wirklich etwas passiert (aktiver Schritt,
+Ergebnis), wird die Darstellung spürbar lesbarer — ohne den
+Scope in Richtung freier Canvas / Editor zu verschieben.
+
+Der Darstellungsmodus ist:
+
+- **keine Interaktion**, sondern eine reine Funktion der Phase.
+- **kein Ersatz für die Presence-Modi** (Docked / Expanded / Action
+  / Disconnected) — diese bleiben unabhängig und kollidieren nicht.
+- **keine neue Wahrheit** — der Modus wird pro Phase neu aus dem
+  State-Modul abgeleitet und nicht persistiert.
+
+### 8a.7 Robustere Event-Rekonstruktion — PR 2
+
+PR 2 härtet die Projektion an drei Stellen, ohne neue Event-Typen
+zu verlangen:
+
+- **Mehrere `action_step`-Events.** Das Overlay zählt Schritte in
+  einem flach gehaltenen `step_count` und zeigt ab dem 2. Schritt
+  einen kleinen Hint („Step 3") *nur im EXPANDED-Modus*. Kein
+  History-Log, kein Scrollback.
+- **Anti-Flicker bei leeren Payloads.** `action_step` mit leerem
+  `title`/`description` überschreibt den bestehenden Action-Titel
+  nicht mehr; frühere Label-Entscheidungen bleiben sichtbar, bis
+  ein neues belastbares Feld ankommt.
+- **Späte oder fehlende Vor-Events.** Wenn ein `action_step`
+  eintrifft, ohne dass zuvor `action_planned`/`action_started`
+  gesehen wurde (z. B. späte Verbindung), promotet das Overlay
+  den Flow still auf `ACTIVE` mit neutralen Trigger- und Action-
+  Defaults; ein darauffolgendes `action_completed`/`failed`
+  funktioniert normal.
+- **Label-Auflösung als pure Helfer.** Alle Label-Defaults leben
+  jetzt in `workflow_overlay_state.gd` als static Funktionen
+  (`trigger_label_from_payload`, `action_label_from_payload`,
+  `step_label_from_payload`, `result_label_from_payload`,
+  `cancel_label_from_payload`). Sie sind ohne Scene-Tree testbar
+  (siehe `scripts/workflow_overlay_state_smoke.gd`). Default-
+  Ketten sind dokumentiert im State-Modul.
+- **action_id informativ, nicht steuernd.** Das Overlay
+  speichert die `action_id` des laufenden Flows im State, nutzt
+  sie aber **nicht** zur Korrelation. Ein neuer `action_planned`
+  überschreibt immer — kein Queue, kein Merge.
+
+Verifikation: `scripts/workflow_overlay_state_smoke.gd` deckt diese
+Helfer mit ~40 Assertions ab und läuft über den Harness-Case
+`workflow-state-smoke` (`scripts/run_overlay_verification.sh
+workflow-state-smoke`). Der Controller selbst wird über Szenenlauf
+geprüft; für echte `action_*`-Events bleibt ein Lauf gegen einen
+laufenden Core die sinnvollste End-to-End-Verifikation.
+
 ---
 
 ## 8b. Avatar Appearance System (Ziel-Zustand)

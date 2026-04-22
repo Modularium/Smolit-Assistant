@@ -249,16 +249,47 @@ Subeinheit 3.4 unten sowie
 - [ ] Kill-Switch / Stop-Aktion im Banner (setzt Core-seitige
       Cancel-API voraus)
 
-### Subeinheit 3.4 – Workflow Overlay / Visual Action Flow (MVP-Spike)
+### Subeinheit 3.4 – Workflow Overlay / Visual Action Flow (MVP-Spike, PR 2)
 
-Erster, bewusst kleiner MVP-Spike gelandet:
-`ui/scenes/workflow_overlay/workflow_overlay_root.tscn` und die vier
-Scripts unter `ui/scripts/workflow_overlay/` sind im Repo, im
-`main.tscn` unterhalb des Avatars instanziiert, read-only, per
-EventBus an die bestehenden Action Events angebunden. Die Subeinheit
-beschreibt weiterhin den gewünschten Zustand und grenzt ab, was
-*bewusst nicht* enthalten ist — der Spike ist eine Kurzprojektion,
-kein Workflow-Builder.
+MVP-Spike aus PR 1 bleibt die Basis (drei feste Knoten Trigger →
+Action → Result, zwei Kanten, read-only, core-driven, keine neue
+IPC, kein Builder). PR 2 schärft die bestehende Kurzprojektion
+nach, ohne den Scope zu vergrößern:
+
+- **Zweistufige Darstellung.** Automatischer Wechsel zwischen
+  `COLLAPSED` (bei `PLANNED`) und `EXPANDED` (bei `ACTIVE` /
+  Terminal). Keine Interaktion, kein Nutzerschalter, keine zweite
+  Presence-State-Maschine — der Modus ist eine reine Funktion der
+  aktuellen Phase.
+- **Bessere Node-Semantik.** Klare Fallback-Ketten pro Rolle (
+  `trigger_label_from_payload`, `action_label_from_payload`,
+  `step_label_from_payload`, `result_label_from_payload`,
+  `cancel_label_from_payload`) als pure Helper in
+  `workflow_overlay_state.gd`. Leere Labels zeigen den
+  Rollennamen + einen neutralen Default („Start", „Working…",
+  „Done") statt leerer Kapseln.
+- **Robustere Event-Rekonstruktion.** Step-Counter liefert einen
+  optionalen Hint („Step 3") im EXPANDED-Modus; leere
+  `action_step`-Payloads überschreiben bestehende Labels nicht
+  mehr; ein `action_step` vor `action_planned` promotet den Flow
+  still auf `ACTIVE`.
+- **Ruhigerer visueller Rhythmus.** Kantenpuls von 1.1 s → 1.45 s,
+  Linien- und Padding-Werte zwischen den Modi differenziert,
+  leisere Aktivitätsfarbe.
+- **Harness-Integration.** Neuer Case `workflow-state-smoke` in
+  `scripts/run_overlay_verification.sh` läuft
+  `scripts/workflow_overlay_state_smoke.gd` (47 Assertions, alle
+  PASS) — deckt Label-Ketten, Phase→DisplayMode, Step-Hint ab.
+
+Was bewusst **nicht** Teil von PR 2 ist:
+
+- kein Workflow-Builder, kein Editor, kein freier Canvas;
+- keine action_id-Queue, kein History-System, keine Persistenz;
+- keine neuen Event-Typen, keine Protokolländerung, keine neue
+  IPC-Nachricht;
+- kein Nutzer-Toggle zwischen Collapsed und Expanded;
+- keine Änderung an Window-Behavior, Avatar, Presence, Banner,
+  Discovery-Panel, Compact-Input.
 
 **1. Kurzbeschreibung.** Ein transparentes, leichtgewichtiges
 visuelles Flow-Overlay, das links vom Avatar/Icon bzw. als linker

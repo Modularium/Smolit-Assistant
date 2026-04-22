@@ -34,6 +34,11 @@
 #                   Prüft neun synthetische Session/Driver/Desktop-
 #                   Kombinationen gegen die erwartete backend_id.
 #                   Exit 0 = alle PASS.
+#   workflow-state-smoke
+#                 — Führt scripts/workflow_overlay_state_smoke.gd aus.
+#                   Unit-ähnliche Assertions für Skeleton,
+#                   Label-Auflösung, Phase→DisplayMode, Step-Hint.
+#                   Exit 0 = alle PASS.
 #   resolver-wayland-mutter
 #                 — Env-Override (Wayland + GNOME) + Report. Zeigt, dass
 #                   der Resolver backend_wayland_mutter wählt und der
@@ -168,6 +173,12 @@ case "${CASE}" in
     # Classification-Smoketest gegen den Resolver.
     exec godot --headless --path "${UI_DIR}" \
       --script "${REPO_ROOT}/scripts/resolver_classification_smoke.gd"
+    ;;
+  workflow-state-smoke)
+    # Spezialfall: pure Logiktests des Workflow-Overlay-State-Moduls.
+    # Kein Scene-Tree, kein Fenster — reine Assertions.
+    exec godot --headless --path "${UI_DIR}" \
+      --script "${REPO_ROOT}/scripts/workflow_overlay_state_smoke.gd"
     ;;
   resolver-wayland-mutter)
     export SMOLIT_WINDOW_REPORT=1
