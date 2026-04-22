@@ -728,6 +728,141 @@ Darstellung.
 
 ---
 
+### 2.9 Target Selection (Ist-Zustand, MVP)
+
+Zwischen Discovery und Execution sitzt eine kleine, ehrliche
+Zwischenstufe: die UI kann ein entdecktes Target als **aktuellen
+Interaction-Kontext** markieren. Der Core hält dafür genau einen Slot
+im Speicher — kein persistenter Store, keine Multi-Target-Historie,
+kein globales Memory.
+
+**Wichtig:** Auswahl ≠ Berechtigung. Ein ausgewähltes Target bedeutet
+nur „das ist wahrscheinlich das richtige Ziel", nicht „Smolit darf
+jetzt damit etwas tun". Jede Folgeaktion geht weiterhin durch den
+Approval-Flow (2.7).
+
+#### Target-Selection — Eingehend (UI → Core)
+
+- `interaction_select_target` — Wählt ein Target aus einer
+  Discovery-Antwort oder einer ähnlichen Quelle aus. Der Core
+  validiert (`name`, `role`, `confidence`) und speichert. Bei leerem
+  `id` weist der Core eine fortlaufende `sel_NNNNNN`-ID zu.
+
+  ```json
+  {
+    "type": "interaction_select_target",
+    "target": {
+      "id": "sel_ui_1",
+      "name": "calendar",
+      "role": "window",
+      "source": "accessibility",
+      "confidence": "discovered",
+      "matched_hint": "calendar"
+    }
+  }
+  ```
+
+- `interaction_clear_target` — Verwirft die aktuelle Auswahl.
+  Idempotent: die Antwort ist immer `target_cleared`, unabhängig davon
+  ob etwas zu räumen war.
+
+  ```json
+  { "type": "interaction_clear_target" }
+  ```
+
+#### Target-Selection — Ausgehend (Core → UI)
+
+- `target_selected` — Bestätigt die Auswahl und liefert das vom Core
+  normalisierte Target. Die UI nutzt diese Antwort als Quelle der
+  Wahrheit; das eigene Request-Payload wird nicht direkt gerendert.
+
+  ```json
+  {
+    "type": "target_selected",
+    "payload": {
+      "target": {
+        "id": "sel_000001",
+        "name": "calendar",
+        "role": "window",
+        "source": "accessibility",
+        "confidence": "discovered",
+        "matched_hint": "calendar"
+      }
+    }
+  }
+  ```
+
+- `target_cleared` — Bestätigt die Räumung. `previous` ist das
+  vorherige Target, sofern eines gehalten wurde; fehlt es, war der
+  Slot ohnehin leer.
+
+  ```json
+  {
+    "type": "target_cleared",
+    "payload": {
+      "previous": {
+        "id": "sel_000001",
+        "name": "calendar",
+        "role": "window",
+        "source": "accessibility",
+        "confidence": "discovered"
+      }
+    }
+  }
+  ```
+
+#### Target-Schema
+
+| Feld            | Typ      | Bedeutung                                                                 |
+| --------------- | -------- | ------------------------------------------------------------------------- |
+| `id`            | string   | Session-lokale ID; leer → Core vergibt `sel_NNNNNN`.                      |
+| `name`          | string   | Anzeigename; Pflicht, nicht leer.                                         |
+| `role`          | string   | `"application"` / `"window"` / `"ui_element"` / `"region"` / `"unknown"`. |
+| `source`        | string   | Provenienz, Default `"accessibility"`.                                    |
+| `confidence`    | string   | `"verified"` \| `"discovered"` (aus der Discovery-Quelle übernommen).     |
+| `matched_hint`  | string?  | Ursprünglicher Hint, falls aus `inspect_target` stammend.                 |
+| `app_name`      | string?  | Einhüllende Anwendung, wenn ableitbar.                                    |
+
+Validierungsfehler (`name`/`role` leer, unbekannte `confidence`)
+erzeugen ein `error`-Envelope; die bestehende Auswahl bleibt
+unverändert.
+
+#### Approval-Kopplung
+
+Wenn beim Auslösen einer Interaction ein Target ausgewählt ist, nimmt
+der Core einen **Snapshot** in die `ApprovalRequest` auf:
+
+- `approval_requested.payload.selected_target` trägt das aktive
+  Target (1:1 wie das `target_selected`-Payload).
+- `approval_requested.payload.message` hängt einen `Ziel: name (role,
+  confidence)`-Zusatz an, damit Nutzer:innen sehen *was* angeklickt
+  werden soll und *wo*.
+
+Diese Integration ist rein deskriptiv. Der Core leitet aus dem
+gehaltenen Target **keine** zusätzlichen Rechte ab — die üblichen
+Policy-Checks und der Approval-Flow laufen unverändert.
+
+#### Reset
+
+Die UI muss Auswahl-Zustand in mindestens diesen Fällen aktiv verwerfen:
+
+- expliziter Klick auf „Clear".
+- `ipc_disconnected` (Core-Zustand wird beim Reconnect neu gelesen).
+- nicht behebbarer Fehler im eigenen Flow (optional — kein Muss).
+
+#### Scope-Grenzen der Target Selection
+
+- **Keine** automatischen Aktionen nach der Auswahl.
+- **Kein** persistenter Target-Store, keine Cross-Session-Memory.
+- **Keine** Multi-Target-Chains oder implizite Target-Historie.
+- **Keine** fuzzy/smart Matching-Logik; die UI schickt, was sie aus
+  der Discovery hat.
+- **Keine** direkte A11y-Execution — Discovery und Selection enden
+  hier, Execution läuft weiterhin über das bestehende Interaction-
+  Backend inkl. Approval.
+
+---
+
 ## 3. Core ↔ ABrain: CLI-Adapter (Ist-Zustand)
 
 Heute spricht der Core ABrain über einen **externen Prozess** an.

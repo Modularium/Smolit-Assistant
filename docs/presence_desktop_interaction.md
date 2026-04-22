@@ -779,6 +779,27 @@ Zum Zusammenspiel mit dem Presence-Modell heißt das:
   Approval-Flow (§14b.3), sobald überhaupt ein schreibender Pfad
   existiert.
 
+### 14c.2 Target Selection — der Schritt zwischen Discovery und Execution
+
+Zwischen Discovery und Execution sitzt eine explizite, kleine Stufe:
+Die UI kann ein entdecktes Target als **aktuellen Interaction-Kontext**
+markieren (siehe `docs/api.md` §2.9). Der Core hält genau einen Slot
+im Speicher und bestätigt mit `target_selected`; „Clear" räumt ihn
+über `target_cleared`. Mehrere gleichzeitige Targets gibt es nicht.
+
+Die Auswahl ist **keine Berechtigung**. Sie
+
+- ist sichtbar (die UI rendert eine Badge plus Approval-Hinweis),
+- ist reversibel (explicit Clear, Disconnect, Fehler),
+- ist kurzlebig (kein Persistenz-Layer, kein Cross-Session-Memory),
+- wird beim nächsten Approval nur als **Kontext** mitgeliefert —
+  Policy-Checks und Nutzer-Bestätigung laufen unverändert.
+
+Damit wird die Kette aus §14c und §14b.3 sichtbar:
+Probe → Discovery → *Selection* → Approval → Execution.
+Jede Stufe bleibt separat abschaltbar; keine Stufe leitet
+stillschweigend zur nächsten durch.
+
 ---
 
 ## 15. Konsequenzen für die weitere Architektur

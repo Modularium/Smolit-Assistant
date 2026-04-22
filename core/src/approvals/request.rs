@@ -10,7 +10,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::actions::ActionTarget;
-use crate::interaction::InteractionKind;
+use crate::interaction::{InteractionKind, SelectedTarget};
 
 /// Describes a pending approval as presented to the UI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,6 +24,12 @@ pub struct ApprovalRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     pub timeout_seconds: u64,
+    /// Snapshot of the current Interaction target at the moment the
+    /// approval was requested, when one was held. Purely descriptive —
+    /// the UI renders it, the core does not derive additional
+    /// permissions from it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_target: Option<SelectedTarget>,
 }
 
 /// Echoes the final decision for a given approval back to the UI.

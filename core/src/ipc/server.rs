@@ -157,6 +157,8 @@ async fn dispatch(app: &Arc<App>, raw: &str) -> Vec<OutgoingMessage> {
         IncomingMessage::InteractionDiscoverAccessibility { hint } => {
             app.discover_accessibility(hint).await
         }
+        IncomingMessage::InteractionSelectTarget { target } => app.select_target(target),
+        IncomingMessage::InteractionClearTarget => app.clear_target(),
         IncomingMessage::ApprovalResponse {
             approval_id,
             decision,
@@ -1111,6 +1113,106 @@ mod tests {
             );
         }
         let _terminal = recv_text(&mut ws).await;
+    }
+
+    #[tokio::test]
+    async fn interaction_select_target_emits_target_selected() {
+        let url = spawn_server().await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_select_target","target":{"id":"sel_ui_1","name":"calendar","role":"window","source":"accessibility","confidence":"discovered","matched_hint":"calendar"}}"#
+                .into(),
+        ))
+        .await
+        .unwrap();
+
+        let selected = recv_text(&mut ws).await;
+        assert!(selected.contains(r#""type":"target_selected""#));
+        assert!(selected.contains(r#""name":"calendar""#));
+        assert!(selected.contains(r#""role":"window""#));
+        assert!(selected.contains(r#""confidence":"discovered""#));
+        assert!(selected.contains(r#""matched_hint":"calendar""#));
+    }
+
+    #[tokio::test]
+    async fn interaction_select_target_rejects_invalid_confidence() {
+        let url = spawn_server().await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_select_target","target":{"id":"sel_ui_1","name":"calendar","role":"window","source":"accessibility","confidence":"bogus"}}"#
+                .into(),
+        ))
+        .await
+        .unwrap();
+
+        let err = recv_text(&mut ws).await;
+        assert!(err.contains(r#""type":"error""#));
+        assert!(err.contains("confidence"));
+    }
+
+    #[tokio::test]
+    async fn interaction_clear_target_is_idempotent() {
+        let url = spawn_server().await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_clear_target"}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let cleared = recv_text(&mut ws).await;
+        assert!(cleared.contains(r#""type":"target_cleared""#));
+        assert!(!cleared.contains("previous"));
+    }
+
+    #[tokio::test]
+    async fn interaction_clear_target_returns_previous_when_selected() {
+        let url = spawn_server().await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_select_target","target":{"id":"sel_ui_1","name":"calendar","role":"window","source":"accessibility","confidence":"discovered"}}"#
+                .into(),
+        ))
+        .await
+        .unwrap();
+        let _selected = recv_text(&mut ws).await;
+        ws.send(Message::Text(
+            r#"{"type":"interaction_clear_target"}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let cleared = recv_text(&mut ws).await;
+        assert!(cleared.contains(r#""type":"target_cleared""#));
+        assert!(cleared.contains(r#""previous""#));
+        assert!(cleared.contains(r#""name":"calendar""#));
+    }
+
+    #[tokio::test]
+    async fn approval_request_carries_selected_target_when_held() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 5 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_select_target","target":{"id":"sel_ui_1","name":"calendar","role":"window","source":"accessibility","confidence":"discovered"}}"#
+                .into(),
+        ))
+        .await
+        .unwrap();
+        let _selected = recv_text(&mut ws).await;
+
+        ws.send(Message::Text(
+            r#"{"type":"interaction_open_application","application":"calendar"}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let _planned = recv_text(&mut ws).await;
+        let requested = recv_text(&mut ws).await;
+        assert!(requested.contains(r#""type":"approval_requested""#));
+        assert!(requested.contains(r#""selected_target""#));
+        assert!(requested.contains(r#""name":"calendar""#));
+        assert!(requested.contains("Ziel:"));
     }
 
     #[tokio::test]

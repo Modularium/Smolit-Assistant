@@ -240,7 +240,7 @@ hört ausschließlich am `EventBus` — konkret an den Signalen
 
 Die UI **interpretiert die Werte nicht** (kein Upgrade von
 `discovered` auf `verified`, keine Filterlogik, keine
-Auswahl/Ausführung von Targets). Sie malt nur, was der Core liefert.
+Ausführung von Targets). Sie malt nur, was der Core liefert.
 Fehlen Felder im Payload, fällt die Darstellung still auf neutrale
 Defaults zurück — das Panel darf nicht crashen, nur weil `role` oder
 `matched_hint` fehlt.
@@ -248,6 +248,41 @@ Defaults zurück — das Panel darf nicht crashen, nur weil `role` oder
 Status- und Confidence-Badges nutzen ausschließlich symbolische
 Farb-Tints zur Unterscheidbarkeit. Keine Designbaustelle,
 keine Iconografie.
+
+### 8.2 Target Selection (klickbare Auswahl)
+
+Auf dem Discovery-Panel sitzt eine kleine, ehrliche Auswahlschicht
+(siehe `docs/api.md` §2.9). Sie ist rein visuell:
+
+- Jeder Item-Row bekommt einen **„Select"**-Button. Klick sendet
+  `interaction_select_target` mit `name`, `role`, `confidence`,
+  `source` und optional `matched_hint` / `app_name`. Die UI synthetisiert
+  **keine** ID — der Core vergibt `sel_NNNNNN` bei leerem Feld.
+- Das Panel zeigt eine dedizierte **SelectedTargetRow**
+  (`selected: <name> (role, confidence)` + „Clear"-Button). Die Row
+  wird erst sichtbar, wenn der Core `target_selected` bestätigt hat —
+  es gibt keine optimistische UI-Annahme.
+- Die bereits ausgewählte Row im Items-Container hebt ihren Button auf
+  „Selected" (deaktiviert) um. Das ist der einzige visuelle Hinweis —
+  keine Farbverläufe, keine Listenhervorhebung.
+- **„Clear"** sendet `interaction_clear_target`. Die UI räumt die
+  SelectedTargetRow erst, wenn `target_cleared` eintrifft.
+- Beim `ipc_disconnected` räumt die UI die SelectedTargetRow lokal,
+  weil der Core-Slot beim Reconnect sowieso leer ist.
+
+Die **Approval-Darstellung** erweitert das bestehende Banner um eine
+Zeile `Target: <name> (role, confidence)`, sofern der Core im
+`approval_requested`-Payload `selected_target` mitgeliefert hat.
+Auswahl ersetzt dabei **niemals** Approval: der Approve/Deny-Flow
+bleibt identisch.
+
+Auswahlsemantik, die die UI **nicht** selbst implementiert:
+
+- kein Upgrade von `discovered` auf `verified`,
+- keine Heuristik für „bestes Target",
+- keine Auto-Selection nach Discovery,
+- keine UI-seitige Permission-Logik,
+- keine Persistenz jenseits der aktuellen Session.
 
 Es gibt **keinen** von der UI gehaltenen Dialogzustand. Jede neue
 Conversation-Turn startet mit einem `submit_text` oder `voice_once`.

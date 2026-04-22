@@ -24,6 +24,7 @@ pub mod action;
 pub mod backend;
 pub mod executor;
 pub mod recovery;
+pub mod selection;
 pub mod types;
 pub mod verifier;
 
@@ -39,6 +40,8 @@ pub use backend::{CommandBackend, CommandBackendConfig, InteractionBackend};
 pub use executor::{InteractionExecutor, InteractionPolicy};
 #[allow(unused_imports)]
 pub use recovery::RecoveryHint;
+#[allow(unused_imports)]
+pub use selection::{SelectedTarget, SelectionError};
 #[allow(unused_imports)]
 pub use types::InteractionError;
 #[allow(unused_imports)]

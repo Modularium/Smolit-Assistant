@@ -6,7 +6,7 @@ use crate::actions::{
 };
 use crate::app::StatusPayload;
 use crate::approvals::{ApprovalRequest, ApprovalResolvedPayload, IncomingApprovalDecision};
-use crate::interaction::{AccessibilityDiscovery, AccessibilityProbe};
+use crate::interaction::{AccessibilityDiscovery, AccessibilityProbe, SelectedTarget};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -39,6 +39,13 @@ pub enum IncomingMessage {
         #[serde(default)]
         hint: Option<String>,
     },
+    /// Select one symbolic target as the current Interaction context.
+    /// Stored in-memory only; every follow-up action still goes through
+    /// approval. See `docs/api.md` §2.9.
+    InteractionSelectTarget { target: SelectedTarget },
+    /// Clear any previously selected target. Returns a `target_cleared`
+    /// envelope even when there was nothing to clear (idempotent).
+    InteractionClearTarget,
     ApprovalResponse {
         approval_id: String,
         decision: IncomingApprovalDecision,
@@ -91,6 +98,27 @@ pub enum OutgoingMessage {
     ApprovalResolved { payload: ApprovalResolvedPayload },
     AccessibilityProbeResult { payload: AccessibilityProbe },
     AccessibilityDiscoveryResult { payload: AccessibilityDiscovery },
+    /// Confirms that the core now holds `payload.target` as the current
+    /// Interaction context. Selection is *not* a permission — every
+    /// follow-up action still goes through the approval flow.
+    TargetSelected { payload: TargetSelectedPayload },
+    /// Confirms that the core cleared its current Interaction target.
+    /// Idempotent: emitted even when there was nothing to clear.
+    TargetCleared { payload: TargetClearedPayload },
+}
+
+/// Payload for the `target_selected` outgoing envelope.
+#[derive(Debug, Clone, Serialize)]
+pub struct TargetSelectedPayload {
+    pub target: SelectedTarget,
+}
+
+/// Payload for the `target_cleared` outgoing envelope. `previous` is
+/// the target that was cleared, when one was held.
+#[derive(Debug, Clone, Serialize)]
+pub struct TargetClearedPayload {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous: Option<SelectedTarget>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -144,6 +172,29 @@ mod tests {
     #[test]
     fn rejects_unknown() {
         assert!(parse_incoming(r#"{"type":"nope"}"#).is_err());
+    }
+
+    #[test]
+    fn parses_interaction_select_target() {
+        let msg = parse_incoming(
+            r#"{"type":"interaction_select_target","target":{"id":"sel_1","name":"calendar","role":"window","source":"accessibility","confidence":"discovered"}}"#,
+        )
+        .unwrap();
+        match msg {
+            IncomingMessage::InteractionSelectTarget { target } => {
+                assert_eq!(target.id, "sel_1");
+                assert_eq!(target.name, "calendar");
+                assert_eq!(target.role, "window");
+                assert_eq!(target.confidence, "discovered");
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn parses_interaction_clear_target() {
+        let msg = parse_incoming(r#"{"type":"interaction_clear_target"}"#).unwrap();
+        assert!(matches!(msg, IncomingMessage::InteractionClearTarget));
     }
 
     #[test]

@@ -118,6 +118,12 @@ text = ""
 autowrap_mode = 2
 modulate = Color(1, 1, 1, 0.85)
 
+[node name="ApprovalSelectedTarget" type="Label" parent="VBox/ApprovalBanner/ApprovalVBox"]
+visible = false
+layout_mode = 2
+text = ""
+modulate = Color(0.75, 0.85, 1, 0.85)
+
 [node name="ApprovalTimeout" type="Label" parent="VBox/ApprovalBanner/ApprovalVBox"]
 layout_mode = 2
 text = ""
@@ -162,6 +168,26 @@ layout_mode = 2
 text = ""
 autowrap_mode = 2
 modulate = Color(1, 1, 1, 0.6)
+
+[node name="SelectedTargetRow" type="HBoxContainer" parent="VBox/DiscoveryPanel/DiscoveryVBox"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="SelectedTargetPrefix" type="Label" parent="VBox/DiscoveryPanel/DiscoveryVBox/SelectedTargetRow"]
+layout_mode = 2
+text = "selected:"
+modulate = Color(1, 1, 1, 0.55)
+
+[node name="SelectedTargetLabel" type="Label" parent="VBox/DiscoveryPanel/DiscoveryVBox/SelectedTargetRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = ""
+modulate = Color(0.75, 0.85, 1, 0.9)
+
+[node name="ClearTargetButton" type="Button" parent="VBox/DiscoveryPanel/DiscoveryVBox/SelectedTargetRow"]
+layout_mode = 2
+text = "Clear"
 
 [node name="DiscoveryItems" type="VBoxContainer" parent="VBox/DiscoveryPanel/DiscoveryVBox"]
 layout_mode = 2

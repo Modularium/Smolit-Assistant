@@ -63,6 +63,23 @@ func send_approval_response(approval_id: String, decision: String) -> void:
 	})
 
 
+## Select a discovered target as the current Interaction context. The
+## core validates and echoes back a `target_selected` envelope (or an
+## `error` frame when the payload is malformed). Selection is *not*
+## permission — follow-up actions still require approval.
+func select_target(target: Dictionary) -> void:
+	_send({
+		"type": "interaction_select_target",
+		"target": target,
+	})
+
+
+## Clear the current Interaction context. Idempotent on the core — a
+## `target_cleared` envelope is always returned.
+func clear_target() -> void:
+	_send({"type": "interaction_clear_target"})
+
+
 func _load_config() -> void:
 	var cfg := ConfigFile.new()
 	var err := cfg.load(_CONFIG_PATH)
@@ -176,6 +193,10 @@ func _handle_frame(raw: String) -> void:
 			EventBus.accessibility_probe_result_received.emit(_extract_payload(parsed))
 		"accessibility_discovery_result":
 			EventBus.accessibility_discovery_result_received.emit(_extract_payload(parsed))
+		"target_selected":
+			EventBus.target_selected_received.emit(_extract_payload(parsed))
+		"target_cleared":
+			EventBus.target_cleared_received.emit(_extract_payload(parsed))
 		_:
 			if _debug:
 				push_warning("[ipc] unknown message type: %s" % type)

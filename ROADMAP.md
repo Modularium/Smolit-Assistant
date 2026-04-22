@@ -387,6 +387,20 @@ UI-Phasen geführt und noch **nicht** begonnen.
       (Status-Badge, Item-Liste mit Confidence-Badge) rein anzeigend.
       Siehe [docs/api.md §2.8](./docs/api.md) und
       [docs/ui_architecture.md §8.1](./docs/ui_architecture.md).
+- [x] Target Selection + Approval-assisted Target Handoff:
+      `SelectedTarget`-Referenzmodell (`id`, `name`, `role`, `source`,
+      `confidence`, optional `matched_hint` / `app_name`) in
+      `core/src/interaction/selection.rs`, IPC-Nachrichten
+      `interaction_select_target` / `interaction_clear_target` →
+      `target_selected` / `target_cleared`. Core hält genau einen Slot
+      im Speicher (kein Store, keine Persistenz); `ApprovalRequest`
+      trägt den Snapshot als `selected_target` und der Approval-Text
+      bekommt den Zusatz „Ziel: name (role, confidence)". Godot-UI
+      macht Discovery-Items klickbar („Select"/„Selected"), zeigt eine
+      SelectedTargetRow mit Clear-Button und rendert das Ziel im
+      Approval-Banner. Auswahl ≠ Berechtigung — der Approval-Flow
+      bleibt unverändert. Siehe [docs/api.md §2.9](./docs/api.md) und
+      [docs/ui_architecture.md §8.2](./docs/ui_architecture.md).
 - [ ] Linux-Backends (Folgestufen): echter AT-SPI-RPC-Pfad (zbus /
       atspi-connection), Registry-Root-Discovery, Namens-/Rollen-
       basierte Inspection, Toolkit-Vergleich (GTK / Qt / Electron /
@@ -494,6 +508,19 @@ in einem kleinen DiscoveryPanel — rein anzeigend, ohne Confidence
 nachträglich hochzustufen. Details in
 [docs/ui_architecture.md §8.1](./docs/ui_architecture.md) und
 [docs/linux_interaction_backends_research.md §2.3](./docs/linux_interaction_backends_research.md).
+
+Ebenfalls gelandet: **Target Selection + Approval-assisted Target
+Handoff** (Phase 8b). UI kann Discovery-Items per „Select"-Button als
+aktuellen Interaction-Kontext markieren; der Core hält genau einen
+`SelectedTarget` im Speicher und antwortet mit `target_selected` /
+`target_cleared`. Beim nächsten `approval_requested` trägt der Core das
+Target im zusätzlichen `selected_target`-Feld und ergänzt den
+Approval-Text um „Ziel: name (role, confidence)". Auswahl ist
+ausdrücklich **keine** Berechtigung — jede Folgeaktion geht weiterhin
+durch den bestehenden Approval-Flow, und die UI räumt die Auswahl bei
+Clear-Klick oder `ipc_disconnected`. Details in
+[docs/api.md §2.9](./docs/api.md) und
+[docs/ui_architecture.md §8.2](./docs/ui_architecture.md).
 
 Ebenfalls gelandet: **Linux Accessibility Backend Spike** (Phase 8b).
 `AccessibilityProbe::detect()` liefert aus Session-Umgebung und

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -22,10 +23,12 @@ use crate::audio::{SttService, TtsService};
 use crate::config::Config;
 use crate::interaction::{
     AccessibilityDiscovery, AccessibilityProbe, CommandBackend, CommandBackendConfig,
-    InteractionAction, InteractionExecutor, InteractionKind, InteractionPolicy, discover_top_level,
-    inspect_target,
+    InteractionAction, InteractionExecutor, InteractionKind, InteractionPolicy, SelectedTarget,
+    discover_top_level, inspect_target,
 };
-use crate::ipc::protocol::{InteractionFocusTarget, OutgoingMessage};
+use crate::ipc::protocol::{
+    InteractionFocusTarget, OutgoingMessage, TargetClearedPayload, TargetSelectedPayload,
+};
 
 const EVENTS_CHANNEL_CAPACITY: usize = 256;
 
@@ -36,7 +39,12 @@ pub struct App {
     interaction: InteractionExecutor<CommandBackend>,
     action_counter: AtomicU64,
     approval_counter: AtomicU64,
+    selection_counter: AtomicU64,
     pending_approvals: Arc<PendingApprovalRegistry>,
+    /// Current Interaction target, if any. Held in-memory only —
+    /// cleared on explicit `interaction_clear_target`. No persistence,
+    /// no cross-session memory.
+    selected_target: Mutex<Option<SelectedTarget>>,
     events_tx: broadcast::Sender<OutgoingMessage>,
 }
 
@@ -87,7 +95,9 @@ impl App {
             interaction,
             action_counter: AtomicU64::new(0),
             approval_counter: AtomicU64::new(0),
+            selection_counter: AtomicU64::new(0),
             pending_approvals: Arc::new(PendingApprovalRegistry::new()),
+            selected_target: Mutex::new(None),
             events_tx,
         }
     }
@@ -100,6 +110,78 @@ impl App {
     fn next_approval_id(&self) -> String {
         let n = self.approval_counter.fetch_add(1, Ordering::Relaxed) + 1;
         format!("apr_{n:06}")
+    }
+
+    fn next_selection_id(&self) -> String {
+        let n = self.selection_counter.fetch_add(1, Ordering::Relaxed) + 1;
+        format!("sel_{n:06}")
+    }
+
+    /// Read-only snapshot of the currently selected Interaction target.
+    /// Used by the approval flow to embed the target in
+    /// `approval_requested` and by tests.
+    pub fn current_selected_target(&self) -> Option<SelectedTarget> {
+        self.selected_target
+            .lock()
+            .expect("selected_target mutex poisoned")
+            .clone()
+    }
+
+    /// Store `target` as the current Interaction context, replacing any
+    /// previous selection. Returns a `target_selected` envelope the
+    /// caller should flush to IPC. Validation failures produce an
+    /// `Error` envelope instead — the previous selection is untouched.
+    pub fn select_target(&self, target: SelectedTarget) -> Vec<OutgoingMessage> {
+        let fallback_id = self.next_selection_id();
+        let normalized = match target.normalize_with_fallback_id(fallback_id) {
+            Ok(t) => t,
+            Err(err) => {
+                return vec![OutgoingMessage::Error {
+                    message: err.message().to_string(),
+                }];
+            }
+        };
+
+        {
+            let mut slot = self
+                .selected_target
+                .lock()
+                .expect("selected_target mutex poisoned");
+            *slot = Some(normalized.clone());
+        }
+
+        info!(
+            target_id = %normalized.id,
+            target_name = %normalized.name,
+            target_role = %normalized.role,
+            target_confidence = %normalized.confidence,
+            "selected interaction target",
+        );
+
+        vec![OutgoingMessage::TargetSelected {
+            payload: TargetSelectedPayload { target: normalized },
+        }]
+    }
+
+    /// Clear the current Interaction context. Idempotent: always emits
+    /// a `target_cleared` envelope, with `previous` set when a target
+    /// was actually held.
+    pub fn clear_target(&self) -> Vec<OutgoingMessage> {
+        let previous = {
+            let mut slot = self
+                .selected_target
+                .lock()
+                .expect("selected_target mutex poisoned");
+            slot.take()
+        };
+
+        if let Some(prev) = &previous {
+            info!(target_id = %prev.id, "cleared interaction target");
+        }
+
+        vec![OutgoingMessage::TargetCleared {
+            payload: TargetClearedPayload { previous },
+        }]
     }
 
     /// Subscribe to async continuation events (approval outcomes,
@@ -190,15 +272,17 @@ impl App {
 
         let approval_id = self.next_approval_id();
         let timeout_seconds = self.config.approval.timeout_seconds;
+        let selected_target = self.current_selected_target();
         let request = ApprovalRequest {
             approval_id: approval_id.clone(),
             action_id: action.action_id.clone(),
             action_kind: action.kind(),
             title: action.title.clone(),
-            message: approval_message(&action),
+            message: approval_message(&action, selected_target.as_ref()),
             target: action.target.clone(),
             reason: None,
             timeout_seconds,
+            selected_target,
         };
         let rx = self.pending_approvals.register(&approval_id);
         out.push(OutgoingMessage::ApprovalRequested { payload: request });
@@ -495,8 +579,11 @@ fn step(action_id: &str, title: &str) -> OutgoingMessage {
     }
 }
 
-fn approval_message(action: &InteractionAction) -> String {
-    match action.kind() {
+fn approval_message(
+    action: &InteractionAction,
+    selected_target: Option<&SelectedTarget>,
+) -> String {
+    let base = match action.kind() {
         InteractionKind::OpenApplication => format!("Smolit möchte {0}", action.title.to_lowercase()),
         InteractionKind::FocusWindow => {
             let label = action
@@ -515,5 +602,9 @@ fn approval_message(action: &InteractionAction) -> String {
                 title = action.title
             )
         }
+    };
+    match selected_target {
+        Some(target) => format!("{base} Ziel: {}", target.short_label()),
+        None => base,
     }
 }

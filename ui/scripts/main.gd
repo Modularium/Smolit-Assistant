@@ -42,8 +42,18 @@ const PresenceStateRef := preload("res://scripts/presence/presence_state.gd")
 @onready var _discovery_reason: Label = $VBox/DiscoveryPanel/DiscoveryVBox/DiscoveryReason
 @onready var _discovery_items: VBoxContainer = $VBox/DiscoveryPanel/DiscoveryVBox/DiscoveryItems
 @onready var _discovery_empty: Label = $VBox/DiscoveryPanel/DiscoveryVBox/DiscoveryEmpty
+@onready var _selected_target_row: HBoxContainer = $VBox/DiscoveryPanel/DiscoveryVBox/SelectedTargetRow
+@onready var _selected_target_label: Label = $VBox/DiscoveryPanel/DiscoveryVBox/SelectedTargetRow/SelectedTargetLabel
+@onready var _clear_target_button: Button = $VBox/DiscoveryPanel/DiscoveryVBox/SelectedTargetRow/ClearTargetButton
+@onready var _approval_selected_target: Label = $VBox/ApprovalBanner/ApprovalVBox/ApprovalSelectedTarget
 
 var _current_approval_id: String = ""
+
+## The latest `target_selected` payload echoed by the core. Treated as
+## purely symbolic: we render it, compare item rows to highlight the
+## selected one, and clear it on disconnect / error / explicit clear.
+## We never derive implicit permissions from its presence.
+var _current_selected_target: Dictionary = {}
 
 @onready var _log: RichTextLabel = $VBox/Log
 @onready var _input_row: HBoxContainer = $VBox/InputRow
@@ -80,8 +90,12 @@ func _ready() -> void:
 	EventBus.accessibility_probe_result_received.connect(_on_accessibility_probe_result)
 	EventBus.accessibility_discovery_result_received.connect(_on_accessibility_discovery_result)
 
+	EventBus.target_selected_received.connect(_on_target_selected)
+	EventBus.target_cleared_received.connect(_on_target_cleared)
+
 	_approve_button.pressed.connect(_on_approve_pressed)
 	_deny_button.pressed.connect(_on_deny_pressed)
+	_clear_target_button.pressed.connect(_on_clear_target_pressed)
 
 	_presence.presence_changed.connect(_on_presence_changed)
 	_presence.action_context_changed.connect(_on_action_context_changed)
@@ -91,6 +105,8 @@ func _ready() -> void:
 	_action_banner.visible = false
 	_approval_banner.visible = false
 	_discovery_panel.visible = false
+	_selected_target_row.visible = false
+	_approval_selected_target.visible = false
 
 
 func _set_connected(ok: bool) -> void:
@@ -133,6 +149,9 @@ func _on_connected() -> void:
 func _on_disconnected() -> void:
 	_set_connected(false)
 	_append("[color=orange]disconnected[/color]")
+	# Drop any held Interaction target — the core forgets on its own
+	# state, and a stale badge after a reconnect would be misleading.
+	_reset_selected_target_ui()
 
 
 func _on_pong() -> void:
@@ -273,6 +292,15 @@ func _on_approval_requested(payload: Dictionary) -> void:
 		_approval_timeout.text = "timeout: %d s" % timeout_s
 	else:
 		_approval_timeout.text = ""
+	# If the core snapshotted a selected target at request time, render
+	# it as an extra line — read-only context, does not imply consent.
+	var selected_variant: Variant = payload.get("selected_target", null)
+	if typeof(selected_variant) == TYPE_DICTIONARY:
+		_approval_selected_target.text = "Target: %s" % _format_selected_target(selected_variant)
+		_approval_selected_target.visible = true
+	else:
+		_approval_selected_target.text = ""
+		_approval_selected_target.visible = false
 	_approve_button.disabled = false
 	_deny_button.disabled = false
 	_approval_banner.visible = true
@@ -499,4 +527,147 @@ func _build_discovery_item_row(item: Dictionary) -> HBoxContainer:
 		extra_label.modulate = Color(1, 1, 1, 0.4)
 		row.add_child(extra_label)
 
+	# "Select" button — only meaningful when we have a non-empty name.
+	# The button is the sole selection affordance; clicking it sends the
+	# `interaction_select_target` frame and waits for the `target_selected`
+	# echo before showing the badge.
+	if item_name != "":
+		var select_button := Button.new()
+		var already_selected := _is_same_selected(item)
+		select_button.text = "Selected" if already_selected else "Select"
+		select_button.disabled = already_selected
+		select_button.pressed.connect(_on_item_select_pressed.bind(item))
+		row.add_child(select_button)
+
+		if already_selected:
+			name_label.modulate = Color(0.75, 0.85, 1, 1.0)
+
 	return row
+
+
+func _is_same_selected(item: Dictionary) -> bool:
+	if _current_selected_target.is_empty():
+		return false
+	var sel_name := str(_current_selected_target.get("name", ""))
+	var sel_role := str(_current_selected_target.get("role", ""))
+	var item_name := str(item.get("name", ""))
+	var item_role := str(item.get("role", ""))
+	# Fall back to kind when the item has no explicit role (discovery
+	# rows render kind as role when role is absent).
+	if item_role == "":
+		item_role = str(item.get("kind", ""))
+	return sel_name != "" and sel_name == item_name and sel_role == item_role
+
+
+func _on_item_select_pressed(item: Dictionary) -> void:
+	var item_name := str(item.get("name", ""))
+	if item_name == "":
+		return
+	var role := str(item.get("role", ""))
+	if role == "":
+		role = str(item.get("kind", ""))
+	if role == "":
+		role = "unknown"
+	var confidence := str(item.get("confidence", "discovered"))
+	var source := str(item.get("source", "accessibility"))
+	var payload := {
+		"name": item_name,
+		"role": role,
+		"confidence": confidence,
+		"source": source,
+	}
+	var matched_hint := str(item.get("matched_hint", ""))
+	if matched_hint != "":
+		payload["matched_hint"] = matched_hint
+	var app_name := str(item.get("app_name", ""))
+	if app_name != "":
+		payload["app_name"] = app_name
+	# Let the core mint the id — the UI never synthesizes ids that the
+	# core would overwrite on validation.
+	payload["id"] = ""
+	IpcClient.select_target(payload)
+
+
+func _on_clear_target_pressed() -> void:
+	IpcClient.clear_target()
+
+
+# --- Target selection round-trip -----------------------------------------
+
+func _on_target_selected(payload: Dictionary) -> void:
+	var target_variant: Variant = payload.get("target", {})
+	if typeof(target_variant) != TYPE_DICTIONARY:
+		return
+	var target: Dictionary = target_variant
+	_current_selected_target = target
+	_selected_target_label.text = _format_selected_target(target)
+	_selected_target_row.visible = true
+	_discovery_panel.visible = true
+	_refresh_discovery_row_buttons()
+	_append("[color=cyan]◉ target selected: %s[/color]" % _format_selected_target(target))
+
+
+func _on_target_cleared(payload: Dictionary) -> void:
+	var had_selection := not _current_selected_target.is_empty()
+	_reset_selected_target_ui()
+	if had_selection:
+		var previous_variant: Variant = payload.get("previous", null)
+		if typeof(previous_variant) == TYPE_DICTIONARY:
+			_append("[color=gray]◌ target cleared: %s[/color]" % _format_selected_target(previous_variant))
+		else:
+			_append("[color=gray]◌ target cleared[/color]")
+
+
+func _reset_selected_target_ui() -> void:
+	_current_selected_target = {}
+	_selected_target_label.text = ""
+	_selected_target_row.visible = false
+	_refresh_discovery_row_buttons()
+
+
+func _format_selected_target(target: Dictionary) -> String:
+	var tname := str(target.get("name", ""))
+	var trole := str(target.get("role", ""))
+	var tconf := str(target.get("confidence", ""))
+	if tname == "":
+		return "(unnamed)"
+	if trole == "" and tconf == "":
+		return tname
+	var parts := PackedStringArray()
+	if trole != "":
+		parts.append(trole)
+	if tconf != "":
+		parts.append(tconf)
+	return "%s (%s)" % [tname, ", ".join(parts)]
+
+
+## Re-render the last-known discovery items so "Select"/"Selected"
+## buttons reflect the current selection. The last payload is read
+## directly from visible state: we keep no separate cache — if the
+## panel is not showing items, there is nothing to refresh.
+func _refresh_discovery_row_buttons() -> void:
+	for row in _discovery_items.get_children():
+		if not (row is HBoxContainer):
+			continue
+		var button: Button = null
+		for child in row.get_children():
+			if child is Button:
+				button = child
+				break
+		if button == null:
+			continue
+		# Find the first Label sibling whose text is not a bracketed
+		# badge; that is the name label we used at build time.
+		var item_name := ""
+		for child in row.get_children():
+			if child is Label:
+				var text_value := (child as Label).text
+				if not text_value.begins_with("[") and text_value != "(unnamed)":
+					item_name = text_value
+					break
+		if item_name == "":
+			continue
+		var selected_name := str(_current_selected_target.get("name", ""))
+		var is_selected := selected_name != "" and selected_name == item_name
+		button.text = "Selected" if is_selected else "Select"
+		button.disabled = is_selected

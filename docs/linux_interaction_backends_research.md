@@ -146,6 +146,35 @@ semantisch hochzustufen (siehe `docs/ui_architecture.md` §8.1).
 
 ---
 
+## 2.6 Target Selection als Voraussetzung für spätere A11y-Aktionen
+
+Der Accessibility-Spike endet heute bei strukturierten Discovery-
+Ergebnissen. Für die nächste sinnvolle Stufe (Registry-RPC, Namens-
+Lookups, später Fokus/Write-Pfad) brauchen wir einen sauberen
+Einstieg vor der Execution: die UI wählt explizit ein Target aus,
+der Core hält es kurzlebig als „aktueller Kontext", und **erst** auf
+dieser Grundlage kann eine spätere A11y-Aktion überhaupt definiert
+werden.
+
+Dieser Schritt ist in `core/src/interaction/selection.rs` und IPC
+`interaction_select_target` / `target_selected` (siehe `docs/api.md`
+§2.9) bereits umgesetzt. Er ist **dependency-frei** — kein zbus, kein
+atspi-connection — und lebt ausschließlich vom Discovery-Output. Das
+macht die Reihenfolge für einen späteren echten RPC-Probe eindeutig:
+
+1. RPC-basierte Discovery liefert Items mit `confidence=verified`.
+2. UI markiert eines davon als `SelectedTarget`.
+3. Core nutzt das Target als Kontext in einer schreibenden Action
+   (z. B. `focus_window`, später `type_text` auf einem Accessible).
+4. Approval-Flow (§2.7) läuft wie gewohnt; Auswahl ersetzt Approval
+   nicht.
+
+Ohne diese Zwischenstufe müsste jede zukünftige A11y-Action ihr
+Target selbst re-discovern — das würde die symbolische Entkopplung
+zwischen Discovery, Auswahl und Ausführung wieder einreißen.
+
+---
+
 ## 3. Abgrenzung zu Window- / Overlay-Themen
 
 AT-SPI adressiert *was eine App exponiert*. Die Frage *wie Smolits

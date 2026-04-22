@@ -43,3 +43,12 @@ signal approval_resolved_received(payload: Dictionary)
 ## call.
 signal accessibility_probe_result_received(payload: Dictionary)
 signal accessibility_discovery_result_received(payload: Dictionary)
+
+## Target Selection (see docs/api.md §2.9). UI sends
+## `interaction_select_target` / `interaction_clear_target` frames; the
+## core confirms with `target_selected` / `target_cleared`. Selection
+## is *not* permission — every follow-up action still goes through the
+## approval flow, and the UI must never derive implicit rights from a
+## held target.
+signal target_selected_received(payload: Dictionary)
+signal target_cleared_received(payload: Dictionary)
