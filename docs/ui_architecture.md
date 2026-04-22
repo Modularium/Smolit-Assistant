@@ -74,7 +74,7 @@ aus und erzeugt keine eigene Wahrheit.
 |----------------|--------------------------------------------------------------|
 | Rust Core      | Orchestrierung, Konfiguration, Logging, Audio, IPC, ABrain   |
 | IPC-Bridge     | lokaler WebSocket-Server, JSON-Protokoll, Event-Fan-out      |
-| Godot UI       | Rendering (Avatar, Presence, Workflow-Overlay), Animation, lokale Eingabe, Statusanzeige; **keine** Ausführung von Desktop-Aktionen |
+| Godot UI       | Rendering (Avatar, Presence, Workflow-Overlay; perspektivisch zusätzlich Avatar Appearance System), Animation, lokale Eingabe, Statusanzeige; **keine** Logik, **keine** Execution |
 | ABrain-Adapter | Textanfrage → Antworttext (heute CLI-Prozess)                |
 | STT/TTS-Adapter| externe Commands, austauschbar per Env-Config                |
 
@@ -544,6 +544,117 @@ kollidiert nicht mit bestehenden Cross-References auf §8/§9/§10/§11.
 - **Kein generisches Node-Framework in Phase 1.** Keine
   wiederverwendbare Graph-Infrastruktur, keine Plug-in-Architektur
   für fremde Graphen, kein Export.
+
+---
+
+## 8b. Avatar Appearance System (Ziel-Zustand)
+
+Dieser Abschnitt beschreibt die geplante Erweiterung des Avatar-
+Renderings um ein strukturiertes **Appearance-System** als rein
+visuelle Darstellungsschicht. Er ist **Ziel-Zustand**; heute
+existieren weder Templates noch Themes noch Override-Persistenz
+im Repo. Der Default-Avatar (Smolit Salamander) aus §7 bleibt
+unverändert und erster-Klasse.
+
+Die Abschnittsnummer §8b reiht sich parallel zu §8a (Workflow-
+Overlay-System) und vermeidet einen Renumber bestehender
+Cross-References auf §8/§9/§10/§11.
+
+### 8b.1 Rolle
+
+- **Rein visuelle Darstellungsschicht.** Appearance rendert;
+  Appearance entscheidet nichts.
+- **Getrennt von Core und ABrain.** Appearance-Auswahl darf
+  weder Action-Events verändern noch ABrain-Requests beeinflussen
+  noch Presence-/Approval-Flows anfassen.
+- **Ergänzung, nicht Ersatz** des bestehenden Avatar-Systems (§7).
+  Das bestehende State-Mapping (`idle` / `thinking` / `talking` /
+  `acting` / `disconnected` / `error`) bleibt die maßgebliche
+  Zustandsmaschine.
+
+### 8b.2 Architektur
+
+Vier orthogonale Ebenen; jede einzelne ist optional, und jede
+höhere Ebene setzt auf den unteren auf, ohne sie zu verändern:
+
+1. **Avatar Identity** — *definiert die Figur.* Beispiele:
+   Salamander (Default, Smolit), Roboter, Mensch, Tiere, abstrakte
+   Formen (Orb, Nebel). Ein Identity-Wechsel verändert nur die
+   Figur, keine Verhaltensregeln.
+2. **Avatar Theme** — *Stil der Darstellung.* Mehrere Varianten pro
+   Identity (z. B. `default`, `tech`, `soft`, `neon`, `minimal`).
+   Themes sind Rendering-Presets, keine Zustandsmaschinen.
+3. **Appearance Overrides** — *konkrete Anpassungen.* Farben,
+   Glow, Outline, Größe, visuelle Intensität. Rein visuell,
+   additiv zum Theme.
+4. **Behavior Profile (UI)** — *Ausdruck / Animation.* Modulation
+   von Animationsintensität, Idle-Cues und Übergangsstil. **Keine
+   Logik**, kein Einfluss auf die Avatar-State-Maschine, kein
+   Einfluss auf Action Events.
+
+### 8b.3 Wichtige Trennung
+
+Explizit und bindend für die gesamte Linie:
+
+- **Appearance ≠ Behavior ≠ Personality ≠ Policy.**
+- Die UI darf keine Systementscheidungen beeinflussen.
+- Ein „verspielter" Behavior-Profile-Wert führt weder zu anderer
+  Assistant-Antwort noch zu anderer Desktop-Aktion noch zu
+  anderer Approval-Semantik.
+- Die Avatar-Wahl verändert **nicht**: Action-Execution,
+  Permissions, ABrain-Entscheidungen, Sicherheitsmodelle.
+
+### 8b.4 Template-System (Ziel)
+
+Jede Identity wird als **Template** beschrieben — eine bewusst
+kleine, deklarative Struktur, die **was ein Template anbietet**
+festhält, nicht **wie der Assistent reagiert**:
+
+- **Unterstützte States.** Jedes Template deklariert, welche
+  Avatar-States es visuell abdeckt (mindestens `idle`; alle
+  übrigen optional).
+- **Optionale Animationen.** Pro State kann ein Template eigene
+  Animationen mitliefern; wo keine geliefert wird, greift der
+  Fallback (§8b.5).
+- **Fallback-Regeln für nicht unterstützte Zustände.** Templates
+  dürfen nicht-deklarierte States an den neutralen `idle`-Pfad
+  delegieren.
+
+Templates sind **datengetrieben** beschreibbar; eine API-Zusage
+(Feldnamen, Dateiformat) ist an dieser Stelle ausdrücklich noch
+nicht fixiert.
+
+### 8b.5 Fallback-Prinzip
+
+- Fehlende States dürfen die UI **nicht brechen**. Die bestehende
+  deterministische Rückfall-Logik des Avatar-Systems (siehe §7
+  „Phase B") bleibt maßgeblich.
+- Ersatzstrategie bei fehlenden Assets:
+  1. neutraler Zustand (in der Regel `idle`-Pose);
+  2. reduzierte Darstellung ohne State-spezifische Animation;
+  3. Log-Eintrag, damit das Fehlen diagnostisch sichtbar wird
+     — **kein Crash, keine UI-Blockade**.
+- Der Default Smolit Salamander gilt als Referenztemplate: seine
+  State-Abdeckung definiert, welche Zustände überhaupt mit voller
+  visueller Qualität existieren.
+
+### 8b.6 Nicht-Ziele
+
+- **Kein 3D-Character-Editor, kein Rigging-System** im MVP.
+- **Kein Einfluss auf ABrain, Core-Logik, Permissions, Security.**
+- **Kein automatisches Persönlichkeits-Upgrade durch Avatar-Wahl.**
+- **Kein Ersetzen des Defaults.** Smolit Salamander bleibt
+  primärer Avatar; andere Identities sind additive Optionen.
+- **Kein impliziter Scope-Creep Richtung Animation-Pipeline,
+  Plug-in-Store, User-generated-Content-Plattform.** Jede dieser
+  Richtungen wäre ein eigener Track mit eigenem Entscheidungs-
+  und Verifikationsrahmen.
+
+Einordnung in der Roadmap:
+[`ROADMAP.md`](../ROADMAP.md) Phase 4b.
+Presence-Seite:
+[`presence_desktop_interaction.md`](./presence_desktop_interaction.md),
+Unterabschnitt „Avatar-Personalisierung als Presence-Erweiterung".
 
 ---
 

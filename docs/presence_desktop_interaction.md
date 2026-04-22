@@ -169,6 +169,20 @@ gesteuert. Diese Modi sind **nutzerseitig einstellbar**; der Core
 bzw. die Konfiguration ist die Quelle der Wahrheit, nicht der
 Avatar.
 
+Presence umfasst insgesamt:
+
+- die **sichtbare Figur** (Avatar),
+- ihre **Zustände** (Idle / Thinking / Talking / Acting /
+  Disconnected / Error),
+- ihre **Reaktionen** auf Nutzer- und Core-Events,
+- optional einen **Workflow-/Action-Readout** (siehe
+  Unterabschnitt weiter unten).
+
+Die Figur selbst ist perspektivisch **visuell personalisierbar**
+(Ziel-Zustand, siehe Unterabschnitt „Avatar-Personalisierung als
+Presence-Erweiterung"). Personalisierung ändert die Darstellung,
+**nicht** die Presence-Modi oder das Systemverhalten.
+
 ### 5.1 Presence Modes
 
 #### Off
@@ -232,6 +246,64 @@ Heutiger Stand: noch nicht implementiert. Die Produkt- und UI-Seite
 ist in [`ui_architecture.md` §6a/§8a](./ui_architecture.md)
 beschrieben; die Event-Projektion steht in
 [`api.md` „UI-Projektion: Workflow Overlay"](./api.md).
+
+### Avatar-Personalisierung als Presence-Erweiterung (Ziel-Zustand)
+
+Perspektivisch kann der Avatar selbst **visuell personalisiert**
+werden — nicht in seinem Verhalten. Die Personalisierung erfolgt
+in vier orthogonalen Ebenen (Detailsicht:
+[`ui_architecture.md` §8b](./ui_architecture.md); Roadmap-Seite:
+[`ROADMAP.md` Phase 4b](../ROADMAP.md)):
+
+- **Avatar Identity** — Figurentyp (Salamander als Default, optional
+  Roboter, Mensch, Tiere, abstrakte Formen).
+- **Avatar Theme** — Stil der Darstellung (`default`, `tech`, `soft`,
+  `neon`, `minimal`, …).
+- **Appearance Overrides** — Farben, Glow, Outline, Größe, visuelle
+  Intensität.
+- **Behavior Profile (UI)** — rein visueller Ausdruck (ruhig / aktiv
+  / verspielt / zurückhaltend); moduliert Animation und Idle-Cues,
+  nichts Anderes.
+
+Personalisierung dient:
+
+- **Identifikation** — eigener Look fürs eigene Setup.
+- **Lesbarkeit** — Avatar passt zum jeweiligen Desktop-Kontrast
+  und Nutzerpräferenz.
+- **Emotionaler Bindung** — Avatar darf sich vertraut anfühlen,
+  ohne dass sich dadurch Systemfähigkeiten ändern.
+
+Wichtig — **ohne jede Ausnahme**:
+
+- **Keine Auswirkung auf Action-Ausführung.** Ob Smolit eine
+  Desktop-Aktion ausführen darf oder nicht, hängt ausschließlich
+  an Policy und Approval — nicht am gewählten Avatar.
+- **Keine Auswirkung auf Systemverhalten.** ABrain-Prompts,
+  Action-Event-Struktur, Presence-Modi, Recovery-Strategien
+  bleiben unverändert.
+- **Keine Auswirkung auf Sicherheit.** Avatar-Auswahl verändert
+  keine Trust-Entscheidungen, keine Approval-Flows, keine
+  Permission-Grenzen.
+
+Status: **vollständig Ziel-Zustand**, heute nicht implementiert.
+Default bleibt Smolit Salamander; Alternativen kommen additiv
+hinzu und ersetzen den Default nicht.
+
+#### Klarstellung: Avatar ≠ Assistentenlogik
+
+Damit die Trennung nicht verwässert:
+
+- **Avatar ≠ Assistentenlogik.** Der Avatar ist Darstellung, keine
+  Entscheidungsinstanz. Assistant-Personality, Policy, Automation-
+  Regeln und Intent-Verarbeitung leben im Core bzw. in ABrain, nicht
+  in der UI.
+- **Gleiche Aktionen → gleiche Systemreaktion.** Unabhängig davon,
+  welcher Avatar angezeigt wird (Salamander / Roboter / Mensch /
+  Tier / Orb), liefert dieselbe Nutzereingabe dasselbe
+  Assistenten-Ergebnis.
+- **Appearance ≠ Behavior ≠ Personality ≠ Policy.** Diese vier
+  Ebenen bleiben in der Architektur getrennt; ein Appearance-
+  Wechsel darf keine der drei anderen Ebenen implizit mitverändern.
 
 ---
 

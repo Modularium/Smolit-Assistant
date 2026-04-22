@@ -40,6 +40,11 @@ Smolit soll sich nicht wie ein klassischer Chatbot anfühlen, sondern wie ein pr
 * Kommunikation mit dem Core via lokalem WebSocket
 * perspektivisch zusätzlich ein kleiner, read-only Workflow-/
   Action-Readout neben dem Avatar (Ziel-Zustand, keine Ausführung)
+* perspektivisch visuell personalisierbar (Avatar Identity /
+  Theme / Appearance Overrides / Behavior Profile, rein
+  darstellerisch) — ohne dass sich funktionale Identität,
+  Logik oder Sicherheitsmodell ändern; Smolit Salamander bleibt
+  Default
 
 ### AI
 

@@ -324,6 +324,134 @@ Desktop Interaction Layer, die UI projiziert nur.
 
 ---
 
+## Phase 4b – Avatar Appearance & Personalization (parallele Linie, Ziel-Zustand)
+
+Parallele Linie zu Phase 4 (Behavioral Layer). Diese Phase beschreibt
+die **zukünftige** Erweiterung der bestehenden Avatar-/Presence-Linie
+um ein strukturiertes **Appearance-System**. Sie ist **rein visuell
+/ darstellerisch**, beeinflusst weder Core-Logik noch ABrain noch
+Sicherheits-/Permission-Modelle.
+
+**Status.** Vollständig Ziel-Zustand. Keine aktuelle Implementierung;
+es existieren heute keine entsprechenden Scenes, Scripts oder
+Assets im Repo. Der Default-Avatar (Smolit Salamander) bleibt
+unverändert.
+
+**Bindende Abgrenzungen:**
+
+- Appearance ≠ Behavior ≠ Personality ≠ Policy.
+- Avatar-Auswahl beeinflusst **nicht**: Action-Execution, Permissions,
+  ABrain-Entscheidungen, Systemverhalten.
+- Personalisierung ist **additiv, nicht ersetzend** — der Default
+  Smolit Salamander bleibt erster-Klasse und ist kein austauschbares
+  Theme unter gleichberechtigten Themes.
+- Kein Vermischen von Avatar-Look, Assistant-Personality und
+  Automation-Policy.
+- UI bleibt reiner Renderer; Rust Core bleibt Source of Truth.
+
+### 4b.1 Avatar Identity
+
+Figurentyp — beschreibt **ausschließlich die visuelle Figur**, nicht
+Verhalten oder Logik:
+
+- **Salamander** (Default, Smolit)
+- Roboter
+- Mensch (Kopf / Figur)
+- Tiere
+- abstrakte Formen (z. B. Orb, Nebel)
+
+Ein Wechsel der Identity darf die Liste der unterstützten Presence-
+/Avatar-States nicht implizit ändern; fehlende States fallen auf
+einen neutralen Zustand zurück, ohne die UI zu brechen.
+
+### 4b.2 Avatar Themes / Styles
+
+Mehrere visuelle Varianten **pro Figur**. Themes verändern Stil,
+nicht Funktion. Beispiele:
+
+- `default`
+- `tech`
+- `soft`
+- `neon`
+- `minimal`
+
+Themes sind reine Rendering-Presets; sie dürfen keine Zustands-
+Maschine modifizieren und keine neuen Presence-Modi erzeugen.
+
+### 4b.3 Appearance Overrides
+
+Nutzerspezifische, rein visuelle Anpassungen oberhalb von Identity
+und Theme:
+
+- Farben
+- Glow
+- Outline
+- Größe
+- visuelle Intensität
+
+Overrides sind additiv zum Theme und persistieren als reine
+UI-Präferenz (Ort und Form der Persistenz sind in dieser Phase
+nicht festgelegt).
+
+### 4b.4 Behavior Profiles (UI-Ebene)
+
+„Behavior Profile" in diesem Abschnitt meint ausschließlich den
+*visuellen Ausdruck*, nicht Assistant-Verhalten:
+
+- ruhig
+- aktiv
+- verspielt
+- zurückhaltend
+
+Sie modulieren Animationsintensität, Idle-Cues und Übergangsstil —
+**kein** Einfluss auf Core-Entscheidungen, kein Einfluss auf die
+Avatar-State-Maschine, kein Einfluss auf Action-Events oder deren
+Verarbeitung.
+
+### 4b.5 Stufenmodell
+
+Die Personalisierung wird in drei klar getrennten Stufen ausgebaut.
+Keine davon ist heute implementiert.
+
+- **Stufe A — Brand-safe Personalisierung.** Nur Smolit-Varianten,
+  Themes + Farben. Erster realistischer Ausbauschritt, hält die
+  Marken-Identität intakt.
+- **Stufe B — Kuratierte Templates.** Alternative Figuren (Roboter,
+  Mensch, Tier, abstrakte Effekte) als vom Projekt gepflegte
+  Vorlagen. Jede Vorlage deklariert unterstützte States +
+  Fallback-Regeln.
+- **Stufe C — User-supplied Avatare (später).** Eigene Icons /
+  Figuren, template-basiert validiert. Erst nach stabiler Stufe B
+  und mit klarem Validierungspfad (Größe, Zustandsabdeckung,
+  Sicherheits-/Content-Leitplanken).
+
+### 4b.6 Nicht-Ziele
+
+- **Kein 3D-Character-Editor.**
+- **Kein generisches Avatar-Rigging-System** im MVP.
+- **Kein Einfluss auf ABrain** — weder über das Appearance-System
+  noch über Behavior Profiles.
+- **Kein Einfluss auf Core-Logik** — gleiche Nutzereingabe erzeugt
+  dieselbe Systemreaktion, unabhängig vom gewählten Avatar.
+- **Kein Einfluss auf Security / Permissions** — Avatar-Wahl
+  verändert keine Approval-Flows, keine Action-Execution-Rechte,
+  keine Trust-Entscheidungen.
+- **Kein automatisches „Persönlichkeits-Upgrade" durch Avatar** —
+  ein „verspieltes" Visual-Profile führt nicht zu anderem
+  Assistant-Verhalten.
+- **Kein Austausch des Defaults.** Smolit Salamander bleibt
+  Default und Referenz; Alternativen sind additiv, nicht
+  ersetzend.
+
+Detailarchitektur siehe
+[`docs/ui_architecture.md`](./docs/ui_architecture.md), Abschnitt
+„Avatar Appearance System (Ziel-Zustand)".
+Presence-Einordnung siehe
+[`docs/presence_desktop_interaction.md`](./docs/presence_desktop_interaction.md),
+Unterabschnitt „Avatar-Personalisierung als Presence-Erweiterung".
+
+---
+
 ## Phase 5 – Personality & Memory (V0.6)
 
 - [ ] User-Profil
