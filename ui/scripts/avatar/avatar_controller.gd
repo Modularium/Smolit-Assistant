@@ -34,10 +34,20 @@ extends Control
 ## residue.
 
 const AvatarStateRef := preload("res://scripts/avatar/avatar_state.gd")
+const AvatarAppearanceRef := preload("res://scripts/avatar/avatar_appearance.gd")
 
 signal clicked
 signal toggle_dock
 signal moved(position: Vector2)
+
+## Optionale Env-Variablen für Avatar Appearance Phase A. Werden in
+## `_ready()` einmalig gelesen und sind bewusst der einzige
+## Konfigurationspfad für diesen MVP — kein Settings-Bereich, keine
+## Persistenz, keine Laufzeit-Umschalter. Unbekannte Werte fallen
+## still auf Default / Clamping zurück (siehe avatar_appearance.gd).
+const ENV_APPEARANCE_THEME: String = "SMOLIT_AVATAR_THEME"
+const ENV_APPEARANCE_PROFILE: String = "SMOLIT_AVATAR_PROFILE"
+const ENV_APPEARANCE_INTENSITY: String = "SMOLIT_AVATAR_INTENSITY"
 
 const TALK_HOLD_SECONDS: float = 1.8
 const ERROR_HOLD_SECONDS: float = 1.2
@@ -116,8 +126,21 @@ var _dragging: bool = false
 var _drag_offset: Vector2 = Vector2.ZERO
 var _press_global: Vector2 = Vector2.ZERO
 
+## Appearance-Konfiguration (Phase A, Smolit Salamander only). Das
+## Dict ist ein reines UI-Render-Modul — Identity, Theme, Behavior
+## Profile und Overrides. Wird in `_ready()` aus den Env-Variablen
+## gebaut und danach nicht mehr verändert. Identitätsgarantie:
+## DEFAULT + CALM + Unity-Overrides reproduzieren das vor-PR-Verhalten.
+var _appearance: Dictionary = AvatarAppearanceRef.new_appearance()
+
 
 func _ready() -> void:
+	_load_appearance_from_env()
+	# Root-Scale einmalig auf den Appearance-Scale setzen. Hover-Pops
+	# und State-Pulse bauen darauf auf (siehe `_apply_hover_visual`
+	# und `_start_breath_tween`).
+	scale = AvatarAppearanceRef.resolved_scale(_appearance, BASE_SCALE)
+
 	_hold_timer = Timer.new()
 	_hold_timer.one_shot = true
 	_hold_timer.timeout.connect(_on_hold_timeout)
@@ -251,7 +274,10 @@ func _apply_hover_visual() -> void:
 	# overlapping scale animations on the root.
 	if _hover_tween and _hover_tween.is_valid():
 		_hover_tween.kill()
-	var target_scale := HOVER_SCALE if _hovered else BASE_SCALE
+	var base := HOVER_SCALE if _hovered else BASE_SCALE
+	# Appearance-scale-Override skaliert beide Referenz-Scales
+	# uniform, damit HOVER-Pop als relativer Effekt erhalten bleibt.
+	var target_scale := AvatarAppearanceRef.resolved_scale(_appearance, base)
 	_hover_tween = create_tween()
 	_hover_tween.tween_property(self, "scale", target_scale, HOVER_TWEEN_SECONDS)
 
@@ -279,28 +305,29 @@ func _apply_state_visuals() -> void:
 	match _state:
 		AvatarStateRef.State.IDLE:
 			_body.texture = IDLE_TEXTURE
-			_body.modulate = NORMAL_MODULATE
+			_body.modulate = _appearance_tint(NORMAL_MODULATE)
 			_start_breath_tween(IDLE_BREATH_AMPLITUDE, IDLE_BREATH_HALF_SECONDS)
 			_arm_wiggle_timer()
 		AvatarStateRef.State.THINKING:
 			_body.texture = IDLE_TEXTURE
-			_body.modulate = THINKING_MODULATE
+			_body.modulate = _appearance_tint(THINKING_MODULATE)
 			_start_thinking_tween()
 			_start_breath_tween(THINKING_BREATH_AMPLITUDE, THINKING_BREATH_HALF_SECONDS)
 		AvatarStateRef.State.TALKING:
 			_body.texture = ACTIVE_TEXTURE
-			_body.modulate = NORMAL_MODULATE
+			_body.modulate = _appearance_tint(NORMAL_MODULATE)
 			_start_breath_tween(TALKING_PULSE_AMPLITUDE, TALKING_PULSE_HALF_SECONDS)
 		AvatarStateRef.State.DISCONNECTED:
 			# Sleeping: matte tint, no animation — low power, low noise.
 			_body.texture = IDLE_TEXTURE
-			_body.modulate = DISCONNECTED_MODULATE
+			_body.modulate = _appearance_tint(DISCONNECTED_MODULATE)
 		AvatarStateRef.State.ERROR:
-			_body.modulate = ERROR_MODULATE
+			_body.modulate = _appearance_tint(ERROR_MODULATE)
 			_start_error_startle()
 		AvatarStateRef.State.ACTING:
 			_body.texture = ACTIVE_TEXTURE
-			_body.modulate = ACTING_TINT_BY_TARGET.get(_last_target_kind, NORMAL_MODULATE)
+			var acting_base: Color = ACTING_TINT_BY_TARGET.get(_last_target_kind, NORMAL_MODULATE)
+			_body.modulate = _appearance_tint(acting_base)
 			_start_breath_tween(ACTING_PULSE_AMPLITUDE, ACTING_PULSE_HALF_SECONDS)
 
 
@@ -320,11 +347,16 @@ func _stop_thinking_tween() -> void:
 ## All these states want a single, unambiguous scale oscillation on
 ## `_body.scale`; only amplitude and period change. Keeping it in one
 ## helper means we never accidentally run two competing scale loops.
+## Amplitude und Periode werden durch die Appearance (Profile +
+## Intensity-Override) moduliert — CALM + Unity-Overrides lässt das
+## Original-Timing unverändert (Identitätsgarantie).
 func _start_breath_tween(amplitude: Vector2, half_seconds: float) -> void:
+	var resolved_amp: Vector2 = AvatarAppearanceRef.resolved_amplitude(_appearance, amplitude)
+	var resolved_half: float = AvatarAppearanceRef.resolved_half_seconds(_appearance, half_seconds)
 	_body_scale_tween = create_tween().set_loops()
 	_body_scale_tween.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	_body_scale_tween.tween_property(_body, "scale", amplitude, half_seconds)
-	_body_scale_tween.tween_property(_body, "scale", Vector2.ONE, half_seconds)
+	_body_scale_tween.tween_property(_body, "scale", resolved_amp, resolved_half)
+	_body_scale_tween.tween_property(_body, "scale", Vector2.ONE, resolved_half)
 
 
 func _stop_body_scale_tween() -> void:
@@ -352,10 +384,17 @@ func _stop_startle_tween() -> void:
 
 func _arm_wiggle_timer() -> void:
 	# Re-arm with a fresh random delay so cues don't feel mechanical.
+	# Die Bandbreite wird durch das Behavior-Profile moduliert (LIVELY
+	# häufiger, RESERVED seltener). Das Untergrenzen-Clamp in
+	# `resolved_wiggle_interval` verhindert hektische Cues.
 	_wiggle_timer.stop()
-	_wiggle_timer.wait_time = randf_range(
-		WIGGLE_INTERVAL_MIN_SECONDS, WIGGLE_INTERVAL_MAX_SECONDS
+	var min_s: float = AvatarAppearanceRef.resolved_wiggle_interval(
+		_appearance, WIGGLE_INTERVAL_MIN_SECONDS
 	)
+	var max_s: float = AvatarAppearanceRef.resolved_wiggle_interval(
+		_appearance, WIGGLE_INTERVAL_MAX_SECONDS
+	)
+	_wiggle_timer.wait_time = randf_range(min_s, max_s)
 	_wiggle_timer.start()
 
 
@@ -471,3 +510,51 @@ func _on_action_cancelled(_payload: Dictionary) -> void:
 	var next: int = AvatarStateRef.State.IDLE if IpcClient.is_connected_to_core() \
 		else AvatarStateRef.State.DISCONNECTED
 	_set_state(next)
+
+
+# --- Appearance (Phase A) ------------------------------------------------
+
+
+## Dünner Wrapper um `AvatarAppearanceRef.resolved_tint`. Vereinfacht
+## die Call-Sites in `_apply_state_visuals` und bündelt den Default-
+## Fallback (sicherheitshalber).
+func _appearance_tint(base_color: Color) -> Color:
+	return AvatarAppearanceRef.resolved_tint(_appearance, base_color)
+
+
+## Liest die drei opt-in Env-Variablen für Phase-A-Personalisierung
+## und baut daraus einmalig `_appearance`. Unbekannte oder leere
+## Werte fallen auf Default/Clamping zurück — kein Crash, kein
+## Log-Spam. Der Identitätspfad (keine Env gesetzt) erzeugt
+## *exakt* das vor-PR-Verhalten: DEFAULT-Theme + CALM-Profile +
+## Unity-Overrides.
+func _load_appearance_from_env() -> void:
+	var theme_raw := OS.get_environment(ENV_APPEARANCE_THEME)
+	var profile_raw := OS.get_environment(ENV_APPEARANCE_PROFILE)
+	var intensity_raw := OS.get_environment(ENV_APPEARANCE_INTENSITY).strip_edges()
+
+	var theme: int = AvatarAppearanceRef.theme_from_string(theme_raw)
+	var profile: int = AvatarAppearanceRef.profile_from_string(profile_raw)
+	var intensity: float = 1.0
+	if intensity_raw != "":
+		if intensity_raw.is_valid_float():
+			intensity = float(intensity_raw)
+		else:
+			push_warning("avatar_appearance: SMOLIT_AVATAR_INTENSITY is not a number — falling back to 1.0.")
+
+	_appearance = AvatarAppearanceRef.make_appearance(theme, profile, Color(1, 1, 1, 1), intensity, 1.0)
+
+	# Nur loggen, wenn explizit konfiguriert wurde — Default-Lauf
+	# bleibt byte-kompatibel still.
+	var env_touched: bool = theme_raw.strip_edges() != "" \
+		or profile_raw.strip_edges() != "" \
+		or intensity_raw != ""
+	if env_touched:
+		var overrides: Dictionary = _appearance["overrides"]
+		print("[avatar-appearance] identity=%s theme=%s profile=%s intensity=%.2f scale=%.2f" % [
+			str(_appearance.get("identity", "smolit_salamander")),
+			AvatarAppearanceRef.theme_name(int(_appearance["theme"])),
+			AvatarAppearanceRef.profile_name(int(_appearance["profile"])),
+			float(overrides["intensity"]),
+			float(overrides["scale"]),
+		])

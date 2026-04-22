@@ -366,18 +366,21 @@ Desktop Interaction Layer, die UI projiziert nur.
 
 ---
 
-## Phase 4b – Avatar Appearance & Personalization (parallele Linie, Ziel-Zustand)
+## Phase 4b – Avatar Appearance & Personalization (parallele Linie, Phase A Ist, sonst Ziel-Zustand)
 
 Parallele Linie zu Phase 4 (Behavioral Layer). Diese Phase beschreibt
-die **zukünftige** Erweiterung der bestehenden Avatar-/Presence-Linie
-um ein strukturiertes **Appearance-System**. Sie ist **rein visuell
-/ darstellerisch**, beeinflusst weder Core-Logik noch ABrain noch
+die Erweiterung der bestehenden Avatar-/Presence-Linie um ein
+strukturiertes **Appearance-System**. Sie ist **rein visuell /
+darstellerisch**, beeinflusst weder Core-Logik noch ABrain noch
 Sicherheits-/Permission-Modelle.
 
-**Status.** Vollständig Ziel-Zustand. Keine aktuelle Implementierung;
-es existieren heute keine entsprechenden Scenes, Scripts oder
-Assets im Repo. Der Default-Avatar (Smolit Salamander) bleibt
-unverändert.
+**Status.** Stufe A ist als MVP-Spike implementiert (nur
+Smolit-Salamander, vier markentreue Themes, drei UI-Behavior-
+Profiles, kleine Appearance-Overrides, Env-gesteuerte Opt-in-
+Konfiguration). Stufen B (kuratierte Templates mit alternativen
+Figuren) und C (User-supplied Avatare) bleiben vollständig
+Ziel-Zustand. Der Default-Avatar (Smolit Salamander) bleibt
+unverändert und erster-Klasse.
 
 **Bindende Abgrenzungen:**
 
@@ -453,19 +456,28 @@ Verarbeitung.
 ### 4b.5 Stufenmodell
 
 Die Personalisierung wird in drei klar getrennten Stufen ausgebaut.
-Keine davon ist heute implementiert.
+Stufe A ist implementiert; B und C bleiben Ziel-Zustand.
 
-- **Stufe A — Brand-safe Personalisierung.** Nur Smolit-Varianten,
-  Themes + Farben. Erster realistischer Ausbauschritt, hält die
-  Marken-Identität intakt.
-- **Stufe B — Kuratierte Templates.** Alternative Figuren (Roboter,
-  Mensch, Tier, abstrakte Effekte) als vom Projekt gepflegte
-  Vorlagen. Jede Vorlage deklariert unterstützte States +
-  Fallback-Regeln.
-- **Stufe C — User-supplied Avatare (später).** Eigene Icons /
-  Figuren, template-basiert validiert. Erst nach stabiler Stufe B
-  und mit klarem Validierungspfad (Größe, Zustandsabdeckung,
-  Sicherheits-/Content-Leitplanken).
+- **Stufe A — Brand-safe Personalisierung (Ist, MVP-Spike).** Nur
+  Smolit-Varianten, Themes + Behavior Profiles + Appearance
+  Overrides. Realisiert in
+  `ui/scripts/avatar/avatar_appearance.gd`; Integration im
+  bestehenden `avatar_controller.gd`; Steuerung via drei opt-in
+  Env-Variablen (`SMOLIT_AVATAR_THEME` / `SMOLIT_AVATAR_PROFILE` /
+  `SMOLIT_AVATAR_INTENSITY`). Identitätsgarantie (DEFAULT + CALM +
+  Unity-Overrides == vor-PR-Verhalten) durch den Smoketest
+  `scripts/avatar_appearance_smoke.gd` belegt (32 Assertions
+  PASS; Harness-Case `avatar-appearance-smoke`). Details siehe
+  [`docs/ui_architecture.md` §8b.7](./docs/ui_architecture.md).
+- **Stufe B — Kuratierte Templates (Ziel-Zustand).** Alternative
+  Figuren (Roboter, Mensch, Tier, abstrakte Effekte) als vom
+  Projekt gepflegte Vorlagen. Jede Vorlage deklariert unterstützte
+  States + Fallback-Regeln. Nicht Teil dieses PRs.
+- **Stufe C — User-supplied Avatare (später, Ziel-Zustand).**
+  Eigene Icons / Figuren, template-basiert validiert. Erst nach
+  stabiler Stufe B und mit klarem Validierungspfad (Größe,
+  Zustandsabdeckung, Sicherheits-/Content-Leitplanken). Nicht
+  Teil dieses PRs.
 
 ### 4b.6 Nicht-Ziele
 

@@ -657,7 +657,7 @@ laufenden Core die sinnvollste End-to-End-Verifikation.
 
 ---
 
-## 8b. Avatar Appearance System (Ziel-Zustand)
+## 8b. Avatar Appearance System (Phase A Ist, sonst Ziel-Zustand)
 
 Dieser Abschnitt beschreibt die geplante Erweiterung des Avatar-
 Renderings um ein strukturiertes **Appearance-System** als rein
@@ -765,6 +765,118 @@ Einordnung in der Roadmap:
 Presence-Seite:
 [`presence_desktop_interaction.md`](./presence_desktop_interaction.md),
 Unterabschnitt „Avatar-Personalisierung als Presence-Erweiterung".
+
+### 8b.7 Phase A (Ist-Zustand, MVP-Spike)
+
+Phase A der Appearance-Linie ist jetzt im Repo gelandet — bewusst
+klein, markentreu, Smolit Salamander only. Die in §8b.1–§8b.6
+beschriebene Architektur (vier orthogonale Ebenen) ist für **genau
+eine** Identity realisiert:
+
+- **Identity:** implizit `smolit_salamander`. Kein Identity-Wechsel
+  in Phase A. Keine alternativen Figuren (Roboter / Mensch / Tier /
+  Orb) im Code.
+- **Theme:** vier markentreue Presets — `default`, `soft`, `tech`,
+  `minimal`. Jedes Theme ist nur ein `tint_multiplier`-Eintrag, der
+  multiplikativ auf die bestehende State-Modulate-Kette angewandt
+  wird (`NORMAL`, `THINKING`, `DISCONNECTED`, `ERROR`,
+  `ACTING_TINT_BY_TARGET`). Keine Texturwechsel.
+- **Behavior Profile (UI):** drei UI-only Profile — `calm`
+  (Referenzlinie), `lively`, `reserved`. Modulation erfolgt über
+  drei Multiplikatoren (`amplitude_multiplier`, `tempo_multiplier`,
+  `wiggle_interval_multiplier`). Amplituden werden nicht
+  absolut skaliert, sondern ihr *Delta zur Ruhelage* (Vector2.ONE)
+  — das erhält die Richtung der Mikroanimation und vermeidet
+  Clippen.
+- **Appearance Overrides:** `primary_tint` (multiplikative Farbe
+  nach Theme-Tint), `intensity` (zusätzlicher Amplitude-
+  Multiplikator, geclampt auf 0.5–1.5), `scale` (Root-Scale-
+  Multiplikator, geclampt auf 0.75–1.5).
+
+**Steuerung** (pragmatisch, MVP-Niveau):
+
+Drei opt-in Umgebungsvariablen. Ohne Env-Setup ist das
+Appearance-System als No-op aktiv (Identitätsgarantie, siehe
+unten).
+
+- `SMOLIT_AVATAR_THEME` — `default` / `soft` / `tech` / `minimal`.
+  Unbekannte Werte → `default`.
+- `SMOLIT_AVATAR_PROFILE` — `calm` / `lively` / `reserved`.
+  Unbekannte Werte → `calm`.
+- `SMOLIT_AVATAR_INTENSITY` — Float, geclampt auf 0.5–1.5.
+  Unparsebare Werte → 1.0 plus eine `push_warning`-Zeile.
+
+Beispiel (Entwickler-Lauf):
+
+```bash
+SMOLIT_AVATAR_THEME=tech SMOLIT_AVATAR_PROFILE=lively \
+SMOLIT_AVATAR_INTENSITY=1.2 godot --path ui
+```
+
+Bei gesetzter Env-Konfiguration gibt der Avatar-Controller einmalig
+eine Diagnose-Log-Zeile aus:
+
+```text
+[avatar-appearance] identity=smolit_salamander theme=tech profile=lively intensity=1.20 scale=1.00
+```
+
+Ohne gesetzte Env bleibt der Start-Log **byte-identisch** zum
+vor-PR-Stand — der Standard-Lauf hat keinen neuen Log-Output.
+
+**Datei-Layout:**
+
+```text
+ui/scripts/avatar/
+├── avatar_state.gd        # (unverändert)
+├── avatar_controller.gd   # liest Env → _appearance, wrapt Konstanten
+└── avatar_appearance.gd   # NEU: Enums, Presets, resolve-Helfer
+```
+
+**Identitätsgarantie (geprüft im Smoketest).** `DEFAULT`-Theme +
+`CALM`-Profile + Unity-Overrides (`primary_tint=Color(1,1,1,1)`,
+`intensity=1.0`, `scale=1.0`) reproduzieren das exakte vor-PR-
+Verhalten der Avatar-Mikroanimation:
+
+- `resolved_tint(base) == base` (Theme-Tint und Override-Tint sind
+  multiplikative Identitäten).
+- `resolved_amplitude(base) == base` (Delta-Skalierung mit
+  Multiplikator 1.0).
+- `resolved_half_seconds(base) == base` (Tempo 1.0).
+- `resolved_scale(base) == base` (Scale 1.0).
+- `resolved_wiggle_interval(base) == base` (Wiggle 1.0).
+
+Der Smoketest
+`scripts/avatar_appearance_smoke.gd` deckt diese fünf Invarianten
+zusammen mit Parser-Fallbacks, Clamping und erwarteten Profil-/
+Theme-Effekten ab (insgesamt 32 Assertions, alle PASS unter
+`scripts/run_overlay_verification.sh avatar-appearance-smoke`).
+
+**Fallback-Prinzip in Phase A konkret:**
+
+- Unbekanntes Theme (String oder Int) → `DEFAULT`.
+- Unbekanntes Profile → `CALM`.
+- Intensity/Scale außerhalb des Clamp-Bereichs → auf Min/Max
+  begrenzt.
+- `primary_tint` als Nicht-`Color` → Identität `Color(1,1,1,1)`.
+- Kein Pfad kann den Avatar unsichtbar oder zu groß/klein machen —
+  alle resolve-Helfer clampen oder fallen sicher zurück.
+
+**Was Phase A explizit nicht tut:**
+
+- Keine alternativen Figuren (Roboter / Mensch / Tier / Nebel) —
+  siehe §8b.1.
+- Kein Template-Marktplatz, kein User-Upload-Pfad — siehe §8b.4
+  (Stufe C bleibt Ziel-Zustand).
+- Keine Persistenz (Config-Datei, Nutzerprofil). Wird auf
+  Env-Setup beschränkt, bis Stufe B ansteht.
+- Keine neuen Events, keine IPC-Nachrichten, keine neue Core-API,
+  keine Presence-Mode-Änderung.
+- Keine visuellen Stil-Explosionen: alle Themes bleiben erkennbar
+  als Smolit; `tint_multiplier`-Werte sind bewusst klein.
+- Keine Auswirkung auf Workflow-Overlay, Presence-Controller,
+  Window-Behavior, Approval-/Action-/Discovery-Banner, Compact-
+  Input oder das Overlay-/Click-through-/AOT-/Runtime-Report-
+  System.
 
 ---
 

@@ -39,6 +39,11 @@
 #                   Unit-ähnliche Assertions für Skeleton,
 #                   Label-Auflösung, Phase→DisplayMode, Step-Hint.
 #                   Exit 0 = alle PASS.
+#   avatar-appearance-smoke
+#                 — Führt scripts/avatar_appearance_smoke.gd aus.
+#                   Prüft Themes / Profiles / Overrides / Clamping
+#                   und die Identitätsgarantie (Default+CALM+unity
+#                   == pre-PR-Verhalten). Exit 0 = alle PASS.
 #   resolver-wayland-mutter
 #                 — Env-Override (Wayland + GNOME) + Report. Zeigt, dass
 #                   der Resolver backend_wayland_mutter wählt und der
@@ -179,6 +184,14 @@ case "${CASE}" in
     # Kein Scene-Tree, kein Fenster — reine Assertions.
     exec godot --headless --path "${UI_DIR}" \
       --script "${REPO_ROOT}/scripts/workflow_overlay_state_smoke.gd"
+    ;;
+  avatar-appearance-smoke)
+    # Spezialfall: pure Logiktests des Avatar-Appearance-Moduls
+    # (Phase A, Smolit Salamander only). Kein Scene-Tree. Prüft
+    # insbesondere die Identitätsgarantie DEFAULT+CALM+Unity =
+    # Pre-PR-Werte.
+    exec godot --headless --path "${UI_DIR}" \
+      --script "${REPO_ROOT}/scripts/avatar_appearance_smoke.gd"
     ;;
   resolver-wayland-mutter)
     export SMOLIT_WINDOW_REPORT=1
