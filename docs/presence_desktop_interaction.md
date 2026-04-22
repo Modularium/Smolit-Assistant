@@ -25,6 +25,14 @@ Smolit ist damit **weder ein dekorativer Begleiter** noch ein
 unsichtbarer Hintergrund-Agent. Smolit ist eine sichtbare, aber
 kontrollierte digitale Assistenz-Präsenz.
 
+Der sichtbare Teil von Smolit umfasst perspektivisch nicht nur
+Avatar und Präsenz, sondern auch einen symbolischen **Workflow-/
+Action-Readout** (Ziel-Zustand, siehe Unterabschnitt „Workflow
+Overlay als Presence-Erweiterung" in §5 und die UI-Seite in
+[`ui_architecture.md`](./ui_architecture.md) §6a/§8a). Der Readout
+ist read-only und core-driven; er führt nichts aus und ändert die
+Ausführungs-Architektur nicht.
+
 ---
 
 ## 2. Zielbild
@@ -68,6 +76,15 @@ Das bedeutet im Einzelnen:
   Layer**.
 - Der Avatar erhält vom Core **Action-/Phase-Events** und
   **visualisiert** diese — er ist **Darstellung**, nicht Executor.
+- Neben Avatar-Mimik und Bewegungszuständen kann Smolit
+  perspektivisch einen **abstrahierten sichtbaren Handlungsfluss**
+  als symbolisches Workflow-Readout zeigen. Dieser Flow ist
+  ebenfalls Visual truth und bleibt von der technischen Desktop-
+  Ausführung vollständig entkoppelt — er zeigt *was* gerade
+  passiert, nicht *wie* die Low-Level-Interaktion implementiert
+  ist. Siehe den Unterabschnitt „Workflow Overlay als Presence-
+  Erweiterung" in §5 sowie
+  [`ui_architecture.md` §6a/§8a](./ui_architecture.md).
 
 Gründe für diese Trennung:
 
@@ -95,8 +112,8 @@ Gründe für diese Trennung:
               ┌──────────────────────────┐
               │  Smolit Avatar /         │
               │  Presence Layer          │   sichtbare Figur, Zustände,
-              │  (Docked / Expanded /    │   Bewegungen, Rückmeldungen
-              │   Action Mode)           │
+              │  (Docked / Expanded /    │   Bewegungen, Rückmeldungen,
+              │   Action Mode)           │   Workflow-Readout
               └───────────┬──────────────┘
                           ↕
               ┌──────────────────────────┐
@@ -129,7 +146,7 @@ Verantwortlichkeiten pro Ebene:
 
 | Ebene                        | Verantwortung                                           |
 |------------------------------|---------------------------------------------------------|
-| Presence Layer (Avatar)      | Sichtbarkeit, Zustände, Animation, Nutzerwahrnehmung    |
+| Presence Layer (Avatar)      | Sichtbarkeit, Zustände, Animation, Nutzerwahrnehmung, symbolischer Workflow-Readout (Ziel-Zustand) |
 | Smolit UI (Godot)            | Rendering, Fenster-/Overlay-Verhalten, Input-Weiterleitung |
 | Smolit Core                  | Orchestrierung, Event-Fan-out, Policy-Enforcement       |
 | ABrain / Reasoning / Policy  | Intent-Erkennung, Plan, Entscheidung, Eskalation        |
@@ -189,6 +206,33 @@ Die Presence Modes sind **produktseitig einstellbar** und Teil der
 Nutzer-Policy. Sie bestimmen, wie stark Smolit den Bildschirm
 beansprucht — unabhängig davon, was technisch gerade möglich wäre.
 
+### Workflow Overlay als Presence-Erweiterung (Ziel-Zustand)
+
+Perspektivisch kann die Presence-Schicht neben Avatar und Banner
+einen kleinen, read-only **Workflow-/Action-Readout** zeigen —
+symbolischer Flow links vom Avatar bzw. als linker Flügel derselben
+Presence-Hülle.
+
+- Das Overlay dient dem **Verständnis und der Nachvollziehbarkeit**,
+  nicht der Ausführung.
+- Es ist **primär im Action-Kontext** relevant (siehe §6.3); im
+  Leerlauf (Docked, kein laufender Action Event) bleibt es reduziert
+  oder vollständig verborgen.
+- Es hat **keine eigenständige Executor-Rolle** — es projiziert nur,
+  was der Core ohnehin als Action Events emittiert.
+- Es trägt **keine Interaktionsversprechen** im MVP; spätere
+  Collapse/Expand- oder Inspect-Formen sind architektonisch nicht
+  ausgeschlossen, aber nicht Teil des Ziel-MVP.
+- Es ist **kein neuer Presence Mode** und keine neue Window-
+  Behavior-Fähigkeit. Es lebt innerhalb derselben Presence-Hülle
+  wie Avatar und Banner (siehe
+  [`linux_window_overlay_architecture.md`](./linux_window_overlay_architecture.md)).
+
+Heutiger Stand: noch nicht implementiert. Die Produkt- und UI-Seite
+ist in [`ui_architecture.md` §6a/§8a](./ui_architecture.md)
+beschrieben; die Event-Projektion steht in
+[`api.md` „UI-Projektion: Workflow Overlay"](./api.md).
+
 ---
 
 ## 6. Always-on-top-Konzept
@@ -230,6 +274,14 @@ Drei-Zustands-Modell für das sichtbare Fenster/Overlay.
 - Zeigt Handlung, Zielobjekt und Rückmeldung — entsprechend dem
   eingestellten Visual Action Mode (siehe §7).
 - Kehrt nach Abschluss (oder Abbruch) in Docked zurück.
+- Kann neben dem Avatar zusätzlich einen **symbolischen
+  Workflow-Readout** einblenden (Ziel-Zustand). Beispielhafter
+  Ablauf: `Trigger → Schritt → Aktion → Ergebnis`. Die Darstellung
+  bleibt symbolisch, sicherheitsneutral und read-only; sie zeigt
+  ausschließlich, was der Core ohnehin als Action Events geliefert
+  hat. Siehe Unterabschnitt „Workflow Overlay als Presence-
+  Erweiterung" in §5 und
+  [`ui_architecture.md` §6a/§8a](./ui_architecture.md).
 
 Diese drei Zustände sind **visuelle Zielarchitektur**. Sie
 beschreiben, wie sich Smolit auf dem Desktop anfühlen soll, nicht
@@ -467,6 +519,15 @@ Standardaktionen, die Smolit unterstützen soll:
 
 Ohne **Verification und Recovery** ist breite UI-Automation nicht
 stabil genug und wird in v1 nicht freigegeben.
+
+**Abgrenzung zum Workflow-Overlay.** Das in §5 beschriebene
+Workflow-/Action-Readout darf **nicht** mit Adapter-Execution
+verwechselt werden. Es rendert symbolisch, was der Core über
+Action Events bekannt gibt, und ist bewusst read-only. Recovery,
+Retry, Verification und die Wahl der Fidelity-Stufe bleiben
+ausschließlich im Core / Desktop Interaction Layer — weder die
+UI noch das Overlay treffen solche Entscheidungen oder führen sie
+aus.
 
 ---
 

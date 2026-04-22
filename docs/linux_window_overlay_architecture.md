@@ -40,6 +40,15 @@ Das funktionale Zielbild für Smolit auf Linux ist:
   Click-through-Verhalten explizit steuern. Keine stille Rechteausweitung.
 - **Nicht störend.** Kein Fenster, das sich selbst in den Vordergrund
   drängt, Fokus klaut oder Eingaben blockiert.
+- **Symbolischer Workflow-Readout neben dem Avatar.** Die sichtbare
+  Presence kann künftig neben dem Avatar einen kleinen
+  read-only Workflow-/Action-Readout enthalten, sofern derselbe
+  Overlay-Pfad bereits aktiv ist. Das ist ausdrücklich **keine
+  neue Plattformzusage** und keine eigene Window-Behavior-
+  Fähigkeit — Details in
+  [`ui_architecture.md` §6a/§8a](./ui_architecture.md) und im
+  Unterabschnitt „Workflow-Overlay innerhalb der Presence-Hülle"
+  unten.
 
 Ausdrücklich **nicht** Teil dieses Zielbildes:
 
@@ -88,6 +97,15 @@ Doku müssen das getrennt führen.
 Die folgenden Einschätzungen sind bewusst vorsichtig. Wo das Verhalten
 compositor-abhängig ist, wird das explizit genannt statt einer
 Pauschalantwort.
+
+**Einordnung.** Das in
+[`ui_architecture.md` §6a/§8a](./ui_architecture.md) beschriebene
+Workflow-Overlay ist **kein eigener Plattform-Fähigkeitstyp**,
+sondern zusätzliche UI *innerhalb* derselben Host-/Overlay-Hülle
+wie der Avatar. Die folgenden Kategorien (Always-on-top,
+Transparenz, Click-through, Positionierung, …) verändern sich
+durch diesen UI-Zusatz nicht, und es entsteht kein neuer
+Capability-Eintrag in `window_capabilities.gd`.
 
 ### 1. Always-on-top
 
@@ -913,6 +931,46 @@ Was der Pfad bewusst **nicht** tut:
 - **Keine Feature-Zusage „Always-on-top unter Linux".** Was geht und
   was nicht, steht pro WM/Compositor — der Log-`note`-Block benennt
   das ausdrücklich.
+
+---
+
+## G.3 Workflow-Overlay innerhalb der Presence-Hülle (Ziel-Zustand)
+
+Dieser Unterabschnitt ordnet den in
+[`ui_architecture.md` §6a/§8a](./ui_architecture.md) beschriebenen
+Workflow-Readout plattformseitig ein. Er ist **Ziel-Zustand**,
+heute nicht implementiert.
+
+MVP-Position, bewusst konservativ:
+
+- **Teil derselben Presence-/Overlay-Hülle**, kein separates
+  Multiwindow-System. Das Workflow-Overlay ist zusätzliche UI
+  innerhalb des bestehenden Godot-Hostfensters, nicht ein
+  zweites Toplevel. Kein `WINDOW_FLAG`-Tanz, kein neues
+  Window-Spawning.
+- **Gleiche Plattformgrenzen** wie das Avatar-/Presence-Fenster.
+  Die Transparenz-, Click-through- und Always-on-top-Aussagen
+  aus §C bleiben *punktgenau* dieselben — das Overlay erbt sie
+  implizit, weil es dasselbe Fenster ist.
+- **Keine zusätzlichen Rechte.** Kein globales Desktop-Wissen,
+  kein Zugriff auf fremde Fenster, keine Lese-Rechte auf
+  Compositor-Protokolle jenseits dessen, was der Avatar ohnehin
+  nutzt.
+- **Kein neuer Always-on-top-Pfad.** Das Overlay erzeugt keine
+  neue Stapelungs-Anforderung.
+- **Kein eigener compositor-spezifischer Sonderpfad.** Weder
+  `backend_wayland_wlroots` noch irgendein anderes Backend-Target
+  bekommt durch das Workflow-Overlay eine Sonderbehandlung.
+- **Spätere Hilfsfenster-Experimente** (z. B. ausklappbarer
+  Workflow-Graph als eigenes Toplevel) sind ausdrücklich **nicht**
+  Teil des MVP/Standardpfads. Falls so etwas jemals kommt, braucht
+  es seinen eigenen Entscheidungs- und Verifikationstrack.
+
+Fazit in einem Satz: das Workflow-Readout braucht **keine neue
+Capability** — es lebt innerhalb der bereits vorhandenen
+Transparenz-/Overlay-/Click-through-Grenzen und wird durch
+zusätzliche Sichtbarkeit erreicht, nicht durch zusätzliche
+Plattformrechte.
 
 ---
 

@@ -83,6 +83,19 @@ Action Events; das Protokoll kennt zusätzlich
 `send_shortcut` und `focus_window` sind als Hooks modelliert, liefern
 aber `BackendUnsupported`.
 
+**Workflow-Overlay / Visual Action Flow (Ziel-Zustand, heute nicht
+implementiert).** Architektonisch vorgesehen ist ein sichtbares,
+read-only Workflow-Overlay links der Präsenzfigur bzw. als linker
+Flügel innerhalb derselben Presence-Hülle. Es soll auf Basis der
+bestehenden Action Events (`action_planned` / `action_started` /
+`action_step` / `action_completed` / `action_failed`) einen
+symbolischen Ablauf verständlich machen. Es ist **kein** Workflow-
+Builder, **kein** Desktop-Executor, **keine** zweite Wahrheit neben
+dem Core. Heute existiert weder der Renderer noch das entsprechende
+Szenen-Material im Repo — siehe Subeinheit 3.4 unten sowie
+[docs/ui_architecture.md §6a/§8a](./docs/ui_architecture.md) und
+[docs/api.md „UI-Projektion: Workflow Overlay"](./docs/api.md).
+
 ---
 
 ## Phase 0 – Core Foundation (V0.1) ✅
@@ -229,6 +242,65 @@ aber `BackendUnsupported`.
       Benutzerpräferenz
 - [ ] Kill-Switch / Stop-Aktion im Banner (setzt Core-seitige
       Cancel-API voraus)
+
+### Subeinheit 3.4 – Workflow Overlay / Visual Action Flow (Ziel-Zustand)
+
+Ziel-Zustand, **heute nicht implementiert**. Keine `.gd`/`.tscn`-
+Artefakte, kein Renderer, keine Szenen. Die Subeinheit beschreibt
+*was entstehen soll*, nicht *was existiert*.
+
+**1. Kurzbeschreibung.** Ein transparentes, leichtgewichtiges
+visuelles Flow-Overlay, das links vom Avatar/Icon bzw. als linker
+Flügel innerhalb derselben Presence-Hülle erscheint. Es zeigt auf
+Basis der Action Events einen verständlichen Handlungsfluss
+(Trigger / Schritte / Aktion / Ergebnis). **Read-only**, kein
+Editor, kein Executor, kein zweites Logiksystem.
+
+**2. MVP-Scope.**
+
+- kleine node-basierte Darstellung, Standardfall 2–4 Knoten;
+- gerichtete Kanten mit dezenten Aktivitätsanimationen;
+- semantische Zustände pro Knoten/Kante: `geplant` / `aktiv` /
+  `erfolgreich` / `fehlgeschlagen` / `abgebrochen` / `unklar`;
+- **kein** Zoom, **kein** Pan, **kein** Drag, **keine** freie
+  Verkabelung, **kein** unendlicher Canvas.
+
+**3. Event-Bindung.** Das Overlay konsumiert ausschließlich
+Action Events aus dem Core — es erzeugt keine eigenen Zustände.
+Im MVP bevorzugt genutzt:
+
+- `action_planned`
+- `action_started`
+- `action_step`
+- `action_completed`
+- `action_failed`
+
+Spätere Eventtypen (`action_verification`, `action_cancelled` o. ä.)
+können **additiv** hinzukommen, sollen aber nicht als heutiger
+Ist-Zustand dargestellt werden. Details zur Projektion in
+[docs/api.md „UI-Projektion: Workflow Overlay"](./docs/api.md).
+
+**4. Nicht-Ziele.**
+
+- kein n8n-Ersatz, kein Workflow-Authoring, kein Graph-Editor;
+- keine Desktop-Automation in Godot;
+- keine zweite Session- oder Execution-Logik in der UI;
+- keine Protokollhoheit — die Wahrheit bleibt im Core;
+- Smolit wird dadurch **kein** visueller Workflow-Builder.
+
+**5. Offene Punkte.**
+
+- Layout-Strategie (feste Spur vs. adaptiv, vertikal vs. radial);
+- Node-Semantik / Symbolik (Trigger / Step / Action / Result);
+- Collapse/Expand-Verhalten bei längeren Abläufen;
+- spätere Visualisierungsstufen (Inspect, History-Rewind) sind
+  explizit **nicht** MVP-Teil, aber architektonisch nicht
+  ausgeschlossen.
+
+Dieses Overlay erweitert die Presence-Linie, hält aber die Trennung
+zwischen sichtbarer Darstellung und technischer Ausführung strikt
+aufrecht — die Desktop-Ausführung bleibt ausschließlich im Core /
+Desktop Interaction Layer, die UI projiziert nur.
 
 ---
 

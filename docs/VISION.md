@@ -38,6 +38,8 @@ Smolit soll sich nicht wie ein klassischer Chatbot anfühlen, sondern wie ein pr
 * später optional 2.5D / 3D
 * separater Prozess
 * Kommunikation mit dem Core via lokalem WebSocket
+* perspektivisch zusätzlich ein kleiner, read-only Workflow-/
+  Action-Readout neben dem Avatar (Ziel-Zustand, keine Ausführung)
 
 ### AI
 

@@ -105,6 +105,14 @@ Zusätzlich emittiert der Core **Action Events** (Action Event Model v1).
 Sie sind additiv; ältere UIs, die sie nicht kennen, dürfen sie
 ignorieren. Details in Abschnitt 2.5.
 
+Diese Action Events bilden auch die **Grundlage für den geplanten
+visuellen Workflow-/Action-Readout in der UI** (Ziel-Zustand, siehe
+Abschnitt „UI-Projektion: Workflow Overlay" und
+[`ui_architecture.md` §6a/§8a](./ui_architecture.md)). Das Overlay
+ist eine **Projektion** dieser Events — kein separates Protokoll,
+keine zweite Wahrheit, keine neue Event-Kategorie. Der Core bleibt
+Source of Truth.
+
 Für freigabepflichtige Aktionen kommen die Approval-Events
 `approval_requested` und `approval_resolved` hinzu (Details in
 Abschnitt 2.7).
@@ -315,6 +323,62 @@ Core → UI:   {"type":"action_failed","payload":{"action_id":"act_000002","stat
 - UIs, die Action Events nicht kennen, funktionieren weiter.
 - Erst spätere Phasen dürfen die UI stärker auf Action Events
   ausrichten; v1 ist additiv.
+
+#### UI-Projektion: Workflow Overlay (Ziel-Zustand)
+
+Dieser Unterabschnitt beschreibt, wie die UI aus den bestehenden
+Action Events einen kleinen symbolischen Workflow-/Action-Readout
+rekonstruieren soll. Er ist **Ziel-Zustand**, heute nicht
+implementiert. Die Produktsicht steht in
+[`ui_architecture.md` §6a/§8a](./ui_architecture.md); die
+Architektureinordnung in
+[`presence_desktop_interaction.md`](./presence_desktop_interaction.md),
+Unterabschnitt „Workflow Overlay als Presence-Erweiterung".
+
+Grundsätze:
+
+- **Projektion, kein Protokoll.** Das Overlay liest die bestehenden
+  Action Events und baut daraus einen kleinen sichtbaren Flow auf.
+  Es **erzeugt keinen eigenen Event-Typ** und erwartet kein
+  separates Workflow-Push vom Core.
+- **MVP bevorzugt bestehende Eventtypen.** Der Flow wird aus
+  `action_planned` / `action_started` / `action_step` /
+  `action_completed` / `action_failed` rekonstruiert, die oben in
+  §2.5 bereits vollständig spezifiziert sind.
+- **Additiv, nie Pflicht.** Falls zusätzliche Felder später
+  sinnvoll werden (siehe unten), dann ausschließlich als
+  **optionale** Metadaten an bestehenden Events. Kein Pflichtfeld,
+  keine Breaking Change.
+- **Keine Pflicht für ein vollständiges Workflow-Graph-Schema im
+  MVP.** Smolit ist durch das Overlay ausdrücklich **kein**
+  visueller Workflow-Builder, und die API spezifiziert daher keine
+  Graph-DSL.
+
+Mögliche zusätzliche, **nicht implementierte** optionale Felder an
+den Action Events (nur als Diskussionsgrundlage; keine Pflicht,
+keine Zusicherung):
+
+- `step_id` — stabile ID eines Schritts innerhalb eines
+  `action_id`.
+- `parent_step_id` — optionaler Verweis auf einen vorangegangenen
+  Schritt.
+- `step_kind` — symbolische Kategorie des Knotens (z. B.
+  `trigger` / `step` / `action` / `result`).
+- `display_label` — kurzer, symbolischer Anzeige-Text.
+- `visual_state_hint` — optionaler Zustands-Hint für das Overlay
+  (z. B. `planned` / `active` / `completed` / `failed` /
+  `cancelled` / `uncertain`).
+
+Alle fünf Felder sind **ausdrücklich nicht implementiert**, sind
+**nicht** Teil des heutigen v1-Protokolls, und dürfen nur dann
+ergänzt werden, wenn sie:
+
+- als **optional** und ohne Pflicht-Semantik eingeführt werden,
+- bestehende Frames nicht ungültig machen,
+- UIs ohne Kenntnis dieser Felder weiterhin funktionieren lassen.
+
+Kein separates `workflow_overlay_update`-Protokoll. Das Overlay
+rekonstruiert ausschließlich aus den bestehenden Action Events.
 
 ### 2.6 Desktop Interaction Layer MVP
 

@@ -59,6 +59,13 @@ Abschnitt 15.
 Der Core ist die einzige Quelle der Wahrheit. UI und ABrain/Audio sind
 jeweils Adaptergrenzen.
 
+Die Godot-UI besteht perspektivisch nicht nur aus Avatar-/Presence-
+Rendering, sondern zusätzlich aus einem **Workflow-Overlay-Renderer
+als passivem Action-Readout** (Ziel-Zustand, siehe §6a und §8a).
+Beide konsumieren denselben Event-Strom aus dem Core — das Overlay
+projiziert bestehende Action Events symbolisch, es führt nichts
+aus und erzeugt keine eigene Wahrheit.
+
 ---
 
 ## 3. Verantwortlichkeiten
@@ -67,7 +74,7 @@ jeweils Adaptergrenzen.
 |----------------|--------------------------------------------------------------|
 | Rust Core      | Orchestrierung, Konfiguration, Logging, Audio, IPC, ABrain   |
 | IPC-Bridge     | lokaler WebSocket-Server, JSON-Protokoll, Event-Fan-out      |
-| Godot UI       | Rendering, Animation, lokale Eingabe, Statusanzeige          |
+| Godot UI       | Rendering (Avatar, Presence, Workflow-Overlay), Animation, lokale Eingabe, Statusanzeige; **keine** Ausführung von Desktop-Aktionen |
 | ABrain-Adapter | Textanfrage → Antworttext (heute CLI-Prozess)                |
 | STT/TTS-Adapter| externe Commands, austauschbar per Env-Config                |
 
@@ -111,6 +118,41 @@ ui/
 Scenes hängen ausschließlich am `EventBus`. Der Transport (`IpcClient`) ist
 damit austauschbar, ohne Scene-Code anzufassen.
 
+### Ziel-Zustand – Workflow-Overlay-Erweiterung
+
+Dieser Block beschreibt die **geplante** Erweiterung der Projekt-
+struktur um einen Workflow-Overlay-Renderer. Er ist **noch nicht
+implementiert**; die Dateinamen sind architektonische Platzhalter,
+keine API-Zusage.
+
+```text
+ui/
+├── scenes/
+│   ├── main.tscn
+│   └── workflow_overlay/
+│       └── workflow_overlay_root.tscn
+├── scripts/
+│   ├── main.gd
+│   └── workflow_overlay/
+│       ├── workflow_overlay_controller.gd
+│       ├── workflow_overlay_layout.gd
+│       ├── workflow_overlay_state.gd
+│       ├── workflow_node_view.gd
+│       └── workflow_edge_view.gd
+```
+
+Wichtig:
+
+- Zielstruktur, **heute nicht zwingend implementiert**. Weder die
+  Szene `workflow_overlay_root.tscn` noch die genannten Scripts
+  existieren derzeit im Repo.
+- Die Namen sind architektonische Platzhalter für spätere Arbeit.
+  Keine davon darf als fixierte API interpretiert werden.
+- Das Overlay lebt innerhalb derselben Presence-/Overlay-Hülle
+  (siehe [`linux_window_overlay_architecture.md`](./linux_window_overlay_architecture.md)),
+  kein separates Toplevel-Fenster, kein neues Multiwindow-System
+  im MVP.
+
 ---
 
 ## 6. IPC-Bindung der UI
@@ -136,6 +178,48 @@ damit austauschbar, ohne Scene-Code anzufassen.
 Das genaue Protokoll (Eingangs- und Ausgangs-Nachrichten, Felder,
 Semantik) ist in [`docs/api.md`](./api.md) beschrieben und ist die
 autoritative Quelle; diese Datei dupliziert das Schema nicht.
+
+---
+
+## 6a. Workflow Overlay als passiver Action-Readout (Ziel-Zustand)
+
+Dieser Abschnitt beschreibt die geplante Rolle des Workflow-Overlays
+an der Schnittstelle zum Event-Strom. Er ist **Ziel-Zustand**; der
+Renderer existiert heute nicht im Repo.
+
+- **Definition.** Rein visuelle, read-only Darstellung von Core-
+  Zuständen. Das Overlay ist keine zweite Session-Logik, sondern
+  eine Projektion.
+- **Quelle der Wahrheit.** Ausschließlich Core / EventBus. Das
+  Overlay erzeugt keinen eigenen Zustand, sondern leitet sein
+  Bild aus den vom Core emittierten Action Events ab.
+- **Ziel.** Verständlicher Handlungszusammenhang (Trigger → Schritt
+  → Aktion → Ergebnis) statt rein textueller Log-Ausgabe, damit
+  der Nutzer sieht, *was* gerade passiert — nicht *wie* eine
+  Low-Level-Interaktion implementiert ist.
+- **Position.** Links vom Avatar/Icon bzw. als linker Overlay-
+  Flügel innerhalb derselben Presence-Hülle. Kein separates
+  Toplevel-Fenster, keine neue Plattformfähigkeit.
+- **MVP.** Kleine feste Darstellung (2–4 Knoten im Standardfall),
+  kein freier Canvas. Siehe §8a für Detailscope.
+- **Visuals.** Knoten, gerichtete Kanten, Hervorhebung des aktiven
+  Schrittes, semantische `Success-` / `Failure-` / `Active-`
+  Zustände — ohne feste Farbzusage an dieser Stelle, Farbregeln
+  leben in der späteren Implementierungsdoku.
+- **Interaktion.** Im MVP keine Interaktionsversprechen. Spätere
+  Formen wie Collapse/Expand oder Inspect sind architektonisch
+  nicht ausgeschlossen, aber ausdrücklich nicht Teil des MVP.
+
+Was §6a explizit **nicht** verspricht:
+
+- keine Ausführung, kein Executor, kein Zugriff auf den Desktop —
+  Desktop-Interaktion bleibt vollständig im Core / Interaction
+  Layer;
+- kein eigenes Protokoll neben den Action Events;
+- keine Pflichtaktivierung — das Overlay bleibt Teil derselben
+  Presence-Hülle und erscheint in denselben Presence-Kontexten
+  (Action Mode, siehe
+  [`presence_desktop_interaction.md`](./presence_desktop_interaction.md)).
 
 ---
 
@@ -384,6 +468,82 @@ Abgrenzungen (wichtig):
   oder Multi-Line-Composer-Arbeit.
 - Kein eigener Transport und keine Parallel-IPC; alles läuft über
   den bestehenden `IpcClient` und den bestehenden EventBus.
+
+---
+
+## 8a. Workflow-Overlay-System (Ziel-Zustand)
+
+Dieser Abschnitt beschreibt das Workflow-Overlay als eigenständigen
+UI-Baustein. Er ist **Ziel-Zustand**: keine der genannten Klassen,
+Szenen oder Zustände existiert heute im Repo. Die Nummer §8a
+markiert einen Ziel-Zustand-Nachtrag zu §8 (dort: Ist-Zustand) und
+kollidiert nicht mit bestehenden Cross-References auf §8/§9/§10/§11.
+
+### 8a.1 Rolle
+
+- Sichtbarer Ablauf: Workflow-Overlay macht den aktuellen Handlungs-
+  zusammenhang auf einen Blick erkennbar.
+- Ergänzung zum Avatar, nicht Ersatz. Avatar bleibt die primäre
+  Presence-Figur; das Overlay ist eine begleitende Sicht.
+- Keine zweite Wahrheit: der Core bleibt Source of Truth, das
+  Overlay ist reine UI-Projektion.
+
+### 8a.2 Darstellung
+
+- **Knotenarten (symbolisch).** `Trigger`, `Step`, `Action`,
+  `Result`. Keine feste Typhierarchie im MVP, nur diese vier
+  Kategorien.
+- **Kanten.** Gerichtet, folgen dem zeitlichen Ablauf der Action
+  Events.
+- **Semantische Zustände pro Knoten/Kante.** `geplant` / `aktiv` /
+  `erfolgreich` / `fehlgeschlagen` / `abgebrochen` / `unklar`.
+  Farbzuweisung und konkrete Glyphensprache werden in der späteren
+  Implementierungsdoku festgelegt, nicht hier fixiert.
+- **Aktivität.** Kleine, dezente Animationen auf Kanten /
+  Fokus-Knoten. Keine aufmerksamkeitsheischende Choreografie.
+
+### 8a.3 Scope-Grenzen
+
+- **Kein Editor.** Knoten und Kanten sind nicht nutzer-editierbar,
+  nicht verschiebbar, nicht verkabelbar.
+- **Kein unendlicher Canvas.** MVP-Darstellung passt in eine feste,
+  kleine Fläche links vom Avatar. Kein Zoom, kein Pan.
+- **Kein Graph-Authoring.** Smolit wird durch das Overlay
+  ausdrücklich **kein** visueller Workflow-Builder.
+- **Kein Debug-Graph als neue Runtime-Wahrheit.** Das Overlay
+  rekonstruiert bestehende Action-Event-Abläufe; es ist keine
+  eigene Execution-Engine.
+- **Kein zweites Logiksystem.** Keine Policy, kein Scheduler, keine
+  Retry-Logik in der UI — Recovery / Retry / Verification gehören
+  in den Core / Interaction Layer.
+
+### 8a.4 Datenbindung
+
+- **EventBus-Quelle.** Das Overlay konsumiert die bestehenden
+  Action Events (`action_planned`, `action_started`, `action_step`,
+  `action_completed`, `action_failed`; optional später zusätzlich
+  `action_verification`, `action_cancelled`). Siehe
+  [`api.md`](./api.md) §2.5 und „UI-Projektion: Workflow Overlay".
+- **Lokaler UI-State nur als Projektion / Ableitung.** Der
+  Workflow-State in der UI ist keine persistierte Wahrheit,
+  sondern die reine Ableitung aus dem beobachteten Event-Strom
+  seit Session-Start oder seit dem letzten `action_planned`.
+- **Kein Workflow-DSL-Zwang im MVP.** Das Overlay erwartet keinen
+  vorab gelieferten Workflow-Graphen. Es rekonstruiert einen
+  kleinen symbolischen Kurz-Flow aus dem bestehenden Eventstrom
+  (Trigger aus dem auslösenden Event, Schritte aus `action_step`,
+  Result aus `action_completed`/`action_failed`).
+
+### 8a.5 Nicht-Ziele
+
+- **Kein n8n-Klon.** Weder Authoring noch programmierbare Knoten,
+  weder Webhook-Management noch Integrations-Katalog.
+- **Keine Desktop-Automation in Godot.** Keine Klicks, keine
+  Tastatureingaben, kein OCR, kein Fensterzugriff aus der UI —
+  genau wie §4 der Nicht-Ziele festhält.
+- **Kein generisches Node-Framework in Phase 1.** Keine
+  wiederverwendbare Graph-Infrastruktur, keine Plug-in-Architektur
+  für fremde Graphen, kein Export.
 
 ---
 
