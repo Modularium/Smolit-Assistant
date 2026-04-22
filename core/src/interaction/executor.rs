@@ -29,6 +29,7 @@ use super::verifier::{VerificationConfidence, VerificationResult};
 pub struct InteractionPolicy {
     pub enabled: bool,
     pub allow_open_application: bool,
+    pub allow_focus_window: bool,
     pub allow_type_text: bool,
     pub allow_shortcuts: bool,
     /// When true, any action with `requires_confirmation=true` is
@@ -44,6 +45,9 @@ impl InteractionPolicy {
         match kind {
             InteractionKind::OpenApplication if !self.allow_open_application => {
                 Err(InteractionError::ActionKindDisallowed("open_application"))
+            }
+            InteractionKind::FocusWindow if !self.allow_focus_window => {
+                Err(InteractionError::ActionKindDisallowed("focus_window"))
             }
             InteractionKind::TypeText if !self.allow_type_text => {
                 Err(InteractionError::ActionKindDisallowed("type_text"))
@@ -112,6 +116,11 @@ impl<B: InteractionBackend> InteractionExecutor<B> {
         let result = match &action.payload {
             InteractionPayload::OpenApplication { name } => {
                 self.backend.open_application(&action, name).await
+            }
+            InteractionPayload::FocusWindow { title, app } => {
+                self.backend
+                    .focus_window(&action, title.as_deref(), app.as_deref())
+                    .await
             }
             InteractionPayload::TypeText { text } => {
                 self.backend.type_text(&action, text).await
@@ -183,6 +192,11 @@ impl<B: InteractionBackend> InteractionExecutor<B> {
             InteractionPayload::OpenApplication { name } => {
                 self.backend.open_application(&action, name).await
             }
+            InteractionPayload::FocusWindow { title, app } => {
+                self.backend
+                    .focus_window(&action, title.as_deref(), app.as_deref())
+                    .await
+            }
             InteractionPayload::TypeText { text } => {
                 self.backend.type_text(&action, text).await
             }
@@ -226,6 +240,7 @@ impl<B: InteractionBackend> InteractionExecutor<B> {
 fn step_title_for_kind(kind: InteractionKind) -> &'static str {
     match kind {
         InteractionKind::OpenApplication => "Opening application",
+        InteractionKind::FocusWindow => "Focusing window",
         InteractionKind::TypeText => "Typing text",
         InteractionKind::SendShortcut => "Sending shortcut",
         InteractionKind::Noop => "No-op",
@@ -330,6 +345,7 @@ mod tests {
         InteractionPolicy {
             enabled: true,
             allow_open_application: true,
+            allow_focus_window: true,
             allow_type_text: true,
             allow_shortcuts: true,
             require_confirmation: true,
@@ -340,6 +356,7 @@ mod tests {
         InteractionPolicy {
             enabled: false,
             allow_open_application: true,
+            allow_focus_window: true,
             allow_type_text: true,
             allow_shortcuts: true,
             require_confirmation: true,
@@ -410,6 +427,62 @@ mod tests {
         let out = exec.execute(action).await;
         find_first(&out, r#""type":"action_failed""#);
         find_first(&out, "recovery_hint=abort");
+    }
+
+    fn backend_with_focus_true() -> CommandBackend {
+        CommandBackend::new(CommandBackendConfig {
+            open_app_cmd_template: Some("/bin/true".into()),
+            focus_window_cmd_template: Some("/bin/true".into()),
+        })
+    }
+
+    #[tokio::test]
+    async fn focus_window_disallowed_emits_failed() {
+        let policy = InteractionPolicy {
+            allow_focus_window: false,
+            ..policy_all_allowed()
+        };
+        let exec = InteractionExecutor::new(backend_with_focus_true(), policy);
+        let action = InteractionAction::focus_window(
+            "act_focus_001",
+            Some("calendar".into()),
+            None,
+        );
+        let out = exec.execute(action).await;
+        find_first(&out, r#""type":"action_failed""#);
+        find_first(&out, "focus_window");
+        find_first(&out, "recovery_hint=fallback_unavailable");
+    }
+
+    #[tokio::test]
+    async fn focus_window_without_backend_template_emits_unsupported() {
+        let exec = InteractionExecutor::new(backend_with_true(), policy_all_allowed());
+        let action = InteractionAction::focus_window(
+            "act_focus_002",
+            Some("calendar".into()),
+            None,
+        );
+        let out = exec.execute(action).await;
+        find_first(&out, r#""type":"action_failed""#);
+        find_first(&out, "focus_window");
+        find_first(&out, "recovery_hint=fallback_unavailable");
+    }
+
+    #[tokio::test]
+    async fn focus_window_with_template_emits_verification_and_completed() {
+        let exec = InteractionExecutor::new(backend_with_focus_true(), policy_all_allowed());
+        let action = InteractionAction::focus_window(
+            "act_focus_003",
+            Some("calendar".into()),
+            None,
+        );
+        let out = exec.execute(action).await;
+        assert!(matches!(out[0], OutgoingMessage::ActionPlanned { .. }));
+        find_first(&out, r#""type":"action_step""#);
+        find_first(&out, "Focusing window");
+        find_first(&out, r#""type":"action_verification""#);
+        find_first(&out, "Best-effort");
+        find_first(&out, r#""type":"action_completed""#);
     }
 
     #[tokio::test]

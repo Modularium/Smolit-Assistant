@@ -47,6 +47,7 @@ pub struct InteractionConfig {
     pub enabled: bool,
     pub backend: String,
     pub allow_open_application: bool,
+    pub allow_focus_window: bool,
     pub allow_type_text: bool,
     pub allow_shortcuts: bool,
     pub require_confirmation: bool,
@@ -55,6 +56,12 @@ pub struct InteractionConfig {
     /// Kept optional so absence is an honest "unavailable" signal
     /// rather than a silent default like `xdg-open`.
     pub open_app_cmd_template: Option<String>,
+    /// Command template used by the `command` backend to focus a
+    /// window. `{name}` is the preferred display string (title or
+    /// app); `{title}` and `{app}` are each substituted or empty.
+    /// Kept optional so absence is an honest "unsupported" signal
+    /// (e.g. on Wayland there is no generic focus primitive).
+    pub focus_window_cmd_template: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -117,6 +124,10 @@ impl Config {
             lookup("SMOLIT_INTERACTION_ALLOW_OPEN_APP").as_deref(),
             true,
         );
+        let allow_focus_window = parse_bool(
+            lookup("SMOLIT_INTERACTION_ALLOW_FOCUS_WINDOW").as_deref(),
+            false,
+        );
         let allow_type_text = parse_bool(
             lookup("SMOLIT_INTERACTION_ALLOW_TYPE_TEXT").as_deref(),
             false,
@@ -130,6 +141,8 @@ impl Config {
             true,
         );
         let open_app_cmd_template = non_empty(lookup("SMOLIT_INTERACTION_OPEN_APP_CMD"));
+        let focus_window_cmd_template =
+            non_empty(lookup("SMOLIT_INTERACTION_FOCUS_WINDOW_CMD"));
 
         let approval_timeout_seconds = parse_u64(
             lookup("SMOLIT_APPROVAL_TIMEOUT_SECONDS").as_deref(),
@@ -156,10 +169,12 @@ impl Config {
                 enabled: interaction_enabled,
                 backend: interaction_backend,
                 allow_open_application,
+                allow_focus_window,
                 allow_type_text,
                 allow_shortcuts,
                 require_confirmation,
                 open_app_cmd_template,
+                focus_window_cmd_template,
             },
             approval: ApprovalConfig {
                 timeout_seconds: approval_timeout_seconds,

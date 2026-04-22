@@ -34,6 +34,16 @@ pub trait InteractionBackend: Send + Sync {
         name: &str,
     ) -> impl std::future::Future<Output = Result<VerificationResult, InteractionError>> + Send;
 
+    fn focus_window(
+        &self,
+        _action: &InteractionAction,
+        _title: Option<&str>,
+        _app: Option<&str>,
+    ) -> impl std::future::Future<Output = Result<VerificationResult, InteractionError>> + Send
+    {
+        async { Err(InteractionError::BackendUnsupported("focus_window")) }
+    }
+
     fn type_text(
         &self,
         _action: &InteractionAction,
@@ -63,6 +73,13 @@ pub struct CommandBackendConfig {
     /// substituted with the symbolic application name. Example:
     /// `gtk-launch {name}` or `xdg-open {name}`.
     pub open_app_cmd_template: Option<String>,
+    /// Template executed when focusing a window. `{name}` is the
+    /// preferred symbolic target (title or app), `{title}` / `{app}` are
+    /// each substituted with the corresponding component or an empty
+    /// string if absent. Example on X11: `wmctrl -a {name}`. On Wayland
+    /// there is no generic equivalent — leaving this unset makes the
+    /// backend honestly report `focus_window` as unsupported.
+    pub focus_window_cmd_template: Option<String>,
 }
 
 pub struct CommandBackend {
@@ -131,6 +148,76 @@ impl InteractionBackend for CommandBackend {
             }
         }
     }
+
+    async fn focus_window(
+        &self,
+        _action: &InteractionAction,
+        title: Option<&str>,
+        app: Option<&str>,
+    ) -> Result<VerificationResult, InteractionError> {
+        let Some(template) = self.config.focus_window_cmd_template.as_deref() else {
+            // No template configured — do not guess, do not fake
+            // success. Honest unsupported is the correct answer.
+            return Err(InteractionError::BackendUnsupported("focus_window"));
+        };
+
+        let title = title.map(str::trim).filter(|s| !s.is_empty());
+        let app = app.map(str::trim).filter(|s| !s.is_empty());
+        let Some(name) = title.or(app) else {
+            return Err(InteractionError::Preconditions(
+                "focus_window requires a title or app target".to_string(),
+            ));
+        };
+
+        let rendered = template
+            .replace("{name}", name)
+            .replace("{title}", title.unwrap_or(""))
+            .replace("{app}", app.unwrap_or(""));
+        let (program, args) = split_command(&rendered)
+            .ok_or_else(|| InteractionError::Preconditions("rendered command is empty".into()))?;
+
+        debug!(program = %program, args = ?args, "interaction: spawning focus-window command");
+
+        let output = Command::new(&program)
+            .args(&args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await;
+
+        match output {
+            Ok(out) if out.status.success() => {
+                // Exit 0 says the helper ran — it does not prove focus
+                // actually moved. MVP stays honest: `uncertain`.
+                Ok(VerificationResult::uncertain(
+                    "Focus command completed",
+                    format!(
+                        "ran `{program}` for `{name}` (no focus probe yet)"
+                    ),
+                ))
+            }
+            Ok(out) => {
+                let code = out.status.code().unwrap_or(-1);
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                let snippet = stderr.trim();
+                let detail = if snippet.is_empty() {
+                    format!("exit code {code}")
+                } else {
+                    format!("exit code {code}: {snippet}")
+                };
+                Err(InteractionError::BackendFailed(format!(
+                    "focus command `{program}` failed ({detail})"
+                )))
+            }
+            Err(err) => {
+                warn!(error = %err, program = %program, "failed to spawn focus-window command");
+                Err(InteractionError::BackendFailed(format!(
+                    "failed to spawn `{program}`: {err}"
+                )))
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -176,4 +263,52 @@ mod tests {
         assert!(matches!(err, InteractionError::BackendUnsupported(_)));
     }
 
+    #[tokio::test]
+    async fn focus_window_without_template_is_unsupported() {
+        let backend = CommandBackend::new(CommandBackendConfig::default());
+        let err = backend
+            .focus_window(&action("n/a"), Some("calendar"), None)
+            .await
+            .expect_err("expected unsupported");
+        assert!(matches!(err, InteractionError::BackendUnsupported(_)));
+    }
+
+    #[tokio::test]
+    async fn focus_window_without_target_reports_preconditions() {
+        let backend = CommandBackend::new(CommandBackendConfig {
+            focus_window_cmd_template: Some("/bin/true".into()),
+            ..CommandBackendConfig::default()
+        });
+        let err = backend
+            .focus_window(&action("n/a"), None, None)
+            .await
+            .expect_err("expected preconditions error");
+        assert!(matches!(err, InteractionError::Preconditions(_)));
+    }
+
+    #[tokio::test]
+    async fn focus_window_with_true_is_uncertain() {
+        let backend = CommandBackend::new(CommandBackendConfig {
+            focus_window_cmd_template: Some("/bin/true".into()),
+            ..CommandBackendConfig::default()
+        });
+        let result = backend
+            .focus_window(&action("n/a"), Some("calendar"), None)
+            .await
+            .expect("command ran");
+        assert_eq!(result.confidence, VerificationConfidence::Uncertain);
+    }
+
+    #[tokio::test]
+    async fn focus_window_failing_command_reports_backend_failed() {
+        let backend = CommandBackend::new(CommandBackendConfig {
+            focus_window_cmd_template: Some("/bin/false".into()),
+            ..CommandBackendConfig::default()
+        });
+        let err = backend
+            .focus_window(&action("n/a"), Some("calendar"), None)
+            .await
+            .expect_err("expected failure");
+        assert!(matches!(err, InteractionError::BackendFailed(_)));
+    }
 }

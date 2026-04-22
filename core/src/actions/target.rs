@@ -41,6 +41,10 @@ impl ActionTarget {
             hint: None,
         }
     }
+
+    pub fn window(title: Option<String>, app: Option<String>) -> Self {
+        Self::Window { title, app }
+    }
 }
 
 #[cfg(test)]

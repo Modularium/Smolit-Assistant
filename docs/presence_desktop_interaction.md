@@ -630,8 +630,9 @@ hypothetisch dastehen zu lassen.
   Aktion mit `InteractionKind`, `ActionTarget`, typisiertem Payload
   und Policy-Flags (`requires_confirmation`, `trusted_only`).
 - **InteractionBackend** (`backend.rs`) — schmales Trait-Interface mit
-  MVP-Operationen `open_application`, `type_text`, `send_shortcut`.
-  Genau **ein** konkretes Backend heute: `CommandBackend`.
+  MVP-Operationen `open_application`, `focus_window`, `type_text`,
+  `send_shortcut`. Genau **ein** konkretes Backend heute:
+  `CommandBackend`.
 - **InteractionExecutor** (`executor.rs`) — wendet `InteractionPolicy`
   an, dispatcht an das Backend, wandelt Verifikation und Fehler in
   Action Events.
@@ -667,10 +668,17 @@ kein Confirmation-Kanal existiert. Das ist der ehrliche MVP-Zustand
 
 ### 14b.4 Ehrliche Scope-Grenzen
 
-- `focus_window`, `type_text` und `send_shortcut` sind als Hooks
-  modelliert, liefern aber immer `BackendUnsupported`. Das Protokoll
-  kennt sie bereits, der Executor emittiert `action_failed` mit
+- `type_text` und `send_shortcut` sind als Hooks modelliert, liefern
+  aber immer `BackendUnsupported`. Das Protokoll kennt sie bereits,
+  der Executor emittiert `action_failed` mit
   `recovery_hint=fallback_unavailable`.
+- `focus_window` ist als erster echter Targeting-Schritt
+  implementiert, bleibt aber konservativ: das Backend ruft ein
+  extern konfiguriertes Command-Template (`wmctrl -a {name}` o. Ä.)
+  auf und liefert bei Erfolg bewusst `uncertain`, weil keine
+  Fokus-Probe existiert. Ohne Template oder unter Wayland meldet
+  der Core ehrlich `BackendUnsupported("focus_window")` statt einen
+  Pseudo-Erfolg zu fälschen. Siehe [api.md](./api.md), §2.6.
 - Kein Window-Probe, kein Screenshot, kein OCR, keine globale
   Eingabe. Verification bleibt „best-effort" und wird im
   `action_verification`-Event mit dem Präfix `Best-effort:` klar
@@ -682,8 +690,10 @@ kein Confirmation-Kanal existiert. Das ist der ehrliche MVP-Zustand
 
 - Echte Confirmation-UX über IPC (`interaction_confirm` / `… deny`).
 - Backend für Linux mit AT-SPI oder D-Bus (§16, erste Offene Punkte).
-- Optional: Window-Probe nach `open_application`, um von `uncertain`
-  auf `verified` hochzustufen.
+- Optional: Window-Probe nach `open_application` und `focus_window`,
+  um von `uncertain` auf `verified` hochzustufen.
+- Reichere Ziel-Auflösung für `focus_window` (strukturierte Discovery
+  §10.1 statt symbolischem Substring-Match im Helper).
 - Structured Targets aus einer Discovery-Stufe (§10.1), damit
   `target` jenseits von `application:<name>` strukturiert wird.
 - Richtige Schaltflächen im Presence Layer für „ausführen /

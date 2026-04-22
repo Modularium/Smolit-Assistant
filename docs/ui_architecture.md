@@ -281,9 +281,10 @@ dokumentiert.
 - **Interaction Layer bleibt im Core**: Desktop-nahe Ausführung
   (`core/src/interaction/`) läuft strikt serverseitig. Die UI sendet
   höchstens einen symbolischen Auslöser
-  (`interaction_open_application`, siehe
+  (`interaction_open_application`, `interaction_focus_window`, siehe
   [`docs/api.md`](./api.md), §2.6) und konsumiert die zurückkommenden
-  Action Events — sie führt nichts selbst aus. Die UI stellt nur das
+  Action Events — sie führt nichts selbst aus. Selbst der
+  Fenster-Fokus ist Core-entscheidung: die UI stellt nur das
   Approval-Banner dar, der Core entscheidet per Policy und Backend
   über Ausführbarkeit, Verifikation und Recovery.
 

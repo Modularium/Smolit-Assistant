@@ -148,6 +148,9 @@ async fn dispatch(app: &Arc<App>, raw: &str) -> Vec<OutgoingMessage> {
         IncomingMessage::InteractionOpenApplication { application } => {
             app.execute_open_application(&application).await
         }
+        IncomingMessage::InteractionFocusWindow { target } => {
+            app.execute_focus_window(target).await
+        }
         IncomingMessage::ApprovalResponse {
             approval_id,
             decision,
@@ -371,10 +374,12 @@ mod tests {
             enabled: true,
             backend: "command".into(),
             allow_open_application: true,
+            allow_focus_window: true,
             allow_type_text: false,
             allow_shortcuts: false,
             require_confirmation: false,
             open_app_cmd_template: Some("/bin/true".into()),
+            focus_window_cmd_template: Some("/bin/true".into()),
         })
     }
 
@@ -574,10 +579,12 @@ mod tests {
             enabled: true,
             backend: "command".into(),
             allow_open_application: false,
+            allow_focus_window: false,
             allow_type_text: false,
             allow_shortcuts: false,
             require_confirmation: false,
             open_app_cmd_template: Some("/bin/true".into()),
+            focus_window_cmd_template: None,
         })
         .await;
         let (mut ws, _) = connect_async(&url).await.unwrap();
@@ -601,10 +608,12 @@ mod tests {
             enabled: false,
             backend: "command".into(),
             allow_open_application: true,
+            allow_focus_window: true,
             allow_type_text: false,
             allow_shortcuts: false,
             require_confirmation: false,
             open_app_cmd_template: Some("/bin/true".into()),
+            focus_window_cmd_template: Some("/bin/true".into()),
         })
         .await;
         let (mut ws, _) = connect_async(&url).await.unwrap();
@@ -655,10 +664,12 @@ mod tests {
             enabled: true,
             backend: "command".into(),
             allow_open_application: true,
+            allow_focus_window: true,
             allow_type_text: false,
             allow_shortcuts: false,
             require_confirmation: true,
             open_app_cmd_template: Some("/bin/true".into()),
+            focus_window_cmd_template: Some("/bin/true".into()),
         }
     }
 
@@ -839,5 +850,154 @@ mod tests {
             }
         }
         assert!(saw_error, "expected error frame for duplicate response");
+    }
+
+    #[tokio::test]
+    async fn interaction_focus_window_fails_when_disallowed() {
+        let url = spawn_server_with(InteractionConfig {
+            enabled: true,
+            backend: "command".into(),
+            allow_open_application: true,
+            allow_focus_window: false,
+            allow_type_text: false,
+            allow_shortcuts: false,
+            require_confirmation: false,
+            open_app_cmd_template: Some("/bin/true".into()),
+            focus_window_cmd_template: Some("/bin/true".into()),
+        })
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_focus_window","target":{"type":"window","name":"calendar"}}"#
+                .into(),
+        ))
+        .await
+        .unwrap();
+
+        let _planned = recv_text(&mut ws).await;
+        let _started = recv_text(&mut ws).await;
+        let failed = recv_text(&mut ws).await;
+        assert!(failed.contains(r#""type":"action_failed""#));
+        assert!(failed.contains("focus_window"));
+        assert!(failed.contains("recovery_hint=fallback_unavailable"));
+    }
+
+    #[tokio::test]
+    async fn interaction_focus_window_without_backend_template_reports_unsupported() {
+        let url = spawn_server_with(InteractionConfig {
+            enabled: true,
+            backend: "command".into(),
+            allow_open_application: true,
+            allow_focus_window: true,
+            allow_type_text: false,
+            allow_shortcuts: false,
+            require_confirmation: false,
+            open_app_cmd_template: Some("/bin/true".into()),
+            focus_window_cmd_template: None,
+        })
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_focus_window","target":{"type":"window","name":"calendar"}}"#
+                .into(),
+        ))
+        .await
+        .unwrap();
+
+        let planned = recv_text(&mut ws).await;
+        assert!(planned.contains(r#""type":"action_planned""#));
+        assert!(planned.contains(r#""action_kind":"automation""#));
+        assert!(planned.contains(r#""type":"window","title":"calendar""#));
+
+        let _started = recv_text(&mut ws).await;
+        let _step1 = recv_text(&mut ws).await;
+        let _step2 = recv_text(&mut ws).await;
+        let failed = recv_text(&mut ws).await;
+        assert!(failed.contains(r#""type":"action_failed""#));
+        assert!(failed.contains("focus_window"));
+        assert!(failed.contains("recovery_hint=fallback_unavailable"));
+    }
+
+    #[tokio::test]
+    async fn interaction_focus_window_emits_verification_and_completed_when_allowed() {
+        let url = spawn_server().await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_focus_window","target":{"type":"window","name":"calendar"}}"#
+                .into(),
+        ))
+        .await
+        .unwrap();
+
+        let planned = recv_text(&mut ws).await;
+        assert!(planned.contains(r#""type":"action_planned""#));
+        assert!(planned.contains(r#""type":"window","title":"calendar""#));
+
+        let _started = recv_text(&mut ws).await;
+        let step1 = recv_text(&mut ws).await;
+        assert!(step1.contains("Resolving target"));
+        let step2 = recv_text(&mut ws).await;
+        assert!(step2.contains("Focusing window"));
+
+        let verification = recv_text(&mut ws).await;
+        assert!(verification.contains(r#""type":"action_verification""#));
+        assert!(verification.contains("Best-effort"));
+
+        let completed = recv_text(&mut ws).await;
+        assert!(completed.contains(r#""type":"action_completed""#));
+    }
+
+    #[tokio::test]
+    async fn interaction_focus_window_application_target_maps_to_app() {
+        let url = spawn_server().await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_focus_window","target":{"type":"application","name":"firefox"}}"#
+                .into(),
+        ))
+        .await
+        .unwrap();
+
+        let planned = recv_text(&mut ws).await;
+        assert!(planned.contains(r#""type":"action_planned""#));
+        assert!(planned.contains(r#""type":"window","app":"firefox""#));
+    }
+
+    #[tokio::test]
+    async fn interaction_focus_window_with_approval_flow_runs_end_to_end() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 5 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_focus_window","target":{"type":"window","name":"calendar"}}"#
+                .into(),
+        ))
+        .await
+        .unwrap();
+
+        let _planned = recv_text(&mut ws).await;
+        let requested = recv_text(&mut ws).await;
+        assert!(requested.contains(r#""type":"approval_requested""#));
+        assert!(requested.contains(r#""action_kind":"focus_window""#));
+        assert!(requested.contains("calendar"));
+        let approval_id = extract_approval_id(&requested);
+
+        let response = format!(
+            r#"{{"type":"approval_response","approval_id":"{approval_id}","decision":"approved"}}"#
+        );
+        ws.send(Message::Text(response)).await.unwrap();
+
+        let resolved = recv_text(&mut ws).await;
+        assert!(resolved.contains(r#""type":"approval_resolved""#));
+        let _started = recv_text(&mut ws).await;
+        let _step1 = recv_text(&mut ws).await;
+        let _step2 = recv_text(&mut ws).await;
+        let verification = recv_text(&mut ws).await;
+        assert!(verification.contains(r#""type":"action_verification""#));
+        let completed = recv_text(&mut ws).await;
+        assert!(completed.contains(r#""type":"action_completed""#));
     }
 }

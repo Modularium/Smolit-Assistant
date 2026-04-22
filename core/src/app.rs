@@ -20,7 +20,7 @@ use crate::interaction::{
     CommandBackend, CommandBackendConfig, InteractionAction, InteractionExecutor, InteractionKind,
     InteractionPolicy,
 };
-use crate::ipc::protocol::OutgoingMessage;
+use crate::ipc::protocol::{InteractionFocusTarget, OutgoingMessage};
 
 const EVENTS_CHANNEL_CAPACITY: usize = 256;
 
@@ -55,10 +55,12 @@ impl App {
 
         let backend = CommandBackend::new(CommandBackendConfig {
             open_app_cmd_template: config.interaction.open_app_cmd_template.clone(),
+            focus_window_cmd_template: config.interaction.focus_window_cmd_template.clone(),
         });
         let policy = InteractionPolicy {
             enabled: config.interaction.enabled,
             allow_open_application: config.interaction.allow_open_application,
+            allow_focus_window: config.interaction.allow_focus_window,
             allow_type_text: config.interaction.allow_type_text,
             allow_shortcuts: config.interaction.allow_shortcuts,
             require_confirmation: config.interaction.require_confirmation,
@@ -273,6 +275,24 @@ impl App {
         self.dispatch_interaction(action).await
     }
 
+    pub async fn execute_focus_window(
+        self: &Arc<Self>,
+        target: InteractionFocusTarget,
+    ) -> Vec<OutgoingMessage> {
+        let (title, app) = match target {
+            InteractionFocusTarget::Window { name, title, app } => {
+                // Accept either `name` (per-spec example) or `title`
+                // as the window title — `title` takes precedence when
+                // both are provided.
+                (title.or(name), app)
+            }
+            InteractionFocusTarget::Application { name } => (None, Some(name)),
+        };
+        let mut action = InteractionAction::focus_window(self.next_action_id(), title, app);
+        action.requires_confirmation = true;
+        self.dispatch_interaction(action).await
+    }
+
     pub fn build_status_payload(&self) -> StatusPayload {
         let tts = self.tts.state();
         let stt = self.stt.state();
@@ -293,6 +313,13 @@ impl App {
 fn approval_message(action: &InteractionAction) -> String {
     match action.kind() {
         InteractionKind::OpenApplication => format!("Smolit möchte {0}", action.title.to_lowercase()),
+        InteractionKind::FocusWindow => {
+            let label = action
+                .title
+                .strip_prefix("Focus ")
+                .unwrap_or(&action.title);
+            format!("Smolit möchte das Fenster \"{label}\" fokussieren.")
+        }
         InteractionKind::TypeText => format!("Smolit möchte Text eingeben: {}", action.title),
         InteractionKind::SendShortcut => {
             format!("Smolit möchte einen Shortcut senden: {}", action.title)

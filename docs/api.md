@@ -61,6 +61,7 @@ Zusätzlich nimmt der Core Interaction-Nachrichten des Desktop
 Interaction Layer MVP entgegen (Details in Abschnitt 2.6):
 
 - `interaction_open_application` mit Feld `application: string`.
+- `interaction_focus_window` mit Feld `target` (siehe 2.6).
 
 Für den Approval / Confirmation Flow (Details in Abschnitt 2.7):
 
@@ -76,6 +77,7 @@ Beispiele:
 {"type":"speak_text","text":"Dies ist ein Test"}
 {"type":"voice_once"}
 {"type":"interaction_open_application","application":"calendar"}
+{"type":"interaction_focus_window","target":{"type":"window","name":"calendar"}}
 ```
 
 ### 2.2 Ausgehend (Core → UI)
@@ -306,11 +308,21 @@ Eingehend:
 
 - `{"type":"interaction_open_application","application":"<name>"}` —
   symbolischer App-Name (`"calendar"`, `"terminal"`, …).
+- `{"type":"interaction_focus_window","target":{...}}` — Fokus eines
+  Fensters anfordern. `target` ist eine kleine, bewusst schmale
+  Struktur (nicht der volle `ActionTarget`):
+  - `{"type":"window","name":"<title>"}` — Fenster nach (Teil-)Titel.
+    `name` ist ein bequemer Alias für `title`; zusätzlich darf ein
+    optionaler `app` mitgegeben werden, um den Treffer zu
+    disambiguieren.
+  - `{"type":"application","name":"<app>"}` — irgendein Fenster der
+    Anwendung fokussieren.
 
-Die Handler rufen intern `App::execute_open_application(name)` auf,
-erzeugen einen `InteractionAction` und führen ihn über den
-`InteractionExecutor` aus. Das Ergebnis ist eine Action-Event-Sequenz
-(und ggf. der Approval-Flow aus 2.7).
+Die Handler rufen intern `App::execute_open_application(name)` bzw.
+`App::execute_focus_window(target)` auf, erzeugen einen
+`InteractionAction` und führen ihn über den `InteractionExecutor` aus.
+Das Ergebnis ist eine Action-Event-Sequenz (und ggf. der Approval-Flow
+aus 2.7).
 
 #### Eventfolge (Erfolgspfad, Best-effort)
 
@@ -329,6 +341,35 @@ spawnt den konfigurierten Launcher und protokolliert den Spawn, prüft
 aber **nicht**, ob die Anwendung tatsächlich erschienen ist. Das wird
 im `action_verification`-Event durch das `Best-effort:`-Präfix und im
 `action_completed`-`message` ehrlich ausgedrückt.
+
+#### Eventfolge `focus_window` (Erfolgspfad, Best-effort)
+
+```text
+UI   → Core: {"type":"interaction_focus_window","target":{"type":"window","name":"calendar"}}
+Core → UI:   {"type":"action_planned","payload":{"action_id":"act_000002","action_kind":"automation","title":"Focus calendar","description":"interaction:focus_window","target":{"type":"window","title":"calendar"}}}
+Core → UI:   {"type":"approval_requested","payload":{"approval_id":"apr_000001","action_id":"act_000002","action_kind":"focus_window","title":"Focus calendar","message":"Smolit möchte das Fenster \"calendar\" fokussieren.","target":{"type":"window","title":"calendar"},"timeout_seconds":20}}
+// … nach approved:
+Core → UI:   {"type":"action_started","payload":{"action_id":"act_000002","phase":"started"}}
+Core → UI:   {"type":"action_step","payload":{"action_id":"act_000002","title":"Resolving target"}}
+Core → UI:   {"type":"action_step","payload":{"action_id":"act_000002","title":"Focusing window"}}
+Core → UI:   {"type":"action_verification","payload":{"action_id":"act_000002","title":"Best-effort: Focus command completed"}}
+Core → UI:   {"type":"action_completed","payload":{"action_id":"act_000002","status":"completed","message":"ran `wmctrl` for `calendar` (no focus probe yet)"}}
+```
+
+`focus_window` ist plattform-/backendabhängig. Die ehrlichen Zustände:
+
+- **Verified** — tritt im MVP nicht auf (keine Fokus-Probe).
+- **Uncertain** — der Fokus-Befehl wurde ohne Fehler ausgeführt, aber
+  der Core prüft nicht, ob der Fokus tatsächlich gewechselt ist.
+  Default-Ausgang bei Erfolg.
+- **Failed** / `BackendUnsupported("focus_window")` — wenn kein
+  `SMOLIT_INTERACTION_FOCUS_WINDOW_CMD` konfiguriert ist (z. B. unter
+  Wayland ohne Helfer), oder der Helper einen Nicht-Null-Exit liefert.
+  Recovery-Hint: `fallback_unavailable` bzw. `retry`.
+
+Der Core versucht **nicht**, auf exotische Sonderpfade auszuweichen —
+das Backend sagt ehrlich „das geht hier gerade nicht" und überlässt die
+Entscheidung der UI / dem Nutzer.
 
 #### Eventfolge (Fehlerpfade)
 
@@ -372,6 +413,10 @@ darauf festzulegen.
   für MVP nur `command`.
 - `SMOLIT_INTERACTION_ALLOW_OPEN_APP` (Default `true`) —
   `open_application` erlaubt?
+- `SMOLIT_INTERACTION_ALLOW_FOCUS_WINDOW` (Default `false`) —
+  `focus_window` erlaubt? Konservativ standardmäßig aus; in Kombination
+  mit `SMOLIT_INTERACTION_REQUIRE_CONFIRMATION=true` bleibt auch nach
+  dem Opt-In jede Aktion freigabepflichtig.
 - `SMOLIT_INTERACTION_ALLOW_TYPE_TEXT` (Default `false`) — `type_text`
   erlaubt? (Backend liefert dennoch `BackendUnsupported`.)
 - `SMOLIT_INTERACTION_ALLOW_SHORTCUTS` (Default `false`) —
@@ -380,6 +425,12 @@ darauf festzulegen.
   freigabepflichtige Aktionen laufen über den Approval-Flow (2.7).
 - `SMOLIT_INTERACTION_OPEN_APP_CMD` (Default *leer*) — Command-Template
   für Open-App, z. B. `xdg-open {name}` oder `gtk-launch {name}`.
+- `SMOLIT_INTERACTION_FOCUS_WINDOW_CMD` (Default *leer*) —
+  Command-Template für Focus-Window. Platzhalter: `{name}` (bevorzugter
+  Ziel-String, Titel oder App), `{title}`, `{app}`. Beispiel auf X11:
+  `wmctrl -a {name}`. Unter Wayland existiert kein generisches
+  Äquivalent — leer lassen, der Core meldet dann ehrlich
+  `BackendUnsupported("focus_window")`.
 
 Ohne ein Command-Template meldet der Backend für die jeweilige
 Operation ehrlich „preconditions not met" bzw. `BackendUnsupported` —
@@ -398,6 +449,8 @@ das Verhalten ist damit deterministisch und ungefährlich.
   Core reicht die symbolischen Felder an das Command-Template weiter
   und überlässt dem externen Helper (z. B. `wmctrl -a`), was er daraus
   macht. Keine Sonderpfade für Wayland.
+- **Keine** Fokus-Probe nach dem Helfer-Aufruf — `focus_window` meldet
+  bei Erfolg konsequent `uncertain` statt `verified`.
 - **Keine** Eingabe in sensible Dialoge (Anmelde-, Zahlungs-, System-
   dialoge) geplant; erst eine spätere Phase definiert Trust-Stufen
   (siehe `docs/presence_desktop_interaction.md`, §7).

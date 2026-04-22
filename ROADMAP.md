@@ -336,13 +336,18 @@ UI-Phasen geführt und noch **nicht** begonnen.
       `approval_requested` / `approval_response` / `approval_resolved`,
       Timeout über `SMOLIT_APPROVAL_TIMEOUT_SECONDS`; siehe
       [docs/api.md §2.7](./docs/api.md))
-- [ ] `focus_window` Interaction-Spike: Policy-Gate, command-basiertes
-      MVP-Backend mit Template, Approval-Integration, ehrliches
-      `uncertain` statt Pseudo-Verifikation, `BackendUnsupported` wenn
-      kein Template (z. B. Wayland).
+- [x] `focus_window` Interaction-Spike: Policy-Gate
+      (`SMOLIT_INTERACTION_ALLOW_FOCUS_WINDOW`), command-basiertes
+      MVP-Backend mit Template (`SMOLIT_INTERACTION_FOCUS_WINDOW_CMD`),
+      Approval-Integration, ehrliches `uncertain` statt Pseudo-
+      Verifikation, `BackendUnsupported` wenn kein Template (z. B.
+      Wayland). IPC-Nachricht `interaction_focus_window` additiv.
 - [ ] Confirmation- und Approval-UX für weitere Action Kinds
       (`type_text`, `send_shortcut`, Multi-Step-Flows, persistente
       Trust-Entscheidungen)
+- [ ] Reicheres `focus_window`-Backend jenseits command-basiertem
+      Spike (Portal / compositor-spezifische Pfade, Fokus-Probe zur
+      `verified`-Hochstufung)
 - [ ] Kill switch / Stop-Mechanik
 - [ ] Action-/Verification-/Failure-Events additiv in
       [docs/api.md](./docs/api.md) (Basis steht seit Action Event
@@ -429,6 +434,16 @@ Für den Desktop Interaction Layer läuft jetzt ein konkreter
 abgelehnt, sondern über `approval_requested` / `approval_response` /
 `approval_resolved` an die UI gespiegelt und bei Timeout sauber
 `action_cancelled`. Details in [docs/api.md §2.7](./docs/api.md).
+
+Zusätzlich ist der erste **Interaction-Backend-Spike für
+`focus_window`** im Core gelandet: neuer IPC-Call
+`interaction_focus_window`, Policy-Gate
+`SMOLIT_INTERACTION_ALLOW_FOCUS_WINDOW` (konservativ off),
+command-basiertes Backend mit Template
+`SMOLIT_INTERACTION_FOCUS_WINDOW_CMD`, vollständige Einbindung in
+den Approval-Flow. Verifikation bleibt ehrlich `uncertain`; ohne
+Template (typisch Wayland) meldet der Core
+`BackendUnsupported("focus_window")` statt Pseudo-Erfolg.
 
 Zusätzlich begonnen: **Phase 3b Linux Window & Overlay Architecture**
 als parallele Architekturlinie. Das Dokument legt Wayland/X11-Trennung,

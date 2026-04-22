@@ -22,9 +22,36 @@ pub enum IncomingMessage {
     InteractionOpenApplication {
         application: String,
     },
+    InteractionFocusWindow {
+        target: InteractionFocusTarget,
+    },
     ApprovalResponse {
         approval_id: String,
         decision: IncomingApprovalDecision,
+    },
+}
+
+/// Target shape accepted by the `interaction_focus_window` IPC request.
+/// Intentionally narrower than `ActionTarget` so the wire contract is
+/// obvious: either "a window" (optionally scoped by app) or
+/// "the focused window of this application". The richer `ActionTarget`
+/// is still used for rendering downstream events.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum InteractionFocusTarget {
+    Window {
+        /// Short display name (e.g. `"calendar"`). Accepted as an
+        /// alias for `title` so the wire contract matches the
+        /// `{"type":"window","name":"calendar"}` example in docs.
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        title: Option<String>,
+        #[serde(default)]
+        app: Option<String>,
+    },
+    Application {
+        name: String,
     },
 }
 

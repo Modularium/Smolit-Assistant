@@ -165,16 +165,19 @@ Action Event Model v1 (`action_planned` → `action_started` →
 (`retry` / `abort` / `ask_user` / `fallback_unavailable`) klassifiziert
 und im `action_failed.error`-Feld als `recovery_hint=<x>` übertragen.
 
-Im MVP ist ausschließlich `open_application` wirklich implementiert
-(`CommandBackend`, konfigurierbare Kommando-Templates wie
-`gtk-launch {name}` / `xdg-open {name}`). `focus_window`, `type_text`
-und `send_shortcut` sind weiterhin nur als Hooks vorhanden, liefern
-`BackendUnsupported`. Defaults sind bewusst restriktiv:
-`allow_type_text=false`, `allow_shortcuts=false`,
-`require_confirmation=true`, leeres `SMOLIT_INTERACTION_OPEN_APP_CMD`
-meldet ehrlich „Preconditions not met". Kein OCR, keine
-A11y-Traversierung, keine Pixel-Erkennung, keine globalen Input-Grabs
-— siehe [docs/api.md](docs/api.md) §2.6 und
+Im MVP sind `open_application` und — seit dem aktuellen Spike —
+`focus_window` wirklich implementiert (`CommandBackend`,
+konfigurierbare Kommando-Templates wie `gtk-launch {name}` /
+`xdg-open {name}` für Open-App und z. B. `wmctrl -a {name}` für
+Focus-Window). `type_text` und `send_shortcut` sind weiterhin nur als
+Hooks vorhanden, liefern `BackendUnsupported`. Defaults sind bewusst
+restriktiv: `allow_focus_window=false`, `allow_type_text=false`,
+`allow_shortcuts=false`, `require_confirmation=true`, leeres
+`SMOLIT_INTERACTION_OPEN_APP_CMD` / `…_FOCUS_WINDOW_CMD` meldet
+ehrlich „Preconditions not met" bzw. `BackendUnsupported`. Kein OCR,
+keine A11y-Traversierung, keine Pixel-Erkennung, keine globalen
+Input-Grabs, keine Wayland-Fokus-Sonderpfade — siehe
+[docs/api.md](docs/api.md) §2.6 und
 [docs/presence_desktop_interaction.md](docs/presence_desktop_interaction.md)
 §14b.
 
@@ -182,11 +185,12 @@ Eingehende IPC-Nachrichten:
 
 ```json
 {"type":"interaction_open_application","application":"firefox"}
+{"type":"interaction_focus_window","target":{"type":"window","name":"calendar"}}
 ```
 
 Aktionen mit `requires_confirmation=true` (heute: jede
-`interaction_open_application`) gehen durch den
-**Approval / Confirmation Flow**: der Core sendet `approval_requested`, die UI
+`interaction_open_application` und jede `interaction_focus_window`)
+gehen durch den **Approval / Confirmation Flow**: der Core sendet `approval_requested`, die UI
 zeigt einen Banner mit Approve/Deny, und ein
 `approval_response`-Frame settelt die Aktion. Ohne Antwort innerhalb
 von `SMOLIT_APPROVAL_TIMEOUT_SECONDS` (Default 20) emittiert der Core

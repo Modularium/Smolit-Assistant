@@ -18,6 +18,7 @@ use crate::actions::ActionTarget;
 #[non_exhaustive]
 pub enum InteractionKind {
     OpenApplication,
+    FocusWindow,
     TypeText,
     SendShortcut,
     Noop,
@@ -28,6 +29,7 @@ impl InteractionKind {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::OpenApplication => "open_application",
+            Self::FocusWindow => "focus_window",
             Self::TypeText => "type_text",
             Self::SendShortcut => "send_shortcut",
             Self::Noop => "noop",
@@ -47,6 +49,12 @@ pub enum InteractionPayload {
         /// Symbolic application name, e.g. `"calendar"` / `"terminal"`.
         name: String,
     },
+    FocusWindow {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        app: Option<String>,
+    },
     TypeText {
         text: String,
     },
@@ -61,6 +69,7 @@ impl InteractionPayload {
     pub fn kind(&self) -> InteractionKind {
         match self {
             Self::OpenApplication { .. } => InteractionKind::OpenApplication,
+            Self::FocusWindow { .. } => InteractionKind::FocusWindow,
             Self::TypeText { .. } => InteractionKind::TypeText,
             Self::SendShortcut { .. } => InteractionKind::SendShortcut,
             Self::Noop => InteractionKind::Noop,
@@ -103,6 +112,29 @@ impl InteractionAction {
             title: format!("Open {name}"),
             target,
             payload: InteractionPayload::OpenApplication { name },
+            requires_confirmation: false,
+            trusted_only: false,
+        }
+    }
+
+    /// Convenience constructor for the focus_window spike. `title` and
+    /// `app` are both optional, but the backend requires at least one
+    /// of them — the caller is expected to supply a meaningful target.
+    pub fn focus_window(
+        action_id: impl Into<String>,
+        title: Option<String>,
+        app: Option<String>,
+    ) -> Self {
+        let display = title
+            .clone()
+            .or_else(|| app.clone())
+            .unwrap_or_else(|| "window".to_string());
+        let target = ActionTarget::window(title.clone(), app.clone());
+        Self {
+            action_id: action_id.into(),
+            title: format!("Focus {display}"),
+            target,
+            payload: InteractionPayload::FocusWindow { title, app },
             requires_confirmation: false,
             trusted_only: false,
         }
