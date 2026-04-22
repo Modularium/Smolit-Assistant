@@ -372,8 +372,20 @@ ui/scripts/window_behavior/
 ├── overlay_controller.gd                     # opt-in Overlay-Aktivierung (§F.2)
 ├── overlay_click_through_controller.gd       # opt-in Click-through-Folgeschritt (§F.3)
 ├── overlay_always_on_top_controller.gd       # X11-only AOT-Sonderpfad (§F.4)
-└── overlay_runtime_report.gd                 # opt-in Diagnose-Report
+├── overlay_runtime_report.gd                 # opt-in Diagnose-Report
+├── backend_base.gd                           # Backend-Basisklasse (interne Vorbereitung)
+├── backend_noop.gd                           # first-class Fallback für unknown Sessions
+├── backend_x11.gd                            # X11-Delegations-Backend
+├── backend_wayland_generic.gd                # Wayland-Delegations-Backend (AOT-Refusal by design)
+└── backend_resolver.gd                       # Session → Backend Auswahl
 ```
+
+Die Backend-Familie ist ausdrücklich **interne Strukturarbeit** — sie
+delegiert an die bestehenden Controller und ändert weder das
+Plattformverhalten noch das Log-Format. Ziel: spätere, echt
+unterschiedliche Pfade (layer-shell, GDExtension, compositor-
+spezifische Policy) haben einen klaren Platz, ohne die Aufrufseite
+(`main.gd`, Fassade, Runtime-Report) erneut anfassen zu müssen.
 
 Was der Spike wirklich tut:
 

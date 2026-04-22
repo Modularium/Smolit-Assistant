@@ -398,9 +398,20 @@ dokumentierter Fallback.
       siehe `window_behavior_result.gd`). Offen: echte Backend-
       Familie (§F Zielstruktur), `request_position`, ein Setter-
       Interface statt drei separaten Controllern.
-- [ ] Backends als getrennte Familie einordnen: `backend_x11`,
+- [~] Backends als getrennte Familie einordnen: `backend_x11`,
       `backend_wayland_mutter`, `backend_wayland_wlroots`,
-      `backend_noop` (first-class Fallback).
+      `backend_noop` (first-class Fallback). Interne Vorbereitung
+      gelandet: `backend_base.gd`, `backend_x11.gd`,
+      `backend_wayland_generic.gd`, `backend_noop.gd` + `backend_resolver.gd`
+      unter `ui/scripts/window_behavior/`. Die Fassade
+      `apply_all(anchor)` löst pro Lauf ein Backend auf und delegiert
+      die drei Aktivierungen darüber; Plattformlogik bleibt dabei in
+      den Controller-Gates, Log-Output ist byte-identisch zum
+      Pre-Backend-Stand. Offen: echte Differenzierung
+      (`backend_wayland_mutter` vs. `backend_wayland_wlroots` mit
+      layer-shell), ein expliziter `backend_wayland_unknown`-Case,
+      und die in §F des Architekturdokuments genannten Setter-/
+      Positionsoperationen.
 - [x] Overlay-MVP Phase B (opt-in): transparent + borderless
       Presence-Fenster per `SMOLIT_UI_OVERLAY=1`, capability-gesteuert
       mit ehrlichem Fallback; **ohne** Always-on-top-Zusicherung unter

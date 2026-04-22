@@ -42,6 +42,7 @@ const _ClickThroughRef := preload("res://scripts/window_behavior/overlay_click_t
 const _AlwaysOnTopRef := preload("res://scripts/window_behavior/overlay_always_on_top_controller.gd")
 const _RuntimeReportRef := preload("res://scripts/window_behavior/overlay_runtime_report.gd")
 const _ResultRef := preload("res://scripts/window_behavior/window_behavior_result.gd")
+const _BackendResolverRef := preload("res://scripts/window_behavior/backend_resolver.gd")
 
 
 ## Cheap — nur Detection. Sicher, auch aus `_ready()` aufzurufen.
@@ -121,31 +122,53 @@ static func print_runtime_report_if_enabled(
 	)
 
 
-## Convenience-Einstiegspunkt: führt Probe, Overlay, Click-through,
-## AOT und Report in der kanonischen Reihenfolge aus. Für `main.gd`
-## gedacht, wenn dort *alle* Pfade zusammen laufen sollen. Rückgabe
-## ist ein Dict mit den drei Aktivierungsergebnissen plus dem
-## Probe-Ergebnis — `main.gd` kann den Click-through-Controller-Ref
-## wie bisher aus `click_through_result["controller"]` am Leben halten.
+## Convenience-Einstiegspunkt: führt Probe, dann die drei
+## Aktivierungspfade (Overlay, Click-through, X11-AOT) in der
+## kanonischen Reihenfolge aus und schließt mit dem opt-in Runtime-
+## Report ab. Die drei Aktivierungen laufen über ein intern
+## aufgelöstes **Backend** (`backend_x11` / `backend_wayland_generic` /
+## `backend_noop`), das aktuell fast nur Delegation ist — die
+## plattformseitige Realität liegt weiter in den Controller-Gates.
+## Das Backend-Routing ist die Struktur, auf die spätere
+## Compositor-spezifische Pfade aufsetzen könnten.
+##
+## Rückgabe ist ein Dict mit den drei Aktivierungsergebnissen, dem
+## Probe-Ergebnis und dem gewählten `backend_id` (Diagnosehilfe).
+## `main.gd` hält wie bisher den Click-through-Controller-Ref über
+## `click_through_result["controller"]` am Leben.
 ##
 ## Der explizite Pfad (ein Call je Controller) bleibt gleichwertig
 ## unterstützt, siehe die einzelnen Fassadenfunktionen oben.
 static func apply_all(anchor: Node) -> Dictionary:
 	var probe_result: Dictionary = _ProbeRef.run_if_enabled()
-	var overlay_result: Dictionary = _OverlayRef.activate_if_requested(anchor)
+	# Capability-Snapshot einmal holen und weitergeben — der Resolver
+	# braucht ihn, der Report kann ihn über overlay_result aufgreifen.
+	var capabilities: Dictionary = _CapabilitiesRef.detect()
+	var backend: RefCounted = _BackendResolverRef.resolve(capabilities)
+	var overlay_result: Dictionary = backend.activate_overlay_if_requested(anchor)
 	var click_through_result: Dictionary = \
-		_ClickThroughRef.activate_if_requested(anchor, overlay_result)
+		backend.activate_click_through_if_requested(anchor, overlay_result)
 	var always_on_top_result: Dictionary = \
-		_AlwaysOnTopRef.activate_if_requested(anchor)
+		backend.activate_always_on_top_if_requested(anchor)
 	_RuntimeReportRef.print_if_requested(
 		overlay_result, click_through_result, always_on_top_result
 	)
 	return {
 		"probe": probe_result,
+		"backend_id": backend.backend_id,
+		"backend_description": backend.backend_description,
 		"overlay": overlay_result,
 		"click_through": click_through_result,
 		"always_on_top": always_on_top_result,
 	}
+
+
+## Diagnose-Hilfe: welches Backend würde für einen gegebenen (oder
+## frischen) Capability-Snapshot aktuell gewählt? Nützlich für Docs,
+## Verifikation und Tooling, ohne den ganzen `apply_all()`-Lauf
+## auszuführen.
+static func resolve_backend(capabilities: Dictionary = {}) -> RefCounted:
+	return _BackendResolverRef.resolve(capabilities)
 
 
 ## Zeigt das gemeinsame Aktivierungs-Schema (siehe

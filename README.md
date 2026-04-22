@@ -360,12 +360,19 @@ Für die spätere Overlay-Linie (Phase 3b) sitzt unter
 bewusst zurückhaltende Capability-/Probe-/Activation-Schicht. Intern
 getrennt nach **Detection** (`window_capabilities.gd`), **Probe /
 Verification** (`window_probe.gd`), **Activation** (Overlay /
-Click-through / X11-AOT, je eigenes Opt-in-Env-Flag) und **Reporting**
-(`overlay_runtime_report.gd`). Alle Aktivierungspfade teilen ein
-gemeinsames Ergebnis-Vokabular (`requested / capable / applied /
-observed / active / reason`, siehe
-`window_behavior_result.gd`). Einziger Einstiegspunkt aus `main.gd`
-bleibt die Fassade `window_behavior.gd::apply_all(anchor)`.
+Click-through / X11-AOT, je eigenes Opt-in-Env-Flag), **Reporting**
+(`overlay_runtime_report.gd`) und einer internen
+**Backend-Familie** (`backend_noop`, `backend_x11`,
+`backend_wayland_generic`, ausgewählt über `backend_resolver.gd`).
+Alle Aktivierungspfade teilen ein gemeinsames Ergebnis-Vokabular
+(`requested / capable / applied / observed / active / reason`,
+siehe `window_behavior_result.gd`). Einziger Einstiegspunkt aus
+`main.gd` bleibt die Fassade
+`window_behavior.gd::apply_all(anchor)`; sie löst pro Lauf ein
+Backend auf und delegiert die drei Aktivierungen darüber. Die
+Backend-Schicht ist aktuell reine Routing-Struktur — die
+Plattformrealität lebt weiterhin in den Controller-Gates; keine
+neuen Nutzerfeatures, keine neuen Plattformversprechen.
 
 Kurzfassung der bestehenden Diagnose-Achsen:
 
