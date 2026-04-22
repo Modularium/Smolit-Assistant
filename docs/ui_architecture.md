@@ -441,6 +441,56 @@ geplanten separaten Window-Behavior-Abstraktion — ist in
 [`docs/linux_window_overlay_architecture.md`](./linux_window_overlay_architecture.md)
 dokumentiert.
 
+### 9.0 Interne Rollenverteilung in `ui/scripts/window_behavior/`
+
+Die Schicht ist inzwischen gewachsen und intern nach **vier Rollen**
+plus Fassade und gemeinsamem Vokabular getrennt. Diese Übersicht
+ersetzt keine Detaildoku der einzelnen Pfade — sie macht nur
+sichtbar, wo welcher Baustein sitzt, damit spätere Arbeit nicht
+halbparallele Sonderpfade neben einander baut:
+
+- **Detection / Capability** — `window_capabilities.gd`. Session-Typ,
+  Display-Driver, Capability-Status (`available` / `experimental` /
+  `unsupported` / `unknown`). Keine Schreibzugriffe.
+- **Probe / Verification** — `window_probe.gd`. Opt-in, reversibel,
+  diagnostisch. Keine Produktaktivierung.
+- **Activation (pro Pfad ein eigenes Env-Flag)**:
+  - `overlay_controller.gd` (`SMOLIT_UI_OVERLAY`)
+  - `overlay_click_through_controller.gd` (`SMOLIT_UI_CLICK_THROUGH`)
+  - `overlay_always_on_top_controller.gd` (`SMOLIT_UI_ALWAYS_ON_TOP`)
+
+  Jeder Pfad hat eigene Gates und verweigert ehrlich; kein stiller
+  Nebeneffekt zwischen den drei.
+- **Reporting** — `overlay_runtime_report.gd`. Opt-in
+  `SMOLIT_WINDOW_REPORT=1`; konsolidierter Diagnose-Block ohne
+  Scene-Eingriff.
+- **Fassade** — `window_behavior.gd`. Einziger Einstieg aus
+  `main.gd`. Enthält `apply_all(anchor)` als kanonische Reihenfolge
+  (Probe → Overlay → Click-through → AOT → Report).
+- **Gemeinsames Vokabular** — `window_behavior_result.gd`. Definiert
+  die Standard-Achsen pro Aktivierungspfad:
+  `requested / capable / applied / observed / active / reason`
+  (siehe unten).
+
+`main.gd` ruft in `_ready()` nur noch `SmolitWindowBehavior.apply_all(
+self)` auf und hält den Click-through-Controller (falls aktiv) als
+Lifetime-Anker, damit dessen Signal-Subscriptions bestehen bleiben.
+Keine Plattformdetails wandern in Scene-Code.
+
+Gemeinsame Achsen pro Aktivierungspfad (siehe
+`window_behavior_result.gd`):
+
+- `requested` — Nutzer hat den Pfad explizit per Env angefordert.
+- `capable`   — Vorbedingungen (Capability, Session, Flag-Known)
+  erfüllt.
+- `applied`   — DisplayServer-Seite wurde tatsächlich geschrieben.
+- `observed`  — Rücklesewert bestätigt die Schreibung.
+- `active`    — Konsolidierter Endzustand.
+- `reason`    — Einzeiler, warum der Pfad so endete.
+
+Pfad-spezifische Zusatzachsen (Bounds, Zonenliste, Session-Details)
+bleiben erhalten — sie ergänzen das Skeleton, ersetzen es nicht.
+
 ### 9.1 Window Behavior Spike v1 (opt-in)
 
 Ein erster kleiner Capability-/Probe-Pfad ist in

@@ -147,43 +147,21 @@ func _ready() -> void:
 	_approval_selected_target.visible = false
 	_compact_panel.visible = false
 
-	# Linux Window Behavior Spike (Phase 3b). No-op unless the user opts
-	# in via `SMOLIT_WINDOW_PROBE=1`. Lives outside the presence/avatar
-	# state machines by design; it only reports and (opt-in) probes the
-	# host window, never changes scene logic.
-	_WindowBehaviorRef.run_probe_if_enabled()
-
-	# Overlay MVP Phase B — opt-in transparent presence window. No-op
-	# unless `SMOLIT_UI_OVERLAY=1` is set and the current session
-	# advertises transparency as available/experimental. Honest fallback
-	# to the normal window otherwise; no scene or presence change.
-	var overlay_result: Dictionary = _WindowBehaviorRef.activate_overlay_if_requested(self)
-
-	# Overlay click-through follow-up. Additional opt-in via
-	# `SMOLIT_UI_CLICK_THROUGH=1`; only takes effect on top of an
-	# already-active overlay, and only when interactive zones can be
-	# derived from the current layout. Honest no-op in every other
-	# case — reason goes to the log.
+	# Linux Window Behavior — ein einziger Fassaden-Einstieg, der alle
+	# opt-in Pfade (Probe, Overlay, Click-through, X11-AOT, Runtime-
+	# Report) in der kanonischen Reihenfolge ausführt. Jeder Pfad hat
+	# sein eigenes Env-Flag und verweigert ehrlich, wenn Vorbedingungen
+	# nicht stimmen — siehe window_behavior/*.gd und die Docs in
+	# docs/ui_architecture.md §9 / docs/linux_window_overlay_architecture.md §F.
+	var window_behavior_result: Dictionary = _WindowBehaviorRef.apply_all(self)
+	# Click-through-Controller am Leben halten, damit seine
+	# visibility_changed/resized-Subscriptions für die Scene-Lebenszeit
+	# aktiv bleiben (siehe overlay_click_through_controller.gd Kopf).
 	var click_through_result: Dictionary = \
-		_WindowBehaviorRef.activate_click_through_if_requested(self, overlay_result)
+		window_behavior_result.get("click_through", {})
 	var controller_variant: Variant = click_through_result.get("controller", null)
 	if controller_variant is RefCounted:
 		_click_through_controller = controller_variant
-
-	# X11-only Always-on-top Sonderpfad (SMOLIT_UI_ALWAYS_ON_TOP=1).
-	# Unabhängig von Overlay und Click-through. Unter GNOME/Wayland,
-	# unknown Session oder headless ein ehrlicher No-op — siehe
-	# `docs/linux_always_on_top_decision.md`.
-	var always_on_top_result: Dictionary = \
-		_WindowBehaviorRef.activate_always_on_top_if_requested(self)
-
-	# Opt-in diagnostic runtime report (SMOLIT_WINDOW_REPORT=1). Prints
-	# a consolidated block on session/capability/overlay/click-through/
-	# always-on-top status — diagnostic-only, no behaviour change. See
-	# `docs/linux_overlay_verification_matrix.md` for usage.
-	_WindowBehaviorRef.print_runtime_report_if_enabled(
-		overlay_result, click_through_result, always_on_top_result
-	)
 
 
 func _set_connected(ok: bool) -> void:

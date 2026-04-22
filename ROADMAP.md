@@ -387,11 +387,17 @@ dokumentierter Fallback.
       die Refusal-Message gegen reale Session-Signale zu verifizieren.
 - [ ] Entscheidungsspike „Godot-Fenster-Flags vs. GDExtension vs.
       Host-Prozess mit eingebettetem Godot".
-- [ ] Window-Behavior-Abstraktion als eigene Schicht
+- [~] Window-Behavior-Abstraktion als eigene Schicht
       (`window_behavior/`) vollständig ausbauen — Trait/Interface mit
       `set_always_on_top`, `set_transparent`, `set_click_through`,
-      `request_position`, `current_capabilities` (Capability-Seite
-      steht per Spike v1 bereits; Setter-/Backend-Seite offen).
+      `request_position`, `current_capabilities`. Capability-Seite
+      steht per Spike v1 bereits; Activation-Seite ist inzwischen in
+      drei getrennte opt-in Controller (Overlay, Click-through, X11-
+      AOT) zerlegt und verwendet ein gemeinsames Ergebnis-Vokabular
+      (`requested / capable / applied / observed / active / reason`,
+      siehe `window_behavior_result.gd`). Offen: echte Backend-
+      Familie (§F Zielstruktur), `request_position`, ein Setter-
+      Interface statt drei separaten Controllern.
 - [ ] Backends als getrennte Familie einordnen: `backend_x11`,
       `backend_wayland_mutter`, `backend_wayland_wlroots`,
       `backend_noop` (first-class Fallback).

@@ -1,17 +1,37 @@
 extends RefCounted
-## Linux Window Behavior — schmale Fassade (Phase 3b Spike v1)
+## Linux Window Behavior — schmale Fassade
 ##
-## Koordiniert die beiden konkreten Bausteine (Capabilities + Probe)
-## unter einer einzigen, einfachen Einstiegsklasse. Zweck: `main.gd`
-## muss nur genau einen Aufruf kennen, um den opt-in Spike zu triggern.
+## Einziger Einstiegspunkt aus `main.gd` in die
+## `ui/scripts/window_behavior/`-Schicht. Die Schicht ist intern nach
+## vier Rollen getrennt:
 ##
-## Absichtlich *kein* Autoload, *kein* Node, *kein* Singleton mit
-## State. Die Fassade ist ein kleiner Funktionscontainer.
+##   * **Detection / Capability** — `window_capabilities.gd`.
+##   * **Probe / Verification**   — `window_probe.gd` (opt-in,
+##                                   reversibel, diagnostisch).
+##   * **Activation**             — drei unabhängige Controller mit
+##                                   eigenen Env-Flags:
+##                                   `overlay_controller.gd`
+##                                   (`SMOLIT_UI_OVERLAY=1`),
+##                                   `overlay_click_through_controller.gd`
+##                                   (`SMOLIT_UI_CLICK_THROUGH=1`),
+##                                   `overlay_always_on_top_controller.gd`
+##                                   (`SMOLIT_UI_ALWAYS_ON_TOP=1`).
+##   * **Reporting**              — `overlay_runtime_report.gd`
+##                                   (opt-in, `SMOLIT_WINDOW_REPORT=1`).
 ##
-## Wichtig:
-##   * keine Business-Logik, keine Presence-Entscheidungen
-##   * kein Always-on-top in dieser Phase (siehe docs/linux_window_overlay_architecture.md §F)
-##   * keine neue UI, keine neuen IPC-Events
+## Alle Aktivierungspfade teilen ein gemeinsames Ergebnis-Vokabular
+## (`requested / capable / applied / observed / active / reason`),
+## definiert in `window_behavior_result.gd`. Pfad-spezifische Achsen
+## (Bounds, Zonen, Session-Details, …) bleiben erhalten.
+##
+## Leitregeln:
+##   * kein Autoload, kein Node, kein Singleton-State; alles
+##     funktionsbasiert, Rückgabe per Dictionary.
+##   * keine Business-/Presence-Entscheidungen.
+##   * kein stiller Nebeneffekt: jedes Feature hat ein eigenes
+##     Env-Flag und verweigert ehrlich, wenn die Vorbedingungen
+##     nicht stimmen.
+##   * keine IPC-/EventBus-Anbindung.
 
 class_name SmolitWindowBehavior
 
@@ -19,8 +39,9 @@ const _CapabilitiesRef := preload("res://scripts/window_behavior/window_capabili
 const _ProbeRef := preload("res://scripts/window_behavior/window_probe.gd")
 const _OverlayRef := preload("res://scripts/window_behavior/overlay_controller.gd")
 const _ClickThroughRef := preload("res://scripts/window_behavior/overlay_click_through_controller.gd")
-const _RuntimeReportRef := preload("res://scripts/window_behavior/overlay_runtime_report.gd")
 const _AlwaysOnTopRef := preload("res://scripts/window_behavior/overlay_always_on_top_controller.gd")
+const _RuntimeReportRef := preload("res://scripts/window_behavior/overlay_runtime_report.gd")
+const _ResultRef := preload("res://scripts/window_behavior/window_behavior_result.gd")
 
 
 ## Cheap — nur Detection. Sicher, auch aus `_ready()` aufzurufen.
@@ -98,3 +119,37 @@ static func print_runtime_report_if_enabled(
 	_RuntimeReportRef.print_if_requested(
 		overlay_result, click_through_result, always_on_top_result
 	)
+
+
+## Convenience-Einstiegspunkt: führt Probe, Overlay, Click-through,
+## AOT und Report in der kanonischen Reihenfolge aus. Für `main.gd`
+## gedacht, wenn dort *alle* Pfade zusammen laufen sollen. Rückgabe
+## ist ein Dict mit den drei Aktivierungsergebnissen plus dem
+## Probe-Ergebnis — `main.gd` kann den Click-through-Controller-Ref
+## wie bisher aus `click_through_result["controller"]` am Leben halten.
+##
+## Der explizite Pfad (ein Call je Controller) bleibt gleichwertig
+## unterstützt, siehe die einzelnen Fassadenfunktionen oben.
+static func apply_all(anchor: Node) -> Dictionary:
+	var probe_result: Dictionary = _ProbeRef.run_if_enabled()
+	var overlay_result: Dictionary = _OverlayRef.activate_if_requested(anchor)
+	var click_through_result: Dictionary = \
+		_ClickThroughRef.activate_if_requested(anchor, overlay_result)
+	var always_on_top_result: Dictionary = \
+		_AlwaysOnTopRef.activate_if_requested(anchor)
+	_RuntimeReportRef.print_if_requested(
+		overlay_result, click_through_result, always_on_top_result
+	)
+	return {
+		"probe": probe_result,
+		"overlay": overlay_result,
+		"click_through": click_through_result,
+		"always_on_top": always_on_top_result,
+	}
+
+
+## Zeigt das gemeinsame Aktivierungs-Schema (siehe
+## `window_behavior_result.gd`). Nützlich für Tools / Tests, die das
+## Vokabular programmatisch referenzieren wollen.
+static func activation_result_schema() -> Array:
+	return _ResultRef.ACTIVATION_KEYS

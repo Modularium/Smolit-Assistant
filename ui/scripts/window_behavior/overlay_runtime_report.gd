@@ -33,6 +33,7 @@ extends RefCounted
 class_name SmolitOverlayRuntimeReport
 
 const _CapabilitiesRef := preload("res://scripts/window_behavior/window_capabilities.gd")
+const _ResultRef := preload("res://scripts/window_behavior/window_behavior_result.gd")
 
 const ENABLE_ENV_VAR: String = "SMOLIT_WINDOW_REPORT"
 
@@ -148,14 +149,9 @@ static func _append_click_through_lines(lines: PackedStringArray, result: Dictio
 	lines.append("[report] click_through.active           = %s" % bool(result.get("active", false)))
 	var bounds_variant: Variant = result.get("bounds", null)
 	if typeof(bounds_variant) == TYPE_RECT2:
-		# Klare, parser-untaugliche Darstellung — bewusst keine JSON.
-		var bounds: Rect2 = bounds_variant
-		lines.append("[report] click_through.bounds_union     = (%.0f,%.0f %.0fx%.0f)" % [
-			bounds.position.x,
-			bounds.position.y,
-			bounds.size.x,
-			bounds.size.y,
-		])
+		# Darstellung via gemeinsamem Rect-Formatter — selbe
+		# Klammerung wie im Click-through-Controller-Log.
+		lines.append("[report] click_through.bounds_union     = %s" % _ResultRef.format_rect(bounds_variant))
 		lines.append("[report] click_through.region_model     = bounding-union (single-polygon MVP — empty space inside stays clickable)")
 	else:
 		lines.append("[report] click_through.bounds_union     = (none)")
@@ -168,16 +164,7 @@ static func _append_click_through_lines(lines: PackedStringArray, result: Dictio
 			if typeof(zone_variant) != TYPE_DICTIONARY:
 				continue
 			var zone: Dictionary = zone_variant
-			var rect_variant: Variant = zone.get("rect", null)
-			var rect_text := "—"
-			if typeof(rect_variant) == TYPE_RECT2:
-				var rect: Rect2 = rect_variant
-				rect_text = "(%.0f,%.0f %.0fx%.0f)" % [
-					rect.position.x,
-					rect.position.y,
-					rect.size.x,
-					rect.size.y,
-				]
+			var rect_text := _ResultRef.format_rect(zone.get("rect", null))
 			lines.append("[report]   • %-22s rect=%s (%s)" % [
 				str(zone.get("path", "")),
 				rect_text,

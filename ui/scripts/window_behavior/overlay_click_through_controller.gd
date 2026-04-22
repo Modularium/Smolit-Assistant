@@ -59,6 +59,7 @@ extends RefCounted
 class_name SmolitOverlayClickThroughController
 
 const _CapabilitiesRef := preload("res://scripts/window_behavior/window_capabilities.gd")
+const _ResultRef := preload("res://scripts/window_behavior/window_behavior_result.gd")
 
 const ENABLE_ENV_VAR: String = "SMOLIT_UI_CLICK_THROUGH"
 
@@ -129,18 +130,20 @@ func _try_activate(anchor: Node, overlay_result: Dictionary) -> Dictionary:
 	var overlay_requested: bool = bool(overlay_result.get("requested", false))
 	var overlay_active: bool = bool(overlay_result.get("active", false))
 
-	var summary := {
-		"requested": requested,
-		"overlay_requested": overlay_requested,
-		"overlay_active": overlay_active,
-		"capable": false,
-		"zones_derived": 0,
-		"zones_valid": 0,
-		"active": false,
-		"bounds": null,
-		"zones": [],
-		"reason": "",
-	}
+	# Gemeinsames Skeleton (requested/capable/applied/observed/active/
+	# reason) aus `window_behavior_result.gd`; click-through-spezifische
+	# Diagnosefelder werden direkt drumherum gesetzt. Für diesen Pfad
+	# bedeuten `applied` und `observed` identisch zu `active`, weil wir
+	# nur einen einzigen DisplayServer-Aufruf pro Refresh machen und
+	# kein separates Read-Back kennen.
+	var summary: Dictionary = _ResultRef.new_activation_status()
+	summary["requested"] = requested
+	summary["overlay_requested"] = overlay_requested
+	summary["overlay_active"] = overlay_active
+	summary["zones_derived"] = 0
+	summary["zones_valid"] = 0
+	summary["bounds"] = null
+	summary["zones"] = []
 
 	if not overlay_requested:
 		summary["reason"] = "overlay not requested (SMOLIT_UI_OVERLAY unset)"
@@ -208,6 +211,12 @@ func _try_activate(anchor: Node, overlay_result: Dictionary) -> Dictionary:
 			_last_bounds = bounds
 			_last_has_bounds = true
 			summary["active"] = true
+			# Für das gemeinsame Vokabular: applied = wir haben die
+			# Passthrough-Region wirklich übergeben, observed = wir
+			# verlassen uns auf Godots Write-Akzeptanz (kein separater
+			# Read-Back in der DisplayServer-API).
+			summary["applied"] = true
+			summary["observed"] = true
 			summary["reason"] = "active with %d zone(s)" % int(report["valid_count"])
 		else:
 			summary["reason"] = "DisplayServer.window_set_mouse_passthrough not available on this build"
@@ -491,13 +500,8 @@ func _log_summary(summary: Dictionary) -> void:
 		print("[click-through] reason: %s" % reason)
 
 
+## Dünner Proxy auf `SmolitWindowBehaviorResult.format_rect`, damit
+## die bestehenden Call-Sites im Controller unverändert bleiben,
+## aber keine Darstellung dupliziert wird.
 static func _format_rect(rect_variant: Variant) -> String:
-	if typeof(rect_variant) != TYPE_RECT2:
-		return "—"
-	var rect: Rect2 = rect_variant
-	return "(%.0f,%.0f %.0fx%.0f)" % [
-		rect.position.x,
-		rect.position.y,
-		rect.size.x,
-		rect.size.y,
-	]
+	return _ResultRef.format_rect(rect_variant)

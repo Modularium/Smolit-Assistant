@@ -353,11 +353,21 @@ schließt es kontrolliert, Approval- und Action-Banner bleiben darüber
 sichtbar. Siehe
 [docs/ui_architecture.md §8.3](docs/ui_architecture.md).
 
-### Linux Window Behavior (Spike v1, opt-in)
+### Linux Window Behavior (opt-in Schicht)
 
 Für die spätere Overlay-Linie (Phase 3b) sitzt unter
 [`ui/scripts/window_behavior/`](ui/scripts/window_behavior/) eine kleine,
-bewusst zurückhaltende Capability-/Probe-Schicht:
+bewusst zurückhaltende Capability-/Probe-/Activation-Schicht. Intern
+getrennt nach **Detection** (`window_capabilities.gd`), **Probe /
+Verification** (`window_probe.gd`), **Activation** (Overlay /
+Click-through / X11-AOT, je eigenes Opt-in-Env-Flag) und **Reporting**
+(`overlay_runtime_report.gd`). Alle Aktivierungspfade teilen ein
+gemeinsames Ergebnis-Vokabular (`requested / capable / applied /
+observed / active / reason`, siehe
+`window_behavior_result.gd`). Einziger Einstiegspunkt aus `main.gd`
+bleibt die Fassade `window_behavior.gd::apply_all(anchor)`.
+
+Kurzfassung der bestehenden Diagnose-Achsen:
 
 - Capability-Detection liest Session-Typ, DisplayServer-Namen,
   `XDG_CURRENT_DESKTOP` und das Projekt-Setting

@@ -352,6 +352,11 @@ Leitregeln für diese Abstraktion:
 
 Wichtig: Die *vollständige* Schicht existiert noch nicht. Ein erster,
 opt-in kleiner Spike ist aber inzwischen gelandet — siehe §F.1.
+Eine interne Rollenübersicht (Detection / Probe / Activation /
+Reporting + Fassade + gemeinsames Vokabular) findet sich in
+[`ui_architecture.md` §9.0](./ui_architecture.md); dieses Dokument
+konzentriert sich auf die plattformseitige Begründung und die
+einzelnen Phasen.
 
 ### F.1. Window Behavior Capability Spike v1 (Ist)
 
@@ -360,9 +365,14 @@ Window-Behavior-Linie unter `ui/scripts/window_behavior/`:
 
 ```text
 ui/scripts/window_behavior/
-├── window_behavior.gd      # Fassade — einziger Aufrufpunkt aus main.gd
-├── window_capabilities.gd  # Capability-Detection (Env + DisplayServer)
-└── window_probe.gd         # opt-in Probe (SMOLIT_WINDOW_PROBE=1)
+├── window_behavior.gd                        # Fassade — einziger Aufrufpunkt aus main.gd
+├── window_behavior_result.gd                 # gemeinsames Ergebnis-Vokabular
+├── window_capabilities.gd                    # Capability-Detection (Env + DisplayServer)
+├── window_probe.gd                           # opt-in Probe (SMOLIT_WINDOW_PROBE=1)
+├── overlay_controller.gd                     # opt-in Overlay-Aktivierung (§F.2)
+├── overlay_click_through_controller.gd       # opt-in Click-through-Folgeschritt (§F.3)
+├── overlay_always_on_top_controller.gd       # X11-only AOT-Sonderpfad (§F.4)
+└── overlay_runtime_report.gd                 # opt-in Diagnose-Report
 ```
 
 Was der Spike wirklich tut:

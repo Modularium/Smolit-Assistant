@@ -51,6 +51,7 @@ extends RefCounted
 class_name SmolitOverlayAlwaysOnTopController
 
 const _CapabilitiesRef := preload("res://scripts/window_behavior/window_capabilities.gd")
+const _ResultRef := preload("res://scripts/window_behavior/window_behavior_result.gd")
 
 const ENABLE_ENV_VAR: String = "SMOLIT_UI_ALWAYS_ON_TOP"
 
@@ -68,18 +69,17 @@ static func is_requested() -> bool:
 static func activate_if_requested(anchor: Node) -> Dictionary:
 	var requested := is_requested()
 
-	var summary := {
-		"requested": requested,
-		"session_type": "",
-		"display_driver": "",
-		"capability_status": "",
-		"capability_reason": "",
-		"candidate": false,
-		"applied": false,
-		"observed": false,
-		"active": false,
-		"reason": "",
-	}
+	# Gemeinsames Skeleton aus `window_behavior_result.gd`, ergänzt um
+	# die AOT-spezifischen Diagnosefelder. `candidate` bleibt als Alias
+	# für `capable` erhalten, damit bestehende Logs und Verifikations-
+	# dokumente stabil bleiben.
+	var summary: Dictionary = _ResultRef.new_activation_status()
+	summary["requested"] = requested
+	summary["session_type"] = ""
+	summary["display_driver"] = ""
+	summary["capability_status"] = ""
+	summary["capability_reason"] = ""
+	summary["candidate"] = false
 
 	if not requested:
 		summary["reason"] = "always-on-top not requested (SMOLIT_UI_ALWAYS_ON_TOP unset)"
@@ -132,6 +132,7 @@ static func activate_if_requested(anchor: Node) -> Dictionary:
 		return summary
 
 	summary["candidate"] = true
+	summary["capable"] = true
 
 	# Flag setzen, zurücklesen. Das sagt uns, *dass* Godot den Wunsch
 	# angenommen hat — nicht, dass der WM dauerhaft stacked. Der Log-

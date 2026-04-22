@@ -39,6 +39,7 @@ extends RefCounted
 class_name SmolitOverlayController
 
 const _CapabilitiesRef := preload("res://scripts/window_behavior/window_capabilities.gd")
+const _ResultRef := preload("res://scripts/window_behavior/window_behavior_result.gd")
 
 const ENABLE_ENV_VAR: String = "SMOLIT_UI_OVERLAY"
 
@@ -52,11 +53,11 @@ static func is_requested() -> bool:
 ## der Rückgabewert hält fest, dass der Modus nicht angefordert war.
 static func activate_if_requested(anchor: Node) -> Dictionary:
 	if not is_requested():
-		return {
-			"requested": false,
-			"active": false,
-			"reason": "SMOLIT_UI_OVERLAY not set",
-		}
+		# Gemeinsames Skeleton, damit der Runtime-Report dieselben
+		# Achsen findet wie bei den anderen Pfaden.
+		var result: Dictionary = _ResultRef.new_activation_status()
+		result["reason"] = "SMOLIT_UI_OVERLAY not set"
+		return result
 	return activate_now(anchor)
 
 
@@ -72,31 +73,35 @@ static func activate_now(anchor: Node) -> Dictionary:
 	)
 	var transparency_reason := str(transparency_cap.get("reason", ""))
 
-	var result := {
+	# Gemeinsames Skeleton aus `window_behavior_result.gd`. Die Unter-
+	# Dictionaries `transparency{}` / `borderless{}` bleiben die
+	# Detail-Diagnose; die Top-Level-Achsen `capable/applied/observed/
+	# active/reason` werden unten aus ihnen abgeleitet, damit der
+	# Runtime-Report und spätere Konsumenten ein einheitliches
+	# Vokabular sehen.
+	var result: Dictionary = _ResultRef.new_activation_status()
+	result["requested"] = true
+	result["capabilities"] = capabilities
+	result["transparency"] = {
 		"requested": true,
-		"active": false,
-		"capabilities": capabilities,
-		"transparency": {
-			"requested": true,
-			"applied": false,
-			"status": _CapabilitiesRef.name_of_status(transparency_status),
-			"reason": transparency_reason,
-		},
-		"borderless": {
-			"requested": true,
-			"applied": false,
-			"reason": "",
-		},
-		"click_through": {
-			"requested": false,
-			"applied": false,
-			"reason": "deferred — needs interactive-zone polygons to keep the avatar clickable",
-		},
-		"always_on_top": {
-			"requested": false,
-			"applied": false,
-			"reason": "not promised in Phase B — see docs/linux_window_overlay_architecture.md §C.1 / §E",
-		},
+		"applied": false,
+		"status": _CapabilitiesRef.name_of_status(transparency_status),
+		"reason": transparency_reason,
+	}
+	result["borderless"] = {
+		"requested": true,
+		"applied": false,
+		"reason": "",
+	}
+	result["click_through"] = {
+		"requested": false,
+		"applied": false,
+		"reason": "deferred — needs interactive-zone polygons to keep the avatar clickable",
+	}
+	result["always_on_top"] = {
+		"requested": false,
+		"applied": false,
+		"reason": "not promised in Phase B — see docs/linux_window_overlay_architecture.md §C.1 / §E",
 	}
 
 	if transparency_status == _CapabilitiesRef.Status.UNSUPPORTED \
@@ -105,12 +110,17 @@ static func activate_now(anchor: Node) -> Dictionary:
 			_CapabilitiesRef.name_of_status(transparency_status),
 			transparency_reason,
 		])
-		result["transparency"]["reason"] = (
+		var fallback_reason := (
 			"fallback: " + transparency_reason if transparency_reason != ""
 			else "fallback: transparency unavailable"
 		)
+		result["transparency"]["reason"] = fallback_reason
+		# Top-Level-Achsen: capable=false (kein tragfähiger Pfad), alles
+		# andere bleibt bei den Defaults des Skeletons.
+		result["reason"] = fallback_reason
 		return result
 
+	result["capable"] = true
 	if transparency_status == _CapabilitiesRef.Status.EXPERIMENTAL:
 		print("[overlay] transparency experimental — activating with honest warning (reason: %s)" % transparency_reason)
 
@@ -145,6 +155,17 @@ static func activate_now(anchor: Node) -> Dictionary:
 	result["borderless"]["applied"] = borderless_observed
 
 	result["active"] = bool(result["transparency"]["applied"])
+	# Top-Level-Achsen aus den Sub-Dicts abgeleitet — damit Runtime-
+	# Report und spätere Konsumenten das gemeinsame Vokabular (applied/
+	# observed/reason) lesen können, ohne die Struktur der bestehenden
+	# Unter-Dictionaries zu kennen.
+	result["applied"] = bool(result["transparency"]["applied"]) \
+		or bool(result["borderless"]["applied"])
+	result["observed"] = transparent_observed
+	if result["active"]:
+		result["reason"] = "transparent + borderless window applied"
+	elif not result["applied"]:
+		result["reason"] = "transparency write did not stick on read-back"
 
 	print("[overlay] active=%s transparency=%s borderless=%s" % [
 		result["active"],
