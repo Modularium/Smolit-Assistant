@@ -111,6 +111,11 @@ Pauschalantwort.
   Default) **nicht zuverlässig über Standardwege**. Eine
   protokolltreue Lösung benötigt entweder einen anderen Compositor
   (wlroots + layer-shell) oder eine compositor-spezifische Extension.
+- **Entscheidungsstand.** Siehe
+  [`linux_always_on_top_decision.md`](./linux_always_on_top_decision.md):
+  unter GNOME/Wayland **bewusst kein Always-on-top-Versprechen** im
+  Standardpfad, GNOME-Shell-Extension ausdrücklich zurückgestellt,
+  X11 bleibt ein optionaler Sonderpfad für später.
 
 ### 2. Transparenter Hintergrund
 
@@ -755,6 +760,34 @@ gesetzte Aussagen:
 vs. Host-Prozess, keine Festlegung auf einen Compositor-spezifischen
 Pfad (§C/§E), kein Always-on-top-Versuch. Die Messlinie liefert
 *Daten*, keine Architekturfestlegung.
+
+### G.2. Entscheidungssnapshot — Always-on-top
+
+Der §G-Forschungspunkt „Always-on-top unter GNOME" ist inzwischen in
+ein eigenes Entscheidungsdokument überführt:
+[`linux_always_on_top_decision.md`](./linux_always_on_top_decision.md).
+
+Kurzfassung:
+
+- **Standardpfad auf GNOME/Wayland (Ziel-Session).** Kein
+  Always-on-top-Versprechen. Sichtbare Desktop-Präsenz läuft
+  weiterhin über Overlay-MVP (§F.2) + opt-in Click-through (§F.3).
+- **GNOME-Shell-Extension.** Ausdrücklich zurückgestellt (Pflege-
+  aufwand, Versionsbindung, Sicherheitsmodell). Nur bei klarer,
+  messbarer Nachfrage und eigenem Projektrahmen wieder auf dem Tisch.
+- **X11-Seitenpfad.** Dokumentierte Option für eine spätere,
+  opt-in Aktivierung (`_NET_WM_STATE_ABOVE` via
+  `WINDOW_FLAG_ALWAYS_ON_TOP`), capability-gesteuert, ausdrücklich
+  kein Standard-MVP.
+- **wlroots/layer-shell.** Dokumentierte Option, kein aktuelles Ziel.
+- **Diagnostische Probe.** Der bestehende opt-in
+  `SMOLIT_WINDOW_PROBE=1`-Pfad enthält jetzt einen kurzen,
+  reversiblen AOT-Flag-Versuch. Er liefert empirisches Material
+  („flag accepted by API — not a user-visible guarantee under
+  Mutter") und ändert den produktiven Lauf nicht.
+
+Produktseitige Kurzaussage: siehe §F in
+[`linux_always_on_top_decision.md`](./linux_always_on_top_decision.md).
 
 ---
 

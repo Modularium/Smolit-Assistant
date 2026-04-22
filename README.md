@@ -461,6 +461,31 @@ Rechtecken) bleiben Folgearbeit. Details siehe
 und
 [docs/ui_architecture.md §9.3](docs/ui_architecture.md).
 
+### Always-on-Top — was Smolit verspricht / nicht verspricht
+
+Unter Ubuntu 24.04 / GNOME/Wayland (Zielsession) verspricht Smolit
+**bewusst kein Always-on-top**. Die sichtbare Desktop-Präsenz läuft
+über den Overlay-MVP (transparent + borderless, opt-in) und den
+optionalen Click-through-Folgeschritt — das ist der vollständige
+produktive Pfad, mehr behaupten wir nicht. Nutzer, die unter GNOME
+ein sichtbares AOT-Verhalten wünschen, verwenden die GNOME-eigene
+„Always on Top"-Option im Titelleistenmenü des Compositors.
+
+- **GNOME-Shell-Extension** ist als Pfad ausdrücklich zurückgestellt
+  (Pflegeaufwand, Versionsbindung, Sicherheitsmodell).
+- **X11-Sonderpfad** (`WINDOW_FLAG_ALWAYS_ON_TOP` via
+  `_NET_WM_STATE_ABOVE`) ist dokumentierte spätere Option, kein
+  Standard-MVP.
+- **wlroots / layer-shell** ist dokumentierte Möglichkeit, kein
+  aktuelles Ziel.
+- **Diagnose-Probe.** Der bestehende opt-in `SMOLIT_WINDOW_PROBE=1`
+  enthält jetzt einen kurzen, reversiblen AOT-Flag-Versuch mit
+  ehrlichem Log — „flag accepted by API — not a user-visible
+  guarantee under Mutter". Kein produktives Feature.
+
+Vollständige Begründung und Kriterien:
+[docs/linux_always_on_top_decision.md](docs/linux_always_on_top_decision.md).
+
 ### Overlay-Verifikation (nächster Schritt: reale Messung)
 
 Der nächste konkrete Arbeitsschritt auf der Overlay-Linie ist **kein

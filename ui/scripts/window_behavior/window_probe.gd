@@ -13,10 +13,16 @@ extends RefCounted
 ##     ausgelesen und optional nach kurzer Zeit wieder zurückgesetzt
 ##   * keine IPC-/Core-Interaktion, keine Emissions auf dem EventBus
 ##   * keine Portal-Aufrufe, keine X11-/Wayland-Objekte
-##   * Always-on-top wird in dieser Phase bewusst *nicht* gesetzt —
-##     die Capability-Analyse markiert es zu Recht als unzuverlässig
-##     unter GNOME/Wayland, und wir wollen dieses Versprechen nicht
-##     faken.
+##   * Always-on-top wird **produktiv** bewusst *nicht* gesetzt — die
+##     Capability-Analyse markiert es unter GNOME/Wayland zu Recht als
+##     unzuverlässig, und wir wollen dieses Versprechen nicht faken.
+##     Der Probe führt allerdings einen kurzen, reversiblen Flag-
+##     Versuch durch, um empirisch festzuhalten, ob Godot das Flag
+##     akzeptiert. Log macht ausdrücklich klar: *„Flag accepted by
+##     API — this is not a user-visible guarantee under Mutter."*
+##     Das stützt die Entscheidungsdokumentation in
+##     `docs/linux_always_on_top_decision.md`, erzeugt aber keinen
+##     produktiven AOT-Zustand.
 ##
 ## Kapazitäts-Snapshot vor dem Probe, Ergebnis-Snapshot nach jedem
 ## Flag-Write. Alles landet im Log — kein UI-Artefakt.
@@ -63,14 +69,18 @@ static func run_now() -> Dictionary:
 
 	var transparency_probe := _probe_transparency(capabilities)
 	var passthrough_probe := _probe_click_through(capabilities)
+	var always_on_top_probe := _probe_always_on_top(capabilities)
 
 	if _should_revert():
-		_revert_probe_changes(transparency_probe, passthrough_probe)
+		_revert_probe_changes(
+			transparency_probe, passthrough_probe, always_on_top_probe
+		)
 
 	var result := {
 		"capabilities": capabilities,
 		"transparency": transparency_probe,
 		"click_through": passthrough_probe,
+		"always_on_top": always_on_top_probe,
 		"reverted": _should_revert(),
 	}
 	print("[window_behavior] probe: done")
@@ -135,9 +145,78 @@ static func _probe_click_through(capabilities: Dictionary) -> Dictionary:
 	}
 
 
+# --- Always-on-top (rein diagnostisch) ----------------------------------
+
+
+## Kurzer, reversibler AOT-Flag-Versuch. Liefert empirisches Material
+## für `docs/linux_always_on_top_decision.md`: Godot akzeptiert das
+## Flag meistens API-seitig, aber unter Mutter übersetzt sich das
+## nicht in sichtbares Stacking-Verhalten. Das wird hier nicht
+## entschieden, sondern nur ehrlich dokumentiert.
+##
+## Wichtig:
+##   * Kein produktiver Pfad. Auch wenn der Flag-Rücklesewert `true`
+##     ist, zieht Smolit daraus keinen „AOT aktiv"-Schluss.
+##   * Wird per Default mit `_should_revert()` zurückgesetzt.
+static func _probe_always_on_top(capabilities: Dictionary) -> Dictionary:
+	var cap: Dictionary = capabilities.get("always_on_top", {})
+	var status := int(cap.get("status", _CapabilitiesRef.Status.UNKNOWN))
+
+	# Anders als bei Transparenz/Click-through wollen wir hier auch dann
+	# probieren, wenn die Capability den Fall als `unsupported` markiert —
+	# der springende Punkt der AOT-Diagnostik ist ja genau zu zeigen,
+	# dass Godot das Flag akzeptiert, der Compositor es aber (z. B. unter
+	# Mutter) nicht in sichtbares Stacking übersetzt. Übersprungen wird
+	# nur, wenn der Godot-Build das Flag gar nicht kennt.
+	if not _godot_knows_flag("WINDOW_FLAG_ALWAYS_ON_TOP"):
+		return {
+			"attempted": false,
+			"requested": false,
+			"observed": false,
+			"note": "flag not known to this Godot build",
+		}
+
+	var previous: bool = DisplayServer.window_get_flag(
+		DisplayServer.WINDOW_FLAG_ALWAYS_ON_TOP
+	)
+	DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_ALWAYS_ON_TOP, true)
+	var observed: bool = DisplayServer.window_get_flag(
+		DisplayServer.WINDOW_FLAG_ALWAYS_ON_TOP
+	)
+	print("[window_behavior] always_on_top: requested=true observed=%s (status=%s) — flag accepted by API; this is NOT a user-visible guarantee under Mutter (see docs/linux_always_on_top_decision.md)" % [
+		observed,
+		_CapabilitiesRef.name_of_status(status),
+	])
+	return {
+		"attempted": true,
+		"previous": previous,
+		"requested": true,
+		"observed": observed,
+		"note": "observed=true only means Godot accepted the flag; not a user-visible guarantee under GNOME/Wayland — see docs/linux_always_on_top_decision.md",
+	}
+
+
+static func _godot_knows_flag(flag_name: String) -> bool:
+	if not ClassDB.class_exists("DisplayServer"):
+		return false
+	for constant_name in ClassDB.class_get_integer_constant_list("DisplayServer"):
+		if constant_name == flag_name:
+			return true
+	return false
+
+
 # --- Revert --------------------------------------------------------------
 
-static func _revert_probe_changes(transparency_probe: Dictionary, passthrough_probe: Dictionary) -> void:
+static func _revert_probe_changes(
+	transparency_probe: Dictionary,
+	passthrough_probe: Dictionary,
+	always_on_top_probe: Dictionary,
+) -> void:
+	if bool(always_on_top_probe.get("attempted", false)):
+		DisplayServer.window_set_flag(
+			DisplayServer.WINDOW_FLAG_ALWAYS_ON_TOP,
+			bool(always_on_top_probe.get("previous", false)),
+		)
 	if bool(passthrough_probe.get("attempted", false)):
 		DisplayServer.window_set_flag(
 			DisplayServer.WINDOW_FLAG_MOUSE_PASSTHROUGH,

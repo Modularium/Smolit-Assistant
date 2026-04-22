@@ -334,8 +334,27 @@ dokumentierter Fallback.
       Die tatsächlichen Messläufe auf realen Wayland-/X11-Sessions
       stehen weiterhin offen und sind nicht von diesem Harness
       geleistet — er liefert nur die reproduzierbare Grundlage dafür.
-- [ ] Entscheidungsspike „always-on-top unter GNOME": Extension vs.
-      Verzicht vs. compositor-spezifischer Pfad.
+- [x] Entscheidungsspike „always-on-top unter GNOME": Extension vs.
+      Verzicht vs. compositor-spezifischer Pfad — entschieden für
+      **Verzicht im Standardpfad** auf GNOME/Wayland. GNOME-Shell-
+      Extension ausdrücklich zurückgestellt (Pflegeaufwand,
+      Versionsbindung, Sicherheitsmodell); X11-Sonderpfad bleibt
+      dokumentierte Option für spätere, opt-in Aktivierung;
+      wlroots/layer-shell bleibt dokumentierte Möglichkeit ohne
+      aktuelles Ziel. Details und Produktversprechen siehe
+      [docs/linux_always_on_top_decision.md](./docs/linux_always_on_top_decision.md);
+      Entscheidungssnapshot in
+      [docs/linux_window_overlay_architecture.md §G.2](./docs/linux_window_overlay_architecture.md).
+      Ergänzend enthält der opt-in `SMOLIT_WINDOW_PROBE=1`-Pfad
+      jetzt einen kurzen, reversiblen AOT-Flag-Versuch als ehrliche
+      Diagnostik („flag accepted by API — not a user-visible
+      guarantee under Mutter").
+- [ ] X11-Sonderpfad für optionales Always-on-top (nur bei klarer
+      Nachfrage) — capability-gesteuerter opt-in Modus über
+      `WINDOW_FLAG_ALWAYS_ON_TOP`, dokumentierter Sonderpfad, kein
+      Standard-MVP. Aufwand klein, Risiko klein; Entscheidung dafür
+      oder dagegen erst nach realen Messungen aus der
+      Verifikationsmatrix.
 - [ ] Entscheidungsspike „Godot-Fenster-Flags vs. GDExtension vs.
       Host-Prozess mit eingebettetem Godot".
 - [ ] Window-Behavior-Abstraktion als eigene Schicht
