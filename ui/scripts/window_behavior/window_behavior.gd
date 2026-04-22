@@ -116,9 +116,10 @@ static func print_runtime_report_if_enabled(
 	overlay_result: Dictionary,
 	click_through_result: Dictionary,
 	always_on_top_result: Dictionary = {},
+	backend_info: Dictionary = {},
 ) -> void:
 	_RuntimeReportRef.print_if_requested(
-		overlay_result, click_through_result, always_on_top_result
+		overlay_result, click_through_result, always_on_top_result, backend_info
 	)
 
 
@@ -150,8 +151,15 @@ static func apply_all(anchor: Node) -> Dictionary:
 		backend.activate_click_through_if_requested(anchor, overlay_result)
 	var always_on_top_result: Dictionary = \
 		backend.activate_always_on_top_if_requested(anchor)
+	# Backend-Info reicht der Report als eigenes Block durch — so steht
+	# die `backend_id` in der opt-in Diagnoseausgabe drin, ohne dass sie
+	# in den produktiven Controller-Logs auftaucht.
+	var backend_info := {
+		"id": backend.backend_id,
+		"description": backend.backend_description,
+	}
 	_RuntimeReportRef.print_if_requested(
-		overlay_result, click_through_result, always_on_top_result
+		overlay_result, click_through_result, always_on_top_result, backend_info
 	)
 	return {
 		"probe": probe_result,

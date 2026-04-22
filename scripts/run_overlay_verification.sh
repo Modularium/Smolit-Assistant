@@ -27,6 +27,29 @@
 #   full          — Overlay + Click-through + Probe + AOT + Report
 #   report        — nur SMOLIT_WINDOW_REPORT=1 (Report für Baseline)
 #
+# Backend-Familie (Resolver-Verifikation, siehe
+# docs/window_behavior_backend_verification.md):
+#   resolver-smoke
+#                 — Führt scripts/resolver_classification_smoke.gd aus.
+#                   Prüft neun synthetische Session/Driver/Desktop-
+#                   Kombinationen gegen die erwartete backend_id.
+#                   Exit 0 = alle PASS.
+#   resolver-wayland-mutter
+#                 — Env-Override (Wayland + GNOME) + Report. Zeigt, dass
+#                   der Resolver backend_wayland_mutter wählt und der
+#                   Controller-Refusal-Pfad wie gewohnt greift.
+#   resolver-wayland-wlroots
+#                 — Env-Override (Wayland + sway). Zeigt backend_wayland_wlroots.
+#   resolver-wayland-generic
+#                 — Env-Override (Wayland + KDE). Zeigt backend_wayland_generic
+#                   als ehrlichen Fallback.
+#   resolver-noop — Env-Override (session_type=unknown). Zeigt backend_noop.
+#
+# WICHTIG: Die resolver-* Fälle sind Simulationen. Sie beweisen NICHT,
+# dass die jeweiligen Compositoren wirklich vorhanden sind; sie
+# beweisen nur, dass der Resolver bei diesen Env-Signalen das
+# dokumentierte Backend wählt.
+#
 # Flags (vor dem Case-Argument):
 #   --headless    — Godot headless starten (godot --headless --path ui/)
 #   --report      — zusätzlich SMOLIT_WINDOW_REPORT=1 setzen
@@ -140,6 +163,40 @@ case "${CASE}" in
   report)
     export SMOLIT_WINDOW_REPORT=1
     ;;
+  resolver-smoke)
+    # Spezialfall: statt die UI-Scene zu starten, läuft hier der
+    # Classification-Smoketest gegen den Resolver.
+    exec godot --headless --path "${UI_DIR}" \
+      --script "${REPO_ROOT}/scripts/resolver_classification_smoke.gd"
+    ;;
+  resolver-wayland-mutter)
+    export SMOLIT_WINDOW_REPORT=1
+    export XDG_SESSION_TYPE=wayland
+    export WAYLAND_DISPLAY=wayland-0-fake
+    export XDG_CURRENT_DESKTOP=ubuntu:GNOME
+    export DISPLAY=
+    ;;
+  resolver-wayland-wlroots)
+    export SMOLIT_WINDOW_REPORT=1
+    export XDG_SESSION_TYPE=wayland
+    export WAYLAND_DISPLAY=wayland-0-fake
+    export XDG_CURRENT_DESKTOP=sway
+    export DISPLAY=
+    ;;
+  resolver-wayland-generic)
+    export SMOLIT_WINDOW_REPORT=1
+    export XDG_SESSION_TYPE=wayland
+    export WAYLAND_DISPLAY=wayland-0-fake
+    export XDG_CURRENT_DESKTOP=KDE
+    export DISPLAY=
+    ;;
+  resolver-noop)
+    export SMOLIT_WINDOW_REPORT=1
+    export XDG_SESSION_TYPE=
+    export WAYLAND_DISPLAY=
+    export XDG_CURRENT_DESKTOP=
+    export DISPLAY=
+    ;;
   *)
     echo "unknown case: ${CASE}" >&2
     echo "see --help" >&2
@@ -157,7 +214,8 @@ echo "env:"
 for v in SMOLIT_UI_OVERLAY SMOLIT_UI_CLICK_THROUGH \
          SMOLIT_UI_ALWAYS_ON_TOP \
          SMOLIT_WINDOW_PROBE SMOLIT_WINDOW_PROBE_REVERT \
-         SMOLIT_WINDOW_REPORT; do
+         SMOLIT_WINDOW_REPORT \
+         XDG_SESSION_TYPE WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP; do
   printf "  %-28s = %s\n" "$v" "${!v-(unset)}"
 done
 echo "──────────────────────────────────────────────────────────"

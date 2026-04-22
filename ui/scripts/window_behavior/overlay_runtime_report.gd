@@ -51,29 +51,53 @@ static func print_if_requested(
 	overlay_result: Dictionary,
 	click_through_result: Dictionary,
 	always_on_top_result: Dictionary = {},
+	backend_info: Dictionary = {},
 ) -> void:
 	if not is_requested():
 		return
-	print_now(overlay_result, click_through_result, always_on_top_result)
+	print_now(
+		overlay_result, click_through_result, always_on_top_result, backend_info
+	)
 
 
 ## Für manuelle Debugsitzungen: Report auch ohne Env-Flag ausgeben.
 ## Nicht als Default-Pfad gedacht.
+##
+## `backend_info` ist ein optionales Dict mit `id` und `description`
+## (siehe `window_behavior.gd::apply_all()`). Fehlt es, wird ein
+## kurzer Hinweis ausgegeben — die Fassade füllt es aktuell immer.
 static func print_now(
 	overlay_result: Dictionary,
 	click_through_result: Dictionary,
 	always_on_top_result: Dictionary = {},
+	backend_info: Dictionary = {},
 ) -> void:
 	var caps: Dictionary = overlay_result.get("capabilities", _CapabilitiesRef.detect())
 	var lines := PackedStringArray()
 	lines.append("─── overlay runtime report ───────────────────────────────")
 	_append_session_lines(lines, caps)
 	_append_capability_lines(lines, caps)
+	_append_backend_lines(lines, backend_info)
 	_append_overlay_lines(lines, overlay_result)
 	_append_click_through_lines(lines, click_through_result)
 	_append_always_on_top_lines(lines, always_on_top_result)
 	lines.append("──────────────────────────────────────────────────────────")
 	print("\n".join(lines))
+
+
+# --- Section: backend (chosen by backend_resolver.gd) -------------------
+
+
+static func _append_backend_lines(
+	lines: PackedStringArray, backend_info: Dictionary
+) -> void:
+	if backend_info.is_empty():
+		lines.append("[report] backend.id                 = (not reported by caller)")
+		return
+	lines.append("[report] backend.id                 = %s" % str(backend_info.get("id", "")))
+	var description: String = str(backend_info.get("description", ""))
+	if description != "":
+		lines.append("[report] backend.description        = %s" % description)
 
 
 # --- Section: session / display driver ----------------------------------

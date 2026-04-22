@@ -385,12 +385,24 @@ ui/scripts/window_behavior/
 
 Die Backend-Familie ist ausdrücklich **interne Strukturarbeit** — alle
 Backends delegieren an die bestehenden Controller und ändern weder
-Plattformverhalten noch Log-Format. Die Aufteilung der Wayland-Seite
-nach Compositor-Familie (Mutter / wlroots / XWayland / Generic)
-bildet nur die real existierende Plattformheterogenität ab; Ziel:
-spätere echt unterschiedliche Pfade (z. B. `wlr-layer-shell`-Wrapper,
-compositor-spezifische Policy) haben klar benannte Zielorte, ohne
-`main.gd`, die Fassade oder den Runtime-Report erneut anzufassen.
+Plattformverhalten noch Activation-Policy. Die Aufteilung der
+Wayland-Seite nach Compositor-Familie (Mutter / wlroots / XWayland /
+Generic) bildet nur die real existierende Plattformheterogenität
+ab; Ziel: spätere echt unterschiedliche Pfade (z. B. `wlr-layer-shell`-
+Wrapper, compositor-spezifische Policy) haben klar benannte
+Zielorte, ohne `main.gd`, die Fassade oder den Runtime-Report erneut
+anzufassen.
+
+Verifikation der Backend-Zuordnung (welches Backend wählt der
+Resolver unter welchen Bedingungen, und wie belastbar ist das heute
+gemessen): siehe
+[`window_behavior_backend_verification.md`](./window_behavior_backend_verification.md).
+Der opt-in Runtime-Report (`SMOLIT_WINDOW_REPORT=1`) zeigt die
+gewählte `backend.id` + `backend.description` in einem eigenen
+Block; der Resolver-Klassifikations-Smoketest
+(`scripts/resolver_classification_smoke.gd`) prüft neun synthetische
+Session-/Driver-/Desktop-Kombinationen gegen die dokumentierte
+Auswahl.
 
 Was der Spike wirklich tut:
 

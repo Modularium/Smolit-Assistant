@@ -409,15 +409,24 @@ dokumentierter Fallback.
       Klassifikation in GNOME/Mutter, wlroots-Familie, XWayland-
       Sonderfall, oder generischer Wayland-Fallback) und delegiert
       die drei Aktivierungen darüber. Plattformlogik bleibt in den
-      Controller-Gates, Log-Output ist byte-identisch zum
-      Pre-Backend-Stand. **Echte backend-spezifische Aktivierung
-      bleibt offen**: die Backends delegieren aktuell 1:1 an die
-      gemeinsamen Controller; echte Differenzierung
-      (`wlr-layer-shell`-Wrapper in `backend_wayland_wlroots`,
-      etwaige Mutter-spezifische Policy in `backend_wayland_mutter`,
-      XWayland-AOT-Feintuning) bleibt spätere, bewusst gewählte
-      Arbeit. Auch die in §F des Architekturdokuments genannten
-      Setter-/Positionsoperationen sind noch offen.
+      Controller-Gates. **Routing-Ebene empirisch belegt**: der
+      Resolver-Klassifikations-Smoketest
+      [`scripts/resolver_classification_smoke.gd`](./scripts/resolver_classification_smoke.gd)
+      bestätigt die Auswahl für alle sechs Backends (9 synthetische
+      Session/Desktop/Driver-Kombinationen PASS); der opt-in
+      Runtime-Report druckt die gewählte `backend.id` +
+      `backend.description` in einem eigenen Block. Evidenzmatrix
+      pro Backend (real / simuliert / offen) steht in
+      [docs/window_behavior_backend_verification.md](./docs/window_behavior_backend_verification.md).
+      **Echte backend-spezifische Aktivierung bleibt offen**: die
+      Backends delegieren 1:1 an die gemeinsamen Controller; echte
+      Differenzierung (`wlr-layer-shell`-Wrapper in
+      `backend_wayland_wlroots`, etwaige Mutter-spezifische Policy
+      in `backend_wayland_mutter`, XWayland-AOT-Feintuning) bleibt
+      spätere, bewusst gewählte Arbeit. Auch die in §F des
+      Architekturdokuments genannten Setter-/Positionsoperationen
+      sind noch offen, ebenso echte Compositor-Läufe auf realen
+      Mutter-Wayland-/KDE-Wayland-/wlroots-Sessions.
 - [x] Overlay-MVP Phase B (opt-in): transparent + borderless
       Presence-Fenster per `SMOLIT_UI_OVERLAY=1`, capability-gesteuert
       mit ehrlichem Fallback; **ohne** Always-on-top-Zusicherung unter

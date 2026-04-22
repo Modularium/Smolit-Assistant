@@ -365,7 +365,11 @@ Click-through / X11-AOT, je eigenes Opt-in-Env-Flag), **Reporting**
 **Backend-Familie** (`backend_noop`, `backend_x11`,
 `backend_wayland_mutter`, `backend_wayland_wlroots`,
 `backend_xwayland` und `backend_wayland_generic` als Fallback —
-ausgewählt über `backend_resolver.gd`).
+ausgewählt über `backend_resolver.gd`; gewählte `backend.id` wird
+im opt-in Runtime-Report sichtbar gemacht, Zuordnung via
+`scripts/resolver_classification_smoke.gd` empirisch geprüft,
+Evidenzmatrix in
+[docs/window_behavior_backend_verification.md](docs/window_behavior_backend_verification.md)).
 Alle Aktivierungspfade teilen ein gemeinsames Ergebnis-Vokabular
 (`requested / capable / applied / observed / active / reason`,
 siehe `window_behavior_result.gd`). Einziger Einstiegspunkt aus

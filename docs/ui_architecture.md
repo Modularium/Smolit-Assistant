@@ -495,11 +495,20 @@ halbparallele Sonderpfade neben einander baut:
   Alle Backends delegieren aktuell 1:1 an die existierenden
   Controller — die Aufteilung ist **ehrliche interne
   Plattformstruktur**, keine neuen Features. Keine neue IPC-/
-  EventBus-/Presence-Logik, Log-Output byte-identisch zum Pre-Split-
-  Stand. Spätere compositor-spezifische Pfade (`backend_wayland_wlroots`
-  mit echter `wlr-layer-shell`-Integration, `backend_wayland_mutter`
-  mit offizieller GNOME-Extension-Anbindung, falls jemals angebracht)
-  haben jetzt klar benannte Zielorte.
+  EventBus-/Presence-Logik. Spätere compositor-spezifische Pfade
+  (`backend_wayland_wlroots` mit echter `wlr-layer-shell`-Integration,
+  `backend_wayland_mutter` mit offizieller GNOME-Extension-Anbindung,
+  falls jemals angebracht) haben jetzt klar benannte Zielorte.
+
+  **Verifikation der Backend-Familie**: der opt-in Runtime-Report
+  (`SMOLIT_WINDOW_REPORT=1`) zeigt die gewählte `backend.id` und
+  `backend.description` als eigenen Block, damit man pro Lauf
+  sehen kann, welches Backend der Resolver gewählt hat. Der
+  Resolver-Klassifikations-Smoketest
+  [`scripts/resolver_classification_smoke.gd`](../scripts/resolver_classification_smoke.gd)
+  überprüft die Zuordnung gegen neun synthetische Capability-
+  Snapshots. Messmatrix und Evidenzniveau pro Backend stehen in
+  [`docs/window_behavior_backend_verification.md`](./window_behavior_backend_verification.md).
 
 `main.gd` ruft in `_ready()` nur noch `SmolitWindowBehavior.apply_all(
 self)` auf und hält den Click-through-Controller (falls aktiv) als
