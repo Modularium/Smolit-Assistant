@@ -198,9 +198,12 @@ aus Session-Umgebung (`DBUS_SESSION_BUS_ADDRESS`, `WAYLAND_DISPLAY` /
 ohne echten AT-SPI-RPC. `interaction_discover_accessibility`
 (optional mit `hint`) reicht dieses Verdikt an eine
 Discovery-/Inspection-Oberfläche durch und gibt ein strukturiertes
-`accessibility_discovery_result`-Envelope zurück (`items` bleibt in
-dieser Phase leer; das Schema ist für die spätere RPC-Füllung
-vorbereitet). Das Ergebnis läuft regulär durch das Action Event Model
+`accessibility_discovery_result`-Envelope zurück. Der Discovery-Status
+kennt zusätzlich `ok` (strukturierte Items vorhanden); pro Item trägt
+das Payload `confidence` (`verified` bleibt für den späteren echten
+RPC-Pfad reserviert, `discovered` liefert der heutige Hint-Echo-Pfad)
+sowie `source`, optional `matched_hint`, `detail`, `app_name`. Das
+Ergebnis läuft regulär durch das Action Event Model
 (`action_planned` → … → `action_completed` / `action_failed` mit
 `recovery_hint=fallback_unavailable`). Kein Klicken, kein
 `type_text`-Pfad, keine Passwort-/Secret-Interaktion. Details in
@@ -289,6 +292,22 @@ ui/
   nicht gerade `thinking` / `talking` ist), mit eigenem Farbton und
   Aktivitätsindikator. Fällt nach `action_completed` / `action_failed` /
   `action_cancelled` sauber zurück.
+
+### Discovery Panel (Accessibility)
+
+Neben dem Action-Banner rendert die UI seit der „verified target
+discovery"-Stufe ein kleines **DiscoveryPanel**. Es wird sichtbar,
+sobald der Core ein `accessibility_discovery_result` schickt, und
+zeigt:
+
+- ein Status-Badge (`ok` / `uncertain` / `unavailable` / `failed`),
+- den ehrlichen Grund aus dem Core,
+- pro Item Name, Rolle/Kind, ein Confidence-Badge
+  (`[verified]` / `[discovered]`), optional `hint=…` oder `source`.
+
+Die UI **interpretiert** nichts — sie rendert nur, was der Core
+geliefert hat. Fehlende optionale Felder führen zu neutralen
+Defaults, nicht zu Crashes.
 
 ### Presence-Modes (Phase 3.3 MVP)
 

@@ -610,11 +610,37 @@ Beide Payloads sind getagte Enums mit einem `"status"`-Feld:
  "payload":{"status":"uncertain",
             "reason":"… AT-SPI RPC discovery (registry root GetChildren) is not yet wired up",
             "items":[]}}
+{"type":"accessibility_discovery_result",
+ "payload":{"status":"ok",
+            "reason":"session=wayland, dbus-session-bus present, …; hint echoed as structured target (confidence=discovered)",
+            "items":[
+              {"kind":"application",
+               "name":"Firefox",
+               "confidence":"discovered",
+               "source":"accessibility_hint_echo",
+               "role":"application",
+               "detail":"hint echoed; no AT-SPI RPC confirmation yet",
+               "matched_hint":"Firefox",
+               "app_name":"Firefox"}
+            ]}}
 ```
 
-`items` ist in dieser Phase typisch leer; das Schema trägt bereits
-`{kind, name, role?, hint?}` pro Item, damit eine spätere
-RPC-Implementierung additiv Inhalte einfüllen kann.
+Pro Item werden folgende Felder transportiert:
+
+| Feld           | Typ     | Bedeutung                                                    |
+| :------------- | :------ | :----------------------------------------------------------- |
+| `kind`         | String  | Grobes Ziel-Kind (`application` / `window` / `frame`).       |
+| `name`         | String  | Best-effort-Anzeigename.                                     |
+| `confidence`   | String  | `verified` \| `discovered` — Semantik siehe unten.           |
+| `source`       | String  | Provenienzlabel, z. B. `accessibility_hint_echo`.            |
+| `role`         | String? | Optionaler AT-SPI-Role-Hinweis.                              |
+| `hint`         | String? | Optionale freie Beschreibung.                                |
+| `detail`       | String? | Optionale Kurzinfo für die UI.                               |
+| `matched_hint` | String? | Original-Hinweis, wenn das Item aus `inspect_target` stammt. |
+| `app_name`     | String? | Optionaler umgebender App-Name.                              |
+
+Optionale Felder erscheinen nur, wenn sie belegt sind
+(`#[serde(skip_serializing_if = "Option::is_none")]`).
 
 #### Eventfolge (Probe, Erfolgspfad)
 
@@ -641,19 +667,46 @@ Core → UI:   {"type":"accessibility_discovery_result","payload":{"status":"una
 Core → UI:   {"type":"action_failed","payload":{"action_id":"act_000011","status":"failed","message":"unavailable: no WAYLAND_DISPLAY or DISPLAY in environment","error":"recovery_hint=fallback_unavailable"}}
 ```
 
-#### Semantik der drei Status-Werte
+#### Semantik der Discovery-Status-Werte
 
-- **`uncertain`** — Umgebung sieht plausibel aus (Session-Typ da,
-  D-Bus-Session-Bus-Adresse gesetzt), aber der Spike hat **nicht**
-  tatsächlich per RPC verifiziert, dass AT-SPI erreichbar ist. Das
-  ist der ehrliche Default auf einem realen Linux-Desktop.
+- **`ok`** — Discovery wurde ausgeführt und hat mindestens ein
+  strukturiertes Item zurückgegeben. Heute produziert das ausschließ­
+  lich der Hint-Echo-Pfad von `inspect_target(hint)`: ein einziges
+  Item mit `confidence=discovered` und `source=accessibility_hint_echo`.
+  Der echte RPC-Pfad (zbus / atspi-connection, Registry-Walk) ist
+  Folgearbeit.
+- **`uncertain`** — Umgebungsprobe plausibel, Discovery wurde
+  versucht, aber ohne strukturierbares Ergebnis. Heute der Default
+  für `discover_top_level()` auf einem realen Linux-Desktop, solange
+  kein RPC-Client existiert.
 - **`unavailable`** — Eine konkrete Voraussetzung fehlt (nicht
   Linux, weder `DISPLAY` noch `WAYLAND_DISPLAY`, keine
-  `DBUS_SESSION_BUS_ADDRESS`, fehlender Session-Bus-Socket).
-- **`failed`** — Reserviert für unerwartete Fehler beim Proben
-  selbst. In der aktuellen environment-only-Implementierung tritt
-  das nicht auf; das Feld existiert, damit ein zukünftiger
-  RPC-basierter Probe einen eigenen Fehlerpfad bekommt.
+  `DBUS_SESSION_BUS_ADDRESS`, fehlender Session-Bus-Socket, leerer
+  Hint bei `inspect_target`).
+- **`failed`** — Reserviert für unerwartete Fehler beim Probe- oder
+  Discovery-Schritt selbst. In der aktuellen environment-only-
+  Implementierung tritt das nicht auf; das Feld existiert, damit ein
+  zukünftiger RPC-basierter Pfad einen eigenen Fehlerpfad bekommt.
+
+Beim `AccessibilityProbe` entfällt der `ok`-Status: der Probe ist
+**immer** ohne echten RPC-Roundtrip, also reicht die Trias
+`uncertain` / `unavailable` / `failed`.
+
+#### Semantik der Confidence-Werte (pro Item)
+
+- **`verified`** — **Reserviert.** Für einen echten RPC-Pfad, der ein
+  Target direkt aus der AT-SPI-Registry bestätigt hat. Der aktuelle
+  Spike emittiert niemals `verified` — sonst würde er Sicherheit
+  behaupten, die er technisch nicht hat.
+- **`discovered`** — Das Item wird als strukturiertes Target weiter­
+  gereicht, ist aber nicht unabhängig verifiziert. Heute das Label
+  für Hint-Echo-Items: „die UI hat mir diesen Namen genannt, ich
+  führe ihn in der Schemaform weiter, aber ich habe ihn nicht gegen
+  die Accessibility-Registry abgeglichen."
+
+UI-seitig gilt: **`discovered` darf nicht still zu `verified`
+aufgewertet werden.** Das ist eine Core-Entscheidung, keine
+Darstellung.
 
 #### Scope-Grenzen des Accessibility-Spikes
 

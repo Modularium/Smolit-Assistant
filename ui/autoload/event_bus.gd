@@ -33,3 +33,13 @@ signal action_cancelled_received(payload: Dictionary)
 ## `approval_response` frame via IpcClient.send_approval_response().
 signal approval_requested_received(payload: Dictionary)
 signal approval_resolved_received(payload: Dictionary)
+
+## Accessibility / AT-SPI spike (see docs/api.md §2.8). Both envelopes
+## are additive to the existing Action Event stream — the UI may render
+## them in parallel with `action_*` phases. Payload shape is honest:
+## `status` is one of `ok` / `uncertain` / `unavailable` / `failed`,
+## per-item `confidence` is `verified` / `discovered`. UI never
+## upgrades a `discovered` to `verified` itself; that is the core's
+## call.
+signal accessibility_probe_result_received(payload: Dictionary)
+signal accessibility_discovery_result_received(payload: Dictionary)

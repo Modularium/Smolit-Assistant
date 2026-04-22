@@ -36,6 +36,13 @@ const PresenceStateRef := preload("res://scripts/presence/presence_state.gd")
 @onready var _approve_button: Button = $VBox/ApprovalBanner/ApprovalVBox/ApprovalButtons/ApproveButton
 @onready var _deny_button: Button = $VBox/ApprovalBanner/ApprovalVBox/ApprovalButtons/DenyButton
 
+@onready var _discovery_panel: PanelContainer = $VBox/DiscoveryPanel
+@onready var _discovery_title: Label = $VBox/DiscoveryPanel/DiscoveryVBox/DiscoveryHeader/DiscoveryTitle
+@onready var _discovery_status_badge: Label = $VBox/DiscoveryPanel/DiscoveryVBox/DiscoveryHeader/DiscoveryStatusBadge
+@onready var _discovery_reason: Label = $VBox/DiscoveryPanel/DiscoveryVBox/DiscoveryReason
+@onready var _discovery_items: VBoxContainer = $VBox/DiscoveryPanel/DiscoveryVBox/DiscoveryItems
+@onready var _discovery_empty: Label = $VBox/DiscoveryPanel/DiscoveryVBox/DiscoveryEmpty
+
 var _current_approval_id: String = ""
 
 @onready var _log: RichTextLabel = $VBox/Log
@@ -70,6 +77,9 @@ func _ready() -> void:
 	EventBus.approval_requested_received.connect(_on_approval_requested)
 	EventBus.approval_resolved_received.connect(_on_approval_resolved)
 
+	EventBus.accessibility_probe_result_received.connect(_on_accessibility_probe_result)
+	EventBus.accessibility_discovery_result_received.connect(_on_accessibility_discovery_result)
+
 	_approve_button.pressed.connect(_on_approve_pressed)
 	_deny_button.pressed.connect(_on_deny_pressed)
 
@@ -80,6 +90,7 @@ func _ready() -> void:
 	_apply_presence_mode(_presence.current_mode())
 	_action_banner.visible = false
 	_approval_banner.visible = false
+	_discovery_panel.visible = false
 
 
 func _set_connected(ok: bool) -> void:
@@ -344,3 +355,148 @@ func _apply_mapping_chip(info: Dictionary) -> void:
 		parts.append("window: %s" % window)
 	_mapping_chip.text = " · ".join(parts)
 	_mapping_chip.visible = true
+
+
+# --- Accessibility discovery rendering -----------------------------------
+
+## Badge-Farben pro discovery-status. Rein visuell, keine Semantik
+## außer der Unterscheidbarkeit im Panel.
+const _DISCOVERY_STATUS_COLORS: Dictionary = {
+	"ok": Color(0.55, 0.85, 0.6),
+	"uncertain": Color(0.85, 0.8, 0.4),
+	"unavailable": Color(0.85, 0.55, 0.55),
+	"failed": Color(0.9, 0.45, 0.45),
+}
+
+## Badge-Farben pro item-confidence (verified/discovered).
+const _DISCOVERY_CONFIDENCE_COLORS: Dictionary = {
+	"verified": Color(0.55, 0.85, 0.6),
+	"discovered": Color(0.75, 0.85, 1.0),
+}
+
+
+func _on_accessibility_probe_result(payload: Dictionary) -> void:
+	var status := str(payload.get("status", ""))
+	var reason := str(payload.get("reason", ""))
+	if status == "" and reason == "":
+		return
+	if reason != "":
+		_append("[color=gray]◇ a11y probe: %s — %s[/color]" % [status, reason])
+	else:
+		_append("[color=gray]◇ a11y probe: %s[/color]" % status)
+
+
+func _on_accessibility_discovery_result(payload: Dictionary) -> void:
+	var status := str(payload.get("status", ""))
+	var reason := str(payload.get("reason", ""))
+	var raw_items: Variant = payload.get("items", [])
+	var items: Array = raw_items if typeof(raw_items) == TYPE_ARRAY else []
+
+	_render_discovery_panel(status, reason, items)
+
+	# Kompakter Log-Eintrag, unabhängig vom Panel.
+	var summary := "[color=gray]◇ a11y discovery: %s" % status
+	if items.size() > 0:
+		summary += " (%d item%s)" % [items.size(), "" if items.size() == 1 else "s"]
+	summary += "[/color]"
+	_append(summary)
+
+
+func _render_discovery_panel(status: String, reason: String, items: Array) -> void:
+	_clear_discovery_items()
+	_discovery_panel.visible = true
+
+	var badge_text := "[—]"
+	if status != "":
+		badge_text = "[%s]" % status
+	_discovery_status_badge.text = badge_text
+	_discovery_status_badge.modulate = _DISCOVERY_STATUS_COLORS.get(
+		status, Color(1, 1, 1, 0.6)
+	)
+
+	_discovery_reason.visible = reason != ""
+	_discovery_reason.text = reason
+
+	match status:
+		"ok":
+			if items.is_empty():
+				_show_discovery_empty("no items")
+			else:
+				for raw_item in items:
+					if typeof(raw_item) == TYPE_DICTIONARY:
+						_discovery_items.add_child(_build_discovery_item_row(raw_item))
+		"uncertain":
+			if items.is_empty():
+				_show_discovery_empty("probe plausible, no structured items yet")
+			else:
+				for raw_item in items:
+					if typeof(raw_item) == TYPE_DICTIONARY:
+						_discovery_items.add_child(_build_discovery_item_row(raw_item))
+		"unavailable":
+			_show_discovery_empty("accessibility pathway unavailable")
+		"failed":
+			_show_discovery_empty("discovery failed")
+		_:
+			_show_discovery_empty("")
+
+
+func _clear_discovery_items() -> void:
+	for child in _discovery_items.get_children():
+		child.queue_free()
+	_discovery_empty.visible = false
+
+
+func _show_discovery_empty(text: String) -> void:
+	_discovery_empty.text = text
+	_discovery_empty.visible = text != ""
+
+
+func _build_discovery_item_row(item: Dictionary) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+
+	var item_name := str(item.get("name", ""))
+	var role := str(item.get("role", ""))
+	var kind := str(item.get("kind", ""))
+	var confidence := str(item.get("confidence", ""))
+	var detail := str(item.get("detail", ""))
+	var matched_hint := str(item.get("matched_hint", ""))
+	var item_source := str(item.get("source", ""))
+
+	var badge := Label.new()
+	badge.text = "[%s]" % (confidence if confidence != "" else "?")
+	badge.modulate = _DISCOVERY_CONFIDENCE_COLORS.get(
+		confidence, Color(1, 1, 1, 0.5)
+	)
+	row.add_child(badge)
+
+	var name_label := Label.new()
+	if item_name != "":
+		name_label.text = item_name
+	else:
+		name_label.text = "(unnamed)"
+		name_label.modulate = Color(1, 1, 1, 0.5)
+	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(name_label)
+
+	var role_label := Label.new()
+	var role_text := role if role != "" else kind
+	role_label.text = role_text
+	role_label.modulate = Color(1, 1, 1, 0.55)
+	row.add_child(role_label)
+
+	# Optionale Zusatzinfo: matched_hint ≠ name, sonst detail, sonst source.
+	var extra := ""
+	if matched_hint != "" and matched_hint != item_name:
+		extra = "hint=%s" % matched_hint
+	elif detail != "":
+		extra = detail
+	elif item_source != "":
+		extra = item_source
+	if extra != "":
+		var extra_label := Label.new()
+		extra_label.text = extra
+		extra_label.modulate = Color(1, 1, 1, 0.4)
+		row.add_child(extra_label)
+
+	return row

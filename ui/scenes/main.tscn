@@ -135,6 +135,44 @@ text = "Approve"
 layout_mode = 2
 text = "Deny"
 
+[node name="DiscoveryPanel" type="PanelContainer" parent="VBox"]
+visible = false
+layout_mode = 2
+
+[node name="DiscoveryVBox" type="VBoxContainer" parent="VBox/DiscoveryPanel"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="DiscoveryHeader" type="HBoxContainer" parent="VBox/DiscoveryPanel/DiscoveryVBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="DiscoveryTitle" type="Label" parent="VBox/DiscoveryPanel/DiscoveryVBox/DiscoveryHeader"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "accessibility discovery"
+
+[node name="DiscoveryStatusBadge" type="Label" parent="VBox/DiscoveryPanel/DiscoveryVBox/DiscoveryHeader"]
+layout_mode = 2
+text = "[—]"
+modulate = Color(1, 1, 1, 0.75)
+
+[node name="DiscoveryReason" type="Label" parent="VBox/DiscoveryPanel/DiscoveryVBox"]
+layout_mode = 2
+text = ""
+autowrap_mode = 2
+modulate = Color(1, 1, 1, 0.6)
+
+[node name="DiscoveryItems" type="VBoxContainer" parent="VBox/DiscoveryPanel/DiscoveryVBox"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="DiscoveryEmpty" type="Label" parent="VBox/DiscoveryPanel/DiscoveryVBox"]
+visible = false
+layout_mode = 2
+text = "no items"
+modulate = Color(1, 1, 1, 0.45)
+
 [node name="Avatar" parent="VBox" instance=ExtResource("2_avatar")]
 layout_mode = 2
 

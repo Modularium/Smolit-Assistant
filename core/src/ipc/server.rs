@@ -1096,6 +1096,20 @@ mod tests {
         let _verification = recv_text(&mut ws).await;
         let discovery = recv_text(&mut ws).await;
         assert!(discovery.contains(r#""type":"accessibility_discovery_result""#));
+        // When the environment is plausible the hint-echo path emits
+        // an `ok` payload with a single `discovered` item carrying the
+        // matched hint. On a bare CI runner the same probe returns
+        // `unavailable`; both shapes are honest for this spike.
+        if discovery.contains(r#""status":"ok""#) {
+            assert!(discovery.contains(r#""confidence":"discovered""#));
+            assert!(discovery.contains(r#""matched_hint":"firefox""#));
+            assert!(discovery.contains(r#""source":"accessibility_hint_echo""#));
+        } else {
+            assert!(
+                discovery.contains(r#""status":"unavailable""#)
+                    || discovery.contains(r#""status":"failed""#)
+            );
+        }
         let _terminal = recv_text(&mut ws).await;
     }
 

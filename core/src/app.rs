@@ -382,6 +382,20 @@ impl App {
         });
 
         match &result {
+            AccessibilityDiscovery::Ok { items, .. } => {
+                let summary = if items.is_empty() {
+                    format!("{status}: {reason}")
+                } else {
+                    format!("{status}: {} item(s); {reason}", items.len())
+                };
+                out.push(OutgoingMessage::ActionCompleted {
+                    payload: ActionCompletedPayload {
+                        action_id,
+                        status: ActionStatus::Completed,
+                        message: Some(summary),
+                    },
+                });
+            }
             AccessibilityDiscovery::Uncertain { .. } => {
                 out.push(OutgoingMessage::ActionCompleted {
                     payload: ActionCompletedPayload {

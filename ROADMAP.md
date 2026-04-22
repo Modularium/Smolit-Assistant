@@ -376,6 +376,17 @@ UI-Phasen geführt und noch **nicht** begonnen.
       Namens-/Rollen-Lookup bleiben nächste Stufe. Siehe
       [docs/linux_interaction_backends_research.md](./docs/linux_interaction_backends_research.md)
       §2 und [docs/api.md §2.8](./docs/api.md).
+- [x] Verified Target Discovery (Confidence-Modell + UI-Darstellung):
+      `AccessibilityDiscovery::Ok { items }` neben `Uncertain` /
+      `Unavailable` / `Failed`; pro Item `confidence` (`verified`
+      reserviert für echten RPC-Pfad, `discovered` für ehrliche
+      Hint-Echos), `source`, optional `matched_hint`, `detail`,
+      `app_name`. `inspect_target(hint)` liefert Hint-Echo-Items in
+      strukturierter Form; `discover_top_level()` bleibt ehrlich
+      `Uncertain`. Godot-UI rendert das in einem neuen DiscoveryPanel
+      (Status-Badge, Item-Liste mit Confidence-Badge) rein anzeigend.
+      Siehe [docs/api.md §2.8](./docs/api.md) und
+      [docs/ui_architecture.md §8.1](./docs/ui_architecture.md).
 - [ ] Linux-Backends (Folgestufen): echter AT-SPI-RPC-Pfad (zbus /
       atspi-connection), Registry-Root-Discovery, Namens-/Rollen-
       basierte Inspection, Toolkit-Vergleich (GTK / Qt / Electron /
@@ -472,6 +483,17 @@ Zusätzlich begonnen: **Phase 3b Linux Window & Overlay Architecture**
 als parallele Architekturlinie. Das Dokument legt Wayland/X11-Trennung,
 Capability-Matrix und eine noch nicht implementierte Window-Behavior-
 Abstraktion fest — bewusst ohne Codeänderungen.
+
+Ebenfalls gelandet: **Verified Target Discovery** (Phase 8b). Der
+Accessibility-Spike unterscheidet jetzt explizit zwischen `ok`,
+`uncertain`, `unavailable` und `failed` auf Payload-Ebene sowie
+`verified` vs. `discovered` pro Item. `verified` bleibt reserviert
+für den zukünftigen echten RPC-Pfad; `inspect_target(hint)` liefert
+Hint-Echo-Items als `discovered`. Die Godot-UI rendert die Ergebnisse
+in einem kleinen DiscoveryPanel — rein anzeigend, ohne Confidence
+nachträglich hochzustufen. Details in
+[docs/ui_architecture.md §8.1](./docs/ui_architecture.md) und
+[docs/linux_interaction_backends_research.md §2.3](./docs/linux_interaction_backends_research.md).
 
 Ebenfalls gelandet: **Linux Accessibility Backend Spike** (Phase 8b).
 `AccessibilityProbe::detect()` liefert aus Session-Umgebung und

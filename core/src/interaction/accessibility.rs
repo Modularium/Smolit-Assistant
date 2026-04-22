@@ -8,9 +8,10 @@
 //!      speak AT-SPI RPC itself — honest, narrow, and dependency-free.
 //!   2. **Discover** at a very small scale: list or inspect symbolic
 //!      targets via AT-SPI. The full RPC discovery needs a real
-//!      `atspi`/`zbus` client; this phase stops at
-//!      `uncertain`/`unavailable` with structured reasons so the
-//!      Action Event flow and IPC contract are already exercised.
+//!      `atspi`/`zbus` client; this phase stops at a structured
+//!      hint-echo plus the existing `uncertain`/`unavailable` verdicts
+//!      so the Action Event flow and IPC contract are already
+//!      exercised.
 //!
 //! Scope notes (what this spike is **not**):
 //!
@@ -160,16 +161,58 @@ fn parse_unix_socket_path(dbus_addr: &str) -> Option<String> {
     None
 }
 
+/// Per-item confidence level for an `AccessibilityItem`. This is the
+/// honest layer between "definitely here" and "no idea". The wire
+/// format uses snake_case so UIs can render it as a badge without
+/// interpretation.
+///
+/// Semantics for this spike phase:
+///
+/// * `Verified` is **reserved** for the future real-RPC discovery
+///   pipeline (registry walk with a role-typed top-level match). This
+///   spike does not produce `Verified` items — we would lie if it
+///   did.
+/// * `Discovered` means we carry the item forward as a structured
+///   target, but we have not independently confirmed it. Today this is
+///   emitted by the hint-echo path of `inspect_target`: the caller
+///   told us about the target, we acknowledge it with a role guess
+///   and a `matched_hint`, and leave verification to a later stage.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DiscoveryConfidence {
+    /// Strong evidence from an authoritative source (e.g. AT-SPI
+    /// registry). Reserved: no path in this spike produces it yet.
+    Verified,
+    /// Plausible but unconfirmed — structured enough to render but not
+    /// strong enough to act on without further checks.
+    Discovered,
+}
+
+impl DiscoveryConfidence {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Verified => "verified",
+            Self::Discovered => "discovered",
+        }
+    }
+}
+
 /// Outcome of a single discovery or inspection attempt. Kept flat and
 /// small on purpose: we return either a handful of symbolic items or
 /// an honest "unavailable" / "uncertain" with a reason.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum AccessibilityDiscovery {
+    /// Discovery completed and produced at least one structured item.
+    /// No pretence of full-tree accuracy — see per-item
+    /// [`DiscoveryConfidence`] for how strong each result is.
+    Ok {
+        reason: String,
+        items: Vec<AccessibilityItem>,
+    },
     /// Environment probe plausible, discovery attempted, but we cannot
-    /// prove a result without the full RPC stack. Carries a list of
-    /// items we *do* know about (e.g. from the probe) — typically
-    /// empty in this phase.
+    /// prove a result without the full RPC stack. Carries a (usually
+    /// empty) list of items we *do* know about.
     Uncertain {
         reason: String,
         items: Vec<AccessibilityItem>,
@@ -183,6 +226,7 @@ pub enum AccessibilityDiscovery {
 impl AccessibilityDiscovery {
     pub fn status_str(&self) -> &'static str {
         match self {
+            Self::Ok { .. } => "ok",
             Self::Uncertain { .. } => "uncertain",
             Self::Unavailable { .. } => "unavailable",
             Self::Failed { .. } => "failed",
@@ -191,7 +235,8 @@ impl AccessibilityDiscovery {
 
     pub fn reason(&self) -> &str {
         match self {
-            Self::Uncertain { reason, .. }
+            Self::Ok { reason, .. }
+            | Self::Uncertain { reason, .. }
             | Self::Unavailable { reason }
             | Self::Failed { reason } => reason.as_str(),
         }
@@ -199,28 +244,81 @@ impl AccessibilityDiscovery {
 
     pub fn items(&self) -> &[AccessibilityItem] {
         match self {
-            Self::Uncertain { items, .. } => items.as_slice(),
+            Self::Ok { items, .. } | Self::Uncertain { items, .. } => items.as_slice(),
             _ => &[],
         }
     }
 }
 
-/// A very small symbolic description of one accessible top-level
-/// target. Kept intentionally close in shape to `ActionTarget` so the
-/// UI can render discovery results with the same chips it already
-/// uses for action planning.
+/// Source label for a discovered `AccessibilityItem`. Kept as plain
+/// string constants (not an enum) so a later RPC stage can introduce
+/// new sources additively without a schema change.
+pub mod source {
+    /// The caller supplied a `hint` and we echoed it back in a
+    /// structured shape. No independent AT-SPI confirmation.
+    pub const ACCESSIBILITY_HINT_ECHO: &str = "accessibility_hint_echo";
+}
+
+/// A very small symbolic description of one accessible target. Kept
+/// intentionally close in shape to `ActionTarget` so the UI can render
+/// discovery results with the same chips it already uses for action
+/// planning.
+///
+/// Invariants:
+///
+/// * `confidence` must be filled in every time — never leave the
+///   caller guessing whether a result is strong.
+/// * `source` names the provenance in a stable, snake_case vocabulary
+///   (see [`source`]).
+/// * `matched_hint` is set iff the item came from an explicit inspect
+///   call with a user-supplied hint.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct AccessibilityItem {
     /// Coarse kind, e.g. `"application"` / `"window"` / `"frame"`.
     pub kind: String,
     /// Best-effort display name.
     pub name: String,
+    /// Per-item confidence level. `verified` is reserved for the real
+    /// RPC path.
+    pub confidence: DiscoveryConfidence,
+    /// Stable provenance label (see [`source`]).
+    pub source: String,
     /// Optional AT-SPI role hint (`"application"`, `"frame"`, …).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
     /// Optional free-form hint or description.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
+    /// Optional short detail string for UIs (e.g. "hint echo").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    /// If this item came from `inspect_target(hint)`, the exact hint
+    /// string the caller supplied (trimmed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matched_hint: Option<String>,
+    /// Optional enclosing application name, when derivable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_name: Option<String>,
+}
+
+impl AccessibilityItem {
+    /// Build a hint-echo item: the caller asked about `hint`, and the
+    /// probe was at least plausible. We record it as `Discovered`
+    /// (never `Verified`) because no AT-SPI RPC has actually confirmed
+    /// the target exists.
+    fn hint_echo(hint: &str) -> Self {
+        Self {
+            kind: "application".to_string(),
+            name: hint.to_string(),
+            confidence: DiscoveryConfidence::Discovered,
+            source: source::ACCESSIBILITY_HINT_ECHO.to_string(),
+            role: Some("application".to_string()),
+            hint: None,
+            detail: Some("hint echoed; no AT-SPI RPC confirmation yet".to_string()),
+            matched_hint: Some(hint.to_string()),
+            app_name: Some(hint.to_string()),
+        }
+    }
 }
 
 /// Entry point for the discovery spike. Honest to the point of
@@ -243,9 +341,13 @@ pub fn discover_top_level() -> AccessibilityDiscovery {
     }
 }
 
-/// Entry point for the inspection spike. Same honesty as
-/// `discover_top_level`: the probe is the gate; when plausible, we
-/// return `Uncertain` without pretending we walked the tree.
+/// Entry point for the inspection spike. When the probe is plausible
+/// and the caller supplied a non-empty `hint`, we return a single
+/// structured `Discovered` item that echoes the hint. This is the
+/// strongest honest claim available without a real AT-SPI client:
+/// "the caller asked about this target, we have carried it forward as
+/// a structured shape for downstream UI, but we have not verified it
+/// against the accessibility registry."
 pub fn inspect_target(hint: &str) -> AccessibilityDiscovery {
     let hint = hint.trim();
     if hint.is_empty() {
@@ -254,11 +356,11 @@ pub fn inspect_target(hint: &str) -> AccessibilityDiscovery {
         };
     }
     match AccessibilityProbe::detect() {
-        AccessibilityProbe::Uncertain { reason } => AccessibilityDiscovery::Uncertain {
+        AccessibilityProbe::Uncertain { reason } => AccessibilityDiscovery::Ok {
             reason: format!(
-                "{reason}; AT-SPI name lookup for `{hint}` is not yet wired up"
+                "{reason}; hint echoed as structured target (confidence=discovered)"
             ),
-            items: Vec::new(),
+            items: vec![AccessibilityItem::hint_echo(hint)],
         },
         AccessibilityProbe::Unavailable { reason } => {
             AccessibilityDiscovery::Unavailable { reason }
@@ -294,15 +396,11 @@ mod tests {
 
     #[test]
     fn probe_is_unavailable_without_display_env() {
-        // Run the probe with a clean env; on test runners DISPLAY /
-        // WAYLAND_DISPLAY are typically unset. We do not mutate the
-        // process env from tests — rely on the fact that even a
-        // minimal CI environment lacks both.
-        //
-        // We tolerate both Unavailable and Uncertain here because
-        // developer laptops *do* have DISPLAY set. The test asserts
-        // only that the probe returns *something* structured, not
-        // something specific to the machine.
+        // Run the probe with the ambient env; on CI runners DISPLAY /
+        // WAYLAND_DISPLAY are typically unset but on developer laptops
+        // they are. The test asserts only that the probe returns
+        // *something* structured, not something specific to the
+        // machine.
         let probe = AccessibilityProbe::detect();
         let _ = probe.status_str();
         let _ = probe.reason();
@@ -313,8 +411,15 @@ mod tests {
         let result = discover_top_level();
         let _ = result.status_str();
         let _ = result.reason();
-        // Either way, `items` must be a valid slice (possibly empty).
-        assert!(result.items().iter().all(|i| !i.kind.is_empty() || !i.name.is_empty() || i.name.is_empty()));
+        // Top-level discovery has no RPC backing yet, so the honest
+        // outcomes are Uncertain (plausible env, empty items),
+        // Unavailable (no desktop), or Failed.
+        assert!(matches!(
+            result,
+            AccessibilityDiscovery::Uncertain { .. }
+                | AccessibilityDiscovery::Unavailable { .. }
+                | AccessibilityDiscovery::Failed { .. }
+        ));
     }
 
     #[test]
@@ -334,19 +439,74 @@ mod tests {
     }
 
     #[test]
-    fn discovery_is_serializable_as_tagged_json() {
-        let result = AccessibilityDiscovery::Uncertain {
+    fn discovery_ok_is_serializable_as_tagged_json() {
+        let result = AccessibilityDiscovery::Ok {
             reason: "env ok".into(),
             items: vec![AccessibilityItem {
                 kind: "application".into(),
-                name: "calendar".into(),
+                name: "Firefox".into(),
+                confidence: DiscoveryConfidence::Discovered,
+                source: source::ACCESSIBILITY_HINT_ECHO.to_string(),
                 role: Some("application".into()),
                 hint: None,
+                detail: None,
+                matched_hint: Some("Firefox".into()),
+                app_name: None,
             }],
         };
         let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains(r#""status":"ok""#));
+        assert!(json.contains(r#""name":"Firefox""#));
+        assert!(json.contains(r#""confidence":"discovered""#));
+        assert!(json.contains(r#""source":"accessibility_hint_echo""#));
+        assert!(json.contains(r#""matched_hint":"Firefox""#));
+    }
+
+    #[test]
+    fn discovery_uncertain_is_serializable_as_tagged_json() {
+        let result = AccessibilityDiscovery::Uncertain {
+            reason: "env ok, no rpc".into(),
+            items: vec![],
+        };
+        let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains(r#""status":"uncertain""#));
-        assert!(json.contains(r#""name":"calendar""#));
-        assert!(json.contains(r#""role":"application""#));
+        assert!(json.contains(r#""items":[]"#));
+    }
+
+    #[test]
+    fn hint_echo_item_carries_matched_hint_and_discovered_confidence() {
+        let item = AccessibilityItem::hint_echo("Firefox");
+        assert_eq!(item.name, "Firefox");
+        assert_eq!(item.confidence, DiscoveryConfidence::Discovered);
+        assert_eq!(item.matched_hint.as_deref(), Some("Firefox"));
+        assert_eq!(item.source, source::ACCESSIBILITY_HINT_ECHO);
+        // Never elevated to verified in this spike.
+        assert_ne!(item.confidence, DiscoveryConfidence::Verified);
+    }
+
+    #[test]
+    fn inspect_target_with_hint_produces_ok_or_unavailable() {
+        // Same tolerance as probe_is_unavailable_without_display_env:
+        // accept either an Ok result (developer laptop) or Unavailable
+        // (bare CI). The invariant we care about: when Ok, it must
+        // contain exactly one Discovered hint-echo item with the
+        // trimmed hint.
+        let result = inspect_target("  Calendar  ");
+        match result {
+            AccessibilityDiscovery::Ok { ref items, .. } => {
+                assert_eq!(items.len(), 1);
+                let item = &items[0];
+                assert_eq!(item.name, "Calendar");
+                assert_eq!(item.matched_hint.as_deref(), Some("Calendar"));
+                assert_eq!(item.confidence, DiscoveryConfidence::Discovered);
+            }
+            AccessibilityDiscovery::Unavailable { .. }
+            | AccessibilityDiscovery::Failed { .. } => {
+                // Bare-env runner: expected outcome.
+            }
+            AccessibilityDiscovery::Uncertain { .. } => {
+                panic!("inspect_target with non-empty hint should not return Uncertain");
+            }
+        }
     }
 }

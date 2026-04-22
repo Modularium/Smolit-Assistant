@@ -713,9 +713,11 @@ Capability-Pfad im Interaction Layer
 - **Environment-basiert.** Er prüft Session-Typ, `DISPLAY` /
   `WAYLAND_DISPLAY`, `DBUS_SESSION_BUS_ADDRESS` und — wo möglich —
   den Session-Bus-Socket im Dateisystem.
-- **Honest by construction.** Er liefert einen der drei Status-Werte
-  `uncertain` / `unavailable` / `failed` mit einer Begründung; nie
-  einen Fake-`available`.
+- **Honest by construction.** Der Probe liefert einen der drei
+  Status-Werte `uncertain` / `unavailable` / `failed` mit einer
+  Begründung; nie einen Fake-`available`. Die Discovery ergänzt
+  zusätzlich `ok` — genau dann, wenn strukturierte Items entstehen
+  (heute: Hint-Echo-Items aus `inspect_target(hint)`).
 - **Getrennt vom `CommandBackend`.** Der Command-Pfad
   (`open_application`, `focus_window`) bleibt unverändert. Das
   Accessibility-Spike ergänzt ihn, ersetzt ihn nicht.
@@ -745,6 +747,37 @@ Was im Spike bewusst **nicht** drin ist:
 Damit ist Accessibility in Smolit heute ein **strukturierter,
 ehrlicher Discovery-Pfad**, nicht mehr und nicht weniger. Discovery
 ist ausdrücklich nicht dasselbe wie Automation.
+
+### 14c.1 Verified vs. Discovered — ehrliche Confidence-Stufen
+
+Discovery-Ergebnisse tragen ab dieser Phase pro Item eine explizite
+`confidence`-Stufe:
+
+- **`verified`** — Ausdrücklich **reserviert** für einen späteren
+  Pfad, der ein Target über einen echten AT-SPI-Registry-Zugriff
+  bestätigt (Rolle, Name, eventuell eindeutiger Pfad im A11y-Baum).
+  Der aktuelle Spike emittiert `verified` nie — sonst würde er eine
+  Sicherheit behaupten, die er nicht belegen kann.
+- **`discovered`** — Das Item ist als strukturiertes Target
+  weitergegeben, aber nicht unabhängig abgesichert. Heute ausschließ­
+  lich durch den Hint-Echo-Pfad: die UI/Core-Aufrufer nennt einen
+  Namen, der Spike führt ihn in der Schemaform
+  (`{kind, name, role?, matched_hint, …, confidence: "discovered",
+  source: "accessibility_hint_echo"}`) weiter.
+
+Die UI-Seite (Presence/Overlay) darf beide Stufen sichtbar machen,
+aber sie darf `discovered` **nicht** stillschweigend in `verified`
+umetikettieren. Die Stufe ist eine Core-Aussage.
+
+Zum Zusammenspiel mit dem Presence-Modell heißt das:
+
+- A11y-Discovery wird als **lesende, strukturierte Target-Quelle**
+  behandelt — vergleichbar mit `ActionTarget::application(name)`,
+  nur mit zusätzlicher Herkunft und Confidence.
+- Kein A11y-Ergebnis löst automatisch eine Action aus; zwischen
+  „Target gefunden" und „Action ausgeführt" liegt weiterhin der
+  Approval-Flow (§14b.3), sobald überhaupt ein schreibender Pfad
+  existiert.
 
 ---
 

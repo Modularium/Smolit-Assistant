@@ -216,8 +216,38 @@ Die UI kennt drei Zustandsquellen:
    sowie optional `accessibility_probe_result` /
    `accessibility_discovery_result`) — rein reaktiv, wird vom `EventBus`
    verteilt. Accessibility-Payloads sind für die UI reine Darstellungsdaten
-   (status + reason + optionale symbolische items); es gibt keinen
-   UI-seitigen Discovery-Entscheidungszweig.
+   (status + reason + optionale strukturierte Items mit `confidence`,
+   `source`, optional `matched_hint`); es gibt keinen UI-seitigen
+   Discovery-Entscheidungszweig.
+
+### 8.1 Discovery-Panel (Accessibility-Darstellung)
+
+Seit der „verified target discovery"-Stufe rendert `ui/scenes/main.tscn`
+ein kleines **DiscoveryPanel** zwischen Approval-Banner und Avatar. Es
+hört ausschließlich am `EventBus` — konkret an den Signalen
+`accessibility_probe_result_received` und
+`accessibility_discovery_result_received`. Verhalten:
+
+- **`status=ok`** — Liste der Items mit Name, Rolle/Kind und einem
+  Confidence-Badge (`[verified]` / `[discovered]`) pro Item.
+  Optional erscheint eine Zusatzinfo (`hint=…` / `detail` / `source`),
+  wenn sie vom Core transportiert wurde.
+- **`status=uncertain`** — Panel zeigt den Grund und einen neutralen
+  Leer-Hinweis („probe plausible, no structured items yet"). Items
+  werden angezeigt, falls welche mitgeliefert wurden.
+- **`status=unavailable`** / **`failed`** — Panel zeigt den Grund und
+  eine ehrliche, negative Meldung. Keine Items.
+
+Die UI **interpretiert die Werte nicht** (kein Upgrade von
+`discovered` auf `verified`, keine Filterlogik, keine
+Auswahl/Ausführung von Targets). Sie malt nur, was der Core liefert.
+Fehlen Felder im Payload, fällt die Darstellung still auf neutrale
+Defaults zurück — das Panel darf nicht crashen, nur weil `role` oder
+`matched_hint` fehlt.
+
+Status- und Confidence-Badges nutzen ausschließlich symbolische
+Farb-Tints zur Unterscheidbarkeit. Keine Designbaustelle,
+keine Iconografie.
 
 Es gibt **keinen** von der UI gehaltenen Dialogzustand. Jede neue
 Conversation-Turn startet mit einem `submit_text` oder `voice_once`.

@@ -29,8 +29,8 @@ pub mod verifier;
 
 #[allow(unused_imports)]
 pub use accessibility::{
-    AccessibilityDiscovery, AccessibilityItem, AccessibilityProbe, discover_top_level,
-    inspect_target,
+    AccessibilityDiscovery, AccessibilityItem, AccessibilityProbe, DiscoveryConfidence,
+    discover_top_level, inspect_target,
 };
 #[allow(unused_imports)]
 pub use action::{InteractionAction, InteractionKind, InteractionPayload};

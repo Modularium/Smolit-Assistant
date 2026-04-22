@@ -172,6 +172,10 @@ func _handle_frame(raw: String) -> void:
 			EventBus.approval_requested_received.emit(_extract_payload(parsed))
 		"approval_resolved":
 			EventBus.approval_resolved_received.emit(_extract_payload(parsed))
+		"accessibility_probe_result":
+			EventBus.accessibility_probe_result_received.emit(_extract_payload(parsed))
+		"accessibility_discovery_result":
+			EventBus.accessibility_discovery_result_received.emit(_extract_payload(parsed))
 		_:
 			if _debug:
 				push_warning("[ipc] unknown message type: %s" % type)

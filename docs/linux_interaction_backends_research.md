@@ -76,7 +76,40 @@ Pfad im Core zu etablieren und die Protokolloberfläche dafür zu
   Event Model konsumieren, rendern die neuen Flows ohne Anpassung —
   inkl. der honest `Best-effort` / `recovery_hint=…`-Semantik.
 
-### 2.3 Was offen bleibt
+### 2.3 Nachzug — Verified Target Discovery (kleine, ehrliche Stufe)
+
+Zwischen der ersten Capability-Probe und einem echten AT-SPI-RPC-Pfad
+liegt eine kleine, ehrliche Zwischenstufe, die jetzt im Core
+implementiert ist. Sie macht die Discovery-Semantik explizit, ohne
+neuen Code außerhalb des bestehenden Spikes:
+
+- **Payload-Status vierstufig.** `AccessibilityDiscovery` hat jetzt
+  zusätzlich einen `Ok { items }`-Fall neben den bisherigen
+  `Uncertain` / `Unavailable` / `Failed`. Serialisiert wird das als
+  `"status":"ok" | "uncertain" | "unavailable" | "failed"`. Der
+  Probe-Payload bleibt dreistufig (`uncertain` / `unavailable` /
+  `failed`) — ein Probe ohne RPC kann niemals ehrlich „ok" melden.
+- **Per-Item-Confidence zweistufig.** Jedes `AccessibilityItem` trägt
+  jetzt `confidence: "verified" | "discovered"`. `verified` ist in
+  diesem Spike **ausdrücklich reserviert**: ohne echten Registry-
+  Zugriff gibt es keine belastbare Quelle, die das rechtfertigen
+  würde.
+- **Hint-Echo als einzige ehrliche `Ok`-Quelle.** `inspect_target(hint)`
+  liefert bei plausibler Probe genau ein Item mit
+  `confidence=discovered` und `source=accessibility_hint_echo`, samt
+  `matched_hint`. Das ist die stärkste Aussage, die ohne RPC
+  verantwortbar ist: die Aufrufer-Seite hat uns den Namen genannt,
+  wir führen ihn in der Schemaform weiter, mehr nicht.
+- **`discover_top_level()` bleibt bei `Uncertain` mit leerer Liste.**
+  Top-Level-Enumeration ohne RPC wäre reines Raten; das wird bewusst
+  nicht gemacht.
+
+Damit ist die Grenze zwischen „behauptet, dass das Target existiert"
+und „gibt dem Target eine strukturierte Form" im Code und auf der
+IPC-Ebene sichtbar. Die UI kann jede Stufe als Badge rendern, ohne
+semantisch hochzustufen (siehe `docs/ui_architecture.md` §8.1).
+
+### 2.4 Was offen bleibt
 
 - **Echter RPC-Probe** gegen `org.a11y.Bus.GetAddress` auf
   `/org/a11y/bus` via zbus oder `atspi-connection`. Erst damit wird
@@ -96,7 +129,7 @@ Pfad im Core zu etablieren und die Protokolloberfläche dafür zu
   ein A11y-getriebener Fokuspfad erprobt wird, muss er zurück durch
   den Approval-Flow, analog zum bestehenden `focus_window`-Spike.
 
-### 2.4 Wo Vorsicht angebracht ist
+### 2.5 Wo Vorsicht angebracht ist
 
 - **AT-SPI ≠ volle UI-Kontrolle.** Viele Anwendungen exponieren nur
   Fragmente; Browser, Terminals, Password-Dialoge sind notorisch
