@@ -24,14 +24,20 @@ const ACTION_CANCELLED_HOLD_SECONDS: float = 0.6
 signal presence_changed(mode: int)
 
 ## Kontext einer aktuell sichtbaren Action. Keys:
-##   active:        bool     — gibt es gerade eine Action?
-##   action_id:     String
-##   action_kind:   String
-##   title:         String   — Titel aus action_planned
-##   step:          String   — letzter action_step.title
-##   target_text:   String   — symbolische Kurzbeschreibung
-##   status:        String   — "" | "completed" | "failed" | "cancelled"
-##   status_message:String   — optionaler Fehler-/Infotext
+##   active:         bool    — gibt es gerade eine Action?
+##   action_id:      String
+##   action_kind:    String
+##   title:          String  — Titel aus action_planned
+##   step:           String  — letzter action_step.title
+##   target_kind:    String  — "application" | "window" | "ui_element" | "region" | "unknown"
+##   target_name:    String  — menschlich lesbarer Primärname (leer, wenn nicht vorhanden)
+##   target_detail:  String  — Sekundärkontext (z. B. App bei Window, Hint bei UiElement)
+##   target_text:    String  — symbolische Kurzbeschreibung ("→ …") für kompakte Darstellung
+##   mapping_space:  String  — "" | "logical_space" | "window_space" | "screen_space"
+##   mapping_hint:   String  — freier Text aus ActionMapping.hint
+##   mapping_window: String  — optionaler Fensterbezug aus ActionMapping.window
+##   status:         String  — "" | "completed" | "failed" | "cancelled"
+##   status_message: String  — optionaler Fehler-/Infotext
 signal action_context_changed(info: Dictionary)
 
 var _base_mode: int = PresenceStateRef.DEFAULT_BASE
@@ -43,7 +49,13 @@ var _action_id: String = ""
 var _action_kind: String = ""
 var _action_title: String = ""
 var _action_step: String = ""
+var _action_target_kind: String = ""
+var _action_target_name: String = ""
+var _action_target_detail: String = ""
 var _action_target_text: String = ""
+var _action_mapping_space: String = ""
+var _action_mapping_hint: String = ""
+var _action_mapping_window: String = ""
 var _action_status: String = ""
 var _action_status_message: String = ""
 
@@ -117,7 +129,13 @@ func _emit_context() -> void:
 		"action_kind": _action_kind,
 		"title": _action_title,
 		"step": _action_step,
+		"target_kind": _action_target_kind,
+		"target_name": _action_target_name,
+		"target_detail": _action_target_detail,
 		"target_text": _action_target_text,
+		"mapping_space": _action_mapping_space,
+		"mapping_hint": _action_mapping_hint,
+		"mapping_window": _action_mapping_window,
 		"status": _action_status,
 		"status_message": _action_status_message,
 	})
@@ -129,7 +147,13 @@ func _reset_action() -> void:
 	_action_kind = ""
 	_action_title = ""
 	_action_step = ""
+	_action_target_kind = ""
+	_action_target_name = ""
+	_action_target_detail = ""
 	_action_target_text = ""
+	_action_mapping_space = ""
+	_action_mapping_hint = ""
+	_action_mapping_window = ""
 	_action_status = ""
 	_action_status_message = ""
 
@@ -157,7 +181,18 @@ func _on_action_planned(payload: Dictionary) -> void:
 	_action_kind = str(payload.get("action_kind", ""))
 	_action_title = str(payload.get("title", "action"))
 	_action_step = ""
-	_action_target_text = _target_text_of(payload.get("target", {}))
+
+	var target_info := _extract_target(payload.get("target", {}))
+	_action_target_kind = target_info.get("kind", "")
+	_action_target_name = target_info.get("name", "")
+	_action_target_detail = target_info.get("detail", "")
+	_action_target_text = target_info.get("text", "")
+
+	var mapping_info := _extract_mapping(payload.get("mapping", null))
+	_action_mapping_space = mapping_info.get("space", "")
+	_action_mapping_hint = mapping_info.get("hint", "")
+	_action_mapping_window = mapping_info.get("window", "")
+
 	_action_status = ""
 	_action_status_message = ""
 	_emit_context()
@@ -231,35 +266,84 @@ func _on_hold_timeout() -> void:
 	_apply_presence(_resolve_mode_when_idle())
 
 
-## Symbolisches Visual Mapping: sehr kleine Zeichenkette für die
-## Banner-Anzeige. Keine Geometrie, keine Pixel.
-func _target_text_of(target: Variant) -> String:
+## Extrahiert Ziel-Informationen aus einem Action-Target-Dict.
+## Liefert ein Dictionary mit den Keys `kind`, `name`, `detail`, `text`.
+## Alle fehlenden Felder sind leer — die UI darf jedes einzeln rendern
+## oder weglassen, ohne Fehlerpfad.
+##
+## Rein symbolisch: keine Geometrie, keine Pixel, keine Koordinaten.
+func _extract_target(target: Variant) -> Dictionary:
+	var empty := {"kind": "", "name": "", "detail": "", "text": ""}
 	if typeof(target) != TYPE_DICTIONARY:
-		return ""
+		return empty
+
 	var kind := str(target.get("type", ""))
 	match kind:
 		"application":
-			return "→ %s" % str(target.get("name", "application"))
+			var app_name := str(target.get("name", ""))
+			return {
+				"kind": "application",
+				"name": app_name,
+				"detail": str(target.get("hint", "")),
+				"text": ("→ %s" % app_name) if app_name != "" else "→ application",
+			}
 		"window":
 			var title := str(target.get("title", ""))
 			var app := str(target.get("app", ""))
-			if title != "":
-				return "→ %s" % title
-			if app != "":
-				return "→ %s" % app
-			return "→ window"
+			var primary := title if title != "" else app
+			var detail := app if (title != "" and app != "") else ""
+			var text := "→ window"
+			if primary != "":
+				text = "→ %s" % primary
+			return {
+				"kind": "window",
+				"name": primary,
+				"detail": detail,
+				"text": text,
+			}
 		"ui_element":
-			var role := str(target.get("role", "element"))
+			var role := str(target.get("role", ""))
 			var label := str(target.get("label", ""))
-			if label != "":
-				return "→ %s (%s)" % [label, role]
-			return "→ %s" % role
+			var primary_elem := label if label != "" else role
+			var detail_elem := role if (label != "" and role != "") else str(target.get("hint", ""))
+			var text_elem := "→ element"
+			if label != "" and role != "":
+				text_elem = "→ %s (%s)" % [label, role]
+			elif primary_elem != "":
+				text_elem = "→ %s" % primary_elem
+			return {
+				"kind": "ui_element",
+				"name": primary_elem,
+				"detail": detail_elem,
+				"text": text_elem,
+			}
 		"region":
-			var name := str(target.get("name", ""))
-			if name != "":
-				return "→ %s" % name
-			return "→ region"
+			var region_name := str(target.get("name", ""))
+			return {
+				"kind": "region",
+				"name": region_name,
+				"detail": str(target.get("hint", "")),
+				"text": ("→ %s" % region_name) if region_name != "" else "→ region",
+			}
 		"unknown", "":
-			return ""
+			return {"kind": "unknown", "name": "", "detail": "", "text": ""}
 		_:
-			return "→ %s" % kind
+			return {
+				"kind": kind,
+				"name": "",
+				"detail": "",
+				"text": "→ %s" % kind,
+			}
+
+
+## Extrahiert Mapping-Informationen aus ActionMapping. Fehlt das
+## Mapping, sind alle Felder leer.
+func _extract_mapping(mapping: Variant) -> Dictionary:
+	var empty := {"space": "", "hint": "", "window": ""}
+	if typeof(mapping) != TYPE_DICTIONARY:
+		return empty
+	return {
+		"space": str(mapping.get("space", "")),
+		"hint": str(mapping.get("hint", "")),
+		"window": str(mapping.get("window", "")),
+	}

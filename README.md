@@ -224,7 +224,9 @@ Umschreiben der Presence-Logik andocken kann.
    - Header: Status (`connected` / `disconnected`), aktueller Presence-Mode,
      Toggle-Button `Expand` / `Dock`
    - Action Banner (nur sichtbar, wenn eine Action läuft) mit Titel, Step,
-     symbolischem Target-Text und Status (completed / failed / cancelled)
+     einem Target-Chip samt Primärname (`[window] calendar`), optionaler
+     Mapping-Zeile (`mapping: logical_space · towards calendar app`),
+     kompaktem Target-Text und Status (completed / failed / cancelled)
    - Avatar-Bereich mit State-Label und Debug-State-Anzeige
    - Event-Log (RichTextLabel, farbcodiert) — nur im Expanded-Modus sichtbar
    - Eingabezeile + „Send" / „Ping"-Buttons — nur im Expanded-Modus sichtbar

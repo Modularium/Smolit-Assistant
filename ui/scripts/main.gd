@@ -20,6 +20,11 @@ const PresenceStateRef := preload("res://scripts/presence/presence_state.gd")
 
 @onready var _action_banner: PanelContainer = $VBox/ActionBanner
 @onready var _action_title: Label = $VBox/ActionBanner/ActionVBox/ActionTitle
+@onready var _target_row: HBoxContainer = $VBox/ActionBanner/ActionVBox/TargetRow
+@onready var _target_kind_chip: Label = $VBox/ActionBanner/ActionVBox/TargetRow/TargetKindChip
+@onready var _target_name: Label = $VBox/ActionBanner/ActionVBox/TargetRow/TargetName
+@onready var _target_detail: Label = $VBox/ActionBanner/ActionVBox/TargetRow/TargetDetail
+@onready var _mapping_chip: Label = $VBox/ActionBanner/ActionVBox/MappingChip
 @onready var _action_step: Label = $VBox/ActionBanner/ActionVBox/ActionStep
 @onready var _action_target: Label = $VBox/ActionBanner/ActionVBox/ActionTarget
 @onready var _action_status: Label = $VBox/ActionBanner/ActionVBox/ActionStatus
@@ -187,6 +192,9 @@ func _on_action_context_changed(info: Dictionary) -> void:
 	_action_step.text = str(info.get("step", ""))
 	_action_target.text = str(info.get("target_text", ""))
 
+	_apply_target_row(info)
+	_apply_mapping_chip(info)
+
 	var status := str(info.get("status", ""))
 	var message := str(info.get("status_message", ""))
 	match status:
@@ -283,3 +291,56 @@ func _send_current_decision(decision: String) -> void:
 	IpcClient.send_approval_response(_current_approval_id, decision)
 	_approve_button.disabled = true
 	_deny_button.disabled = true
+
+
+# --- Target & Mapping rendering ------------------------------------------
+
+## Kleine Tint-Map pro Target-Kind. Nur symbolisch — keine Semantik
+## daran hängen außer der Unterscheidbarkeit im Banner.
+const TARGET_KIND_COLORS: Dictionary = {
+	"application": Color(0.75, 0.85, 1.0, 0.9),
+	"window": Color(0.6, 0.85, 0.75, 0.9),
+	"ui_element": Color(0.95, 0.8, 0.6, 0.9),
+	"region": Color(0.85, 0.75, 0.95, 0.9),
+	"unknown": Color(1, 1, 1, 0.45),
+}
+
+
+func _apply_target_row(info: Dictionary) -> void:
+	var kind := str(info.get("target_kind", ""))
+	var name := str(info.get("target_name", ""))
+	var detail := str(info.get("target_detail", ""))
+
+	# Fallback: Wenn weder Kind noch Name vorliegen, Row ausblenden.
+	# Die kompakte Ziel-Zeile (ActionTarget) bleibt davon unberührt.
+	if kind == "" and name == "" and detail == "":
+		_target_row.visible = false
+		return
+
+	_target_row.visible = true
+	var chip_kind := kind if kind != "" else "unknown"
+	_target_kind_chip.text = "[%s]" % chip_kind
+	_target_kind_chip.modulate = TARGET_KIND_COLORS.get(chip_kind, TARGET_KIND_COLORS["unknown"])
+	_target_name.text = name
+	_target_detail.visible = detail != ""
+	_target_detail.text = detail
+
+
+func _apply_mapping_chip(info: Dictionary) -> void:
+	var space := str(info.get("mapping_space", ""))
+	var hint := str(info.get("mapping_hint", ""))
+	var window := str(info.get("mapping_window", ""))
+
+	if space == "" and hint == "" and window == "":
+		_mapping_chip.visible = false
+		return
+
+	var parts := PackedStringArray()
+	if space != "":
+		parts.append("mapping: %s" % space)
+	if hint != "":
+		parts.append(hint)
+	if window != "":
+		parts.append("window: %s" % window)
+	_mapping_chip.text = " · ".join(parts)
+	_mapping_chip.visible = true

@@ -232,6 +232,15 @@ Was das MVP umsetzt:
 - Action-Banner mit Titel, Step und **symbolischem** Target-Text
   (`→ Anwendung`, `→ Fenstertitel`, `→ Label (Rolle)`, `→ Region`) —
   ohne Pixelgeometrie,
+- angereicherter Target-/Mapping-Readout im selben Banner: ein kleines
+  Kind-Chip (`[application]`, `[window]`, `[ui_element]`, `[region]`,
+  `[unknown]`) plus Primärname und Sekundärdetail, sowie eine separate
+  Mapping-Zeile mit `mapping.space` und `mapping.hint` (bei Window-
+  Scope ergänzt um `mapping.window`). Fehlen Target- oder Mapping-
+  Felder, bleibt der jeweilige Bereich unsichtbar — kein Fehlerpfad,
+- der Avatar wendet im ACTING-State eine sehr leise, rein symbolische
+  Farbvariante je nach Target-Kind an (Application/Window/UiElement/
+  Region). Keine Bewegung, keine Koordinaten,
 - manuelle Umschaltung zwischen Docked und Expanded über den
   Header-Toggle; Docked blendet Log und Eingabezeile aus.
 

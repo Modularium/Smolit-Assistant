@@ -23,6 +23,17 @@ const DISCONNECTED_COLOR: Color = Color(0.45, 0.45, 0.50)
 const ERROR_COLOR: Color = Color(0.82, 0.32, 0.32)
 const ACTING_COLOR: Color = Color(0.52, 0.46, 0.86)
 
+## Rein symbolische Tint-Varianten, die beim Betreten des ACTING-State
+## je nach letztem Target-Kind angewandt werden. Keine Geometrie, keine
+## Positionen — nur eine leise farbliche Unterscheidung.
+const ACTING_TINT_BY_TARGET: Dictionary = {
+	"application": Color(0.60, 0.54, 0.92),
+	"window": Color(0.48, 0.56, 0.86),
+	"ui_element": Color(0.70, 0.56, 0.86),
+	"region": Color(0.58, 0.48, 0.80),
+	"unknown": Color(0.52, 0.46, 0.86),
+}
+
 @onready var _body: ColorRect = $VisualRoot/Body
 @onready var _mouth: ColorRect = $VisualRoot/Face/Mouth
 @onready var _thinking_indicator: ColorRect = $Effects/ThinkingIndicator
@@ -33,6 +44,7 @@ var _state: int = AvatarStateRef.State.DISCONNECTED
 var _thinking_tween: Tween = null
 var _talking_tween: Tween = null
 var _hold_timer: Timer = null
+var _last_target_kind: String = ""
 
 
 func _ready() -> void:
@@ -47,6 +59,7 @@ func _ready() -> void:
 	EventBus.response_received.connect(_on_response)
 	EventBus.error_received.connect(_on_error)
 
+	EventBus.action_planned_received.connect(_on_action_planned)
 	EventBus.action_started_received.connect(_on_action_started)
 	EventBus.action_step_received.connect(_on_action_step)
 	EventBus.action_completed_received.connect(_on_action_completed)
@@ -92,7 +105,7 @@ func _apply_state_visuals() -> void:
 		AvatarStateRef.State.ERROR:
 			_body.color = ERROR_COLOR
 		AvatarStateRef.State.ACTING:
-			_body.color = ACTING_COLOR
+			_body.color = ACTING_TINT_BY_TARGET.get(_last_target_kind, ACTING_COLOR)
 			_thinking_indicator.visible = true
 			_start_thinking_tween()
 
@@ -143,6 +156,7 @@ func _on_connected() -> void:
 
 func _on_disconnected() -> void:
 	_hold_timer.stop()
+	_last_target_kind = ""
 	_set_state(AvatarStateRef.State.DISCONNECTED)
 
 
@@ -159,6 +173,17 @@ func _on_response(_text: String) -> void:
 func _on_error(_message: String) -> void:
 	_set_state(AvatarStateRef.State.ERROR)
 	_start_hold(ERROR_HOLD_SECONDS)
+
+
+func _on_action_planned(payload: Dictionary) -> void:
+	# Rein symbolische Erinnerung des Target-Kinds, damit ACTING
+	# eine leichte farbliche Unterscheidung bekommen kann. Kein Positions-
+	# oder Geometrie-Kontext.
+	var target: Variant = payload.get("target", null)
+	if typeof(target) == TYPE_DICTIONARY:
+		_last_target_kind = str(target.get("type", ""))
+	else:
+		_last_target_kind = ""
 
 
 func _on_action_started(_payload: Dictionary) -> void:
@@ -181,6 +206,7 @@ func _on_action_step(_payload: Dictionary) -> void:
 func _on_action_completed(_payload: Dictionary) -> void:
 	# Kurzer Erfolgs-Puls über den bestehenden Talking-Visual, dann
 	# sauberer Rückfall in idle/disconnected.
+	_last_target_kind = ""
 	if _state == AvatarStateRef.State.TALKING:
 		return
 	_set_state(AvatarStateRef.State.TALKING)
@@ -188,11 +214,13 @@ func _on_action_completed(_payload: Dictionary) -> void:
 
 
 func _on_action_failed(_payload: Dictionary) -> void:
+	_last_target_kind = ""
 	_set_state(AvatarStateRef.State.ERROR)
 	_start_hold(ERROR_HOLD_SECONDS)
 
 
 func _on_action_cancelled(_payload: Dictionary) -> void:
+	_last_target_kind = ""
 	if _state != AvatarStateRef.State.ACTING:
 		return
 	var next: int = AvatarStateRef.State.IDLE if IpcClient.is_connected_to_core() \

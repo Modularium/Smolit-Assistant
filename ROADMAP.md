@@ -189,6 +189,13 @@ aber `BackendUnsupported`.
       (visueller Ausdruck) — zwei unabhängige Achsen
 - [x] Symbolisches Target-Mapping (`→ Anwendung` / `→ Fenstertitel` /
       `→ Label (Rolle)` / `→ Region`) — keine Pixelgeometrie
+- [x] Angereichertes Target-/Mapping-Rendering im Action-Banner:
+      Kind-Chip (`[application]` / `[window]` / `[ui_element]` /
+      `[region]` / `[unknown]`), Primärname + Sekundärdetail,
+      Mapping-Zeile mit `space`, `hint` und optionalem Fensterbezug;
+      stille Fallbacks, wenn Target- oder Mapping-Felder fehlen
+- [x] Symbolische Avatar-Tint-Variante je Target-Kind im ACTING-State
+      (rein farblich, keine Bewegung, keine Koordinaten)
 
 ### Offen (Phase 3.3)
 
