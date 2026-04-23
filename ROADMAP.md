@@ -1338,6 +1338,49 @@ und Nicht-Ziele.
       enthalten). UI `settings-shell-smoke` um vier
       Cloud-HTTP-Blöcke erweitert. Alle übrigen UI-Smokes grün;
       Headless-Boot sauber.
+- [x] PR 11: TLS für `cloud_http` + sicherer Probe-/Request-
+      Pfad. Der `cloud_http`-Provider akzeptiert jetzt zusätzlich
+      zu `http://` auch `https://`; der HTTPS-Pfad läuft über
+      `tokio-rustls` (pure-Rust, `ring`-Crypto-Provider) gegen
+      den in `webpki-roots` eingebetteten Mozilla-Trust-Store.
+      Hermetischer Build, **keine** Abhängigkeit auf System-
+      Cert-Stores oder native TLS-Libs. **Keine** stille
+      Zertifikats-Deaktivierung, **kein** UI-Schalter „unsichere
+      TLS-Verbindung erlauben", **keine** `accept_invalid_certs`-
+      Abkürzung. Die PR-10-Ablehnung `endpoint_scheme_unsupported`
+      für `https://` entfällt; die Klasse meldet jetzt nur noch
+      nicht-http/https-Schemes (z. B. `ftp://`). Neue
+      Fehlerklassen: `tls_handshake_failed`, `cert_untrusted`
+      (UnknownIssuer-Familie), `cert_invalid` (Expired /
+      NotYetValid / BadSignature / DNS-Mismatch). Der Probe-Pfad
+      macht für `https://` einen echten TLS-Handshake (kein
+      Completion-Request, kein Bearer-Header auf der Leitung);
+      für `http://` bleibt der bisherige TCP-Connect mit
+      kennzeichnender Klasse `ok_http`. UI-Seite: kleiner
+      Insecure-Transport-Hinweis, der sichtbar wird, sobald der
+      Nutzer einen `http://`-Endpoint tippt — kein Toggle, kein
+      Bypass. **Bewusst nicht Teil von PR 11:** kein
+      authentifizierter Probe-Request über TLS (nur der
+      Handshake wird heute ausgeführt; `unauthorized`-Klasse
+      existiert im Run-Pfad, wird aber in der Probe noch nicht
+      getroffen), kein Client-Cert-Support, keine Custom-CA-
+      Bundle-UX, keine TLS-Metriken im Status, kein Streaming/
+      Function-Calling-Ausbau, keine Anbieter-Zoo-Erweiterung.
+      Details in
+      [docs/provider_fallback_and_settings_architecture.md §9 + §11](./docs/provider_fallback_and_settings_architecture.md),
+      [docs/api.md §2.10d](./docs/api.md),
+      [docs/ui_architecture.md §8d.5e](./docs/ui_architecture.md).
+      Tests: Core 268 PASS (+8 vs. PR 10 — drei neue
+      Parser-Unit-Tests inkl. `https://`-Akzeptanz,
+      fünf Provider-Integrationstests inkl. einem echten
+      HTTPS-Fake-Server via rcgen + `cert_untrusted`-Pfad gegen
+      den Produktions-Trust-Store + `tls_handshake_failed`-Pfad
+      HTTPS-gegen-Plain-HTTP + `unauthorized`-Pfad über TLS +
+      plaintext-HTTP-Regressionstest, plus ein IPC-Ende-zu-Ende-
+      Test gegen den Fake-HTTPS-Server mit Produktions-Config);
+      UI `settings-shell-smoke` +3 Assertions (`http://`-Hint
+      erscheint, verweist auf `https://`, bleibt bei `https://`
+      leer). Alle übrigen UI-Smokes grün; Headless-Boot sauber.
 
 ---
 

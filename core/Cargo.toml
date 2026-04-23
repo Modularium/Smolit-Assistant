@@ -13,3 +13,18 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tokio-tungstenite = "0.24"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+# PR 11 — TLS-Unterstützung für den `cloud_http`-Provider. Scope bewusst
+# klein: nur die pure-rust rustls-Linie + webpki-roots als Trust-Store.
+# Keine system-native TLS-Bibliothek, damit der Build hermetisch bleibt.
+# `aws_lc_rs` ist ebenfalls ein Rust/ C-Build-Ziel — wir pinnen deshalb
+# auf `ring`, weil es pure-Rust ist und keine C-Toolchain zum Bauen
+# braucht.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+rustls-pki-types = "1"
+webpki-roots = "0.26"
+
+[dev-dependencies]
+# Nur für TLS-Integrationstests: selbstsigniertes Zertifikat erzeugen,
+# damit `cloud_http` gegen einen lokalen HTTPS-Fake-Server sprechen kann.
+rcgen = { version = "0.13", default-features = false, features = ["ring", "pem"] }

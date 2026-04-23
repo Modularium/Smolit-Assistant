@@ -1946,7 +1946,7 @@ EventBus-/IPC-Erweiterungen (additiv, PR 9):
 - `StatusPayload.text_provider_chain` bleibt der einzige
   Readout-Kanal; keine neuen Felder.
 
-### 8d.5e Cloud-HTTP-Editor + Secret-Pfad (PR 10, Ist-Zustand)
+### 8d.5e Cloud-HTTP-Editor + Secret-Pfad (PR 10 + PR 11, Ist-Zustand)
 
 PR 10 führt den ersten Cloud-/Remote-Text-Provider `cloud_http`
 ein — mit **visuell deutlich abgesetztem** „external · cloud"-
@@ -1961,8 +1961,12 @@ getönt und trägt einen kuratierten Warnhinweis:
 
 - **`enabled` CheckBox** — Master-Schalter. Ohne Flag bleibt der
   Provider inert, auch mit Key im Store.
-- **`endpoint` LineEdit** — `http://host:port/path`. `https://`
-  wird vom Core abgelehnt (Scheme in PR 10 nicht unterstützt).
+- **`endpoint` LineEdit** — `http://host:port/path` **oder**
+  `https://host:port/path`. Seit PR 11 akzeptiert der Core beide
+  Schemes; bei `https://` wird der Request über `tokio-rustls`
+  mit dem webpki-roots-Trust-Store abgewickelt. Ein kleiner
+  Insecure-Transport-Hinweis (siehe unten) wird sichtbar, sobald
+  der Nutzer einen `http://`-Endpoint tippt.
 - **`model` LineEdit** — optional.
 - **`api_key` LineEdit mit `secret = true`** — Godot maskiert
   den Text. Wird **nie** von `apply_status` befüllt; der
@@ -2006,14 +2010,28 @@ getönt und trägt einen kuratierten Warnhinweis:
   (`cloud_http_in_chain` / `_enabled` / `_configured` /
   `_secret_present`) — alle nicht-sensitiv.
 
+**PR 11 — Insecure-Transport-Hinweis:**
+
+Direkt unter dem Endpoint-LineEdit sitzt ein kleines, gold-
+getöntes Label, das leer ist, solange der Endpoint leer oder
+`https://` ist. Sobald der Nutzer `http://...` tippt, erscheint
+ein ehrlicher Hinweistext:
+
+> insecure transport: http:// sends the api key in plaintext.
+> Prefer https:// or a trusted reverse proxy.
+
+**Keine moralische Flut, kein Toggle, kein Bypass-Schalter.**
+Der Hinweis ist rein informativ — der Core führt für `http://`
+weiterhin den bisherigen Plaintext-Pfad aus; er wird nicht
+blockiert. Auch bei insecure-Konfiguration bleibt der
+Secret-Pfad unverändert (Store, Masking, Keine-Rückspiegelung).
+
 ### 8d.6 Verifikation
 
-- `scripts/settings_shell_smoke.gd` (seit PR 10 um vier
-  Cloud-HTTP-Blöcke erweitert — Editor-Build mit externem
-  Warnhinweis, Secret-Edit bleibt nach Status-Tick leer,
-  Status-Label spiegelt `cloud_http_secret_present` korrekt
-  in beiden Richtungen, Edit-Feld ist sofort nach
-  Save-Simulation geleert; +7 Assertions seit PR 9, alle grün):
+- `scripts/settings_shell_smoke.gd` (seit PR 11 um zwei weitere
+  Cloud-HTTP-Blöcke erweitert — Insecure-Hint erscheint bei
+  `http://`-Endpoints, Insecure-Hint bleibt bei `https://` leer;
+  +3 Assertions seit PR 10, alle grün):
   Section-Reihenfolge,
   Slug-Eindeutigkeit, defensive `*_lines`-Renderer für leere /
   partielle / vollständige StatusPayloads inklusive PR-4-Felder

@@ -2146,25 +2146,26 @@ impl App {
             );
         }
 
-        let (host, port, _path) = match crate::providers::text::CloudHttpProvider::parse_endpoint(
-            endpoint_value,
-        ) {
-            Ok(parsed) => parsed,
-            Err(err) => {
-                let msg = format!("{err}");
-                let class = if msg.contains("must start with http://") {
-                    "endpoint_scheme_unsupported"
-                } else {
-                    "endpoint_unparseable"
-                };
-                let human = if class == "endpoint_scheme_unsupported" {
-                    "endpoint must start with http:// (https:// is not supported in this build)"
-                } else {
-                    "endpoint url is not parseable"
-                };
-                return build(false, class, human);
-            }
-        };
+        let (scheme, host, port, _path) =
+            match crate::providers::text::CloudHttpProvider::parse_endpoint(endpoint_value) {
+                Ok(parsed) => parsed,
+                Err(err) => {
+                    let msg = format!("{err}").to_ascii_lowercase();
+                    let class = if msg.contains("missing http:// or https://")
+                        || msg.contains("must start with")
+                    {
+                        "endpoint_scheme_unsupported"
+                    } else {
+                        "endpoint_unparseable"
+                    };
+                    let human = if class == "endpoint_scheme_unsupported" {
+                        "endpoint must start with http:// or https://"
+                    } else {
+                        "endpoint url is not parseable"
+                    };
+                    return build(false, class, human);
+                }
+            };
 
         let timeout_secs = cfg.request_timeout_seconds.max(1).min(30);
         let addr = format!("{host}:{port}");
@@ -2173,22 +2174,99 @@ impl App {
             tokio::net::TcpStream::connect(&addr),
         )
         .await;
-        match connect_result {
-            Err(_) => build(
-                false,
-                "timeout",
-                "tcp connect to configured endpoint timed out",
-            ),
-            Ok(Err(_)) => build(
-                false,
-                "http_connect_failed",
-                "tcp connect to configured endpoint failed",
-            ),
-            Ok(Ok(_stream)) => build(
-                true,
-                "ok",
-                "cloud_http endpoint reachable (tcp connect succeeded, request not sent)",
-            ),
+        let tcp = match connect_result {
+            Err(_) => {
+                return build(
+                    false,
+                    "timeout",
+                    "tcp connect to configured endpoint timed out",
+                );
+            }
+            Ok(Err(_)) => {
+                return build(
+                    false,
+                    "http_connect_failed",
+                    "tcp connect to configured endpoint failed",
+                );
+            }
+            Ok(Ok(s)) => s,
+        };
+
+        // PR 11: für `https://` wird nach dem TCP-Connect der
+        // TLS-Handshake als weiterer ehrlicher Preflight-Schritt
+        // gemacht. Fehler werden in kuratierte Klassen abgebildet —
+        // weder Endpoint noch Key tauchen dabei im Response auf.
+        match scheme {
+            crate::providers::text::CloudHttpScheme::Http => {
+                // Keine weiteren Side-Effects (wie vor PR 11): ehrliches
+                // „TCP reachable, request not sent".
+                drop(tcp);
+                build(
+                    true,
+                    "ok_http",
+                    "cloud_http endpoint reachable over plaintext http:// (tcp connect succeeded, request not sent)",
+                )
+            }
+            crate::providers::text::CloudHttpScheme::Https => {
+                let tls_config =
+                    crate::providers::text::default_cloud_http_tls_config();
+                let server_name = match rustls_pki_types::ServerName::try_from(host.clone()) {
+                    Ok(name) => name,
+                    Err(_) => {
+                        return build(
+                            false,
+                            "endpoint_unparseable",
+                            "endpoint host is not a valid TLS server name",
+                        );
+                    }
+                };
+                let connector = tokio_rustls::TlsConnector::from(tls_config);
+                let handshake = tokio::time::timeout(
+                    std::time::Duration::from_secs(timeout_secs),
+                    connector.connect(server_name, tcp),
+                )
+                .await;
+                match handshake {
+                    Err(_) => build(
+                        false,
+                        "timeout",
+                        "tls handshake to configured endpoint timed out",
+                    ),
+                    Ok(Err(err)) => {
+                        let msg = format!("{err}").to_ascii_lowercase();
+                        let (class, human): (&str, &str) = if msg.contains("unknownissuer")
+                            || msg.contains("unknown issuer")
+                        {
+                            (
+                                "cert_untrusted",
+                                "tls server certificate is not trusted by the configured root store",
+                            )
+                        } else if msg.contains("expired")
+                            || msg.contains("notvalidyet")
+                            || msg.contains("badsignature")
+                            || msg.contains("invalidcertificate")
+                            || msg.contains("notvaliddns")
+                            || msg.contains("revoked")
+                        {
+                            (
+                                "cert_invalid",
+                                "tls server certificate failed validation (expired / not yet valid / hostname mismatch / bad signature)",
+                            )
+                        } else {
+                            (
+                                "tls_handshake_failed",
+                                "tls handshake to configured endpoint failed",
+                            )
+                        };
+                        build(false, class, human)
+                    }
+                    Ok(Ok(_tls_stream)) => build(
+                        true,
+                        "ok",
+                        "cloud_http endpoint reachable over https:// (tls handshake succeeded, no completion request sent)",
+                    ),
+                }
+            }
         }
     }
 }

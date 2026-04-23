@@ -569,6 +569,13 @@ mod tests {
     use futures_util::{SinkExt, StreamExt};
     use tokio_tungstenite::connect_async;
 
+    /// Serialisiert alle Tests, die `SMOLIT_SETTINGS_DIR` anfassen.
+    /// Der Env-Var ist prozess-global; cargo-test läuft standardmäßig
+    /// parallel. Ohne dieses Lock landen Writes aus Test A in Test B's
+    /// Dir (oder umgekehrt), weil `App::new` die Env beim Bauen liest
+    /// und Writes des Secrets-Stores sie ein zweites Mal lesen.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn test_app() -> Arc<App> {
         test_app_with(InteractionConfig {
             enabled: true,
@@ -1969,6 +1976,7 @@ mod tests {
 
     #[tokio::test]
     async fn settings_set_cloud_http_config_applies_without_secret_leak() {
+        let _g = ENV_LOCK.lock().unwrap();
         let dir = scoped_settings_dir("ch-apply");
         let app = build_cloud_http_chain_app(&dir);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -2009,6 +2017,7 @@ mod tests {
 
     #[tokio::test]
     async fn settings_set_cloud_http_secret_persists_but_never_leaks() {
+        let _g = ENV_LOCK.lock().unwrap();
         let dir = scoped_settings_dir("ch-secret");
         let app = build_cloud_http_chain_app(&dir);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -2049,6 +2058,7 @@ mod tests {
 
     #[tokio::test]
     async fn settings_clear_cloud_http_secret_via_null_payload() {
+        let _g = ENV_LOCK.lock().unwrap();
         let dir = scoped_settings_dir("ch-secret-clear");
         let app = build_cloud_http_chain_app(&dir);
         app.set_cloud_http_api_key(crate::app::SettingsCloudHttpSecretUpdate {
@@ -2077,6 +2087,7 @@ mod tests {
 
     #[tokio::test]
     async fn settings_probe_cloud_http_reports_secret_missing_before_key_is_stored() {
+        let _g = ENV_LOCK.lock().unwrap();
         let dir = scoped_settings_dir("ch-probe-missing");
         let app = build_cloud_http_chain_app(&dir);
         app.update_cloud_http_config(crate::app::SettingsCloudHttpConfigUpdate {
@@ -2109,6 +2120,7 @@ mod tests {
 
     #[tokio::test]
     async fn settings_probe_cloud_http_reports_connect_failed_for_closed_port() {
+        let _g = ENV_LOCK.lock().unwrap();
         let dir = scoped_settings_dir("ch-probe-closed");
         let app = build_cloud_http_chain_app(&dir);
         app.update_cloud_http_config(crate::app::SettingsCloudHttpConfigUpdate {
@@ -2154,18 +2166,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn settings_probe_cloud_http_rejects_https_scheme() {
-        let dir = scoped_settings_dir("ch-probe-https");
+    async fn settings_probe_cloud_http_reports_scheme_unsupported_for_non_http_scheme() {
+        // PR 11: https:// ist jetzt erlaubt; andere Schemes wie ftp://
+        // / file:// bleiben hart abgelehnt. Der Probe-Pfad muss den
+        // Scheme-Reject ehrlich klassifizieren und weder Host noch
+        // Secret leaken.
+        let _g = ENV_LOCK.lock().unwrap();
+        let dir = scoped_settings_dir("ch-probe-bad-scheme");
         let app = build_cloud_http_chain_app(&dir);
         app.update_cloud_http_config(crate::app::SettingsCloudHttpConfigUpdate {
             enabled: true,
-            endpoint: Some("https://api.example.com/v1/chat".into()),
+            endpoint: Some("ftp://api.example.com/v1/chat".into()),
             model: None,
             request_timeout_seconds: Some(3),
         })
         .unwrap();
         app.set_cloud_http_api_key(crate::app::SettingsCloudHttpSecretUpdate {
-            api_key: Some("sk-for-https-probe".into()),
+            api_key: Some("sk-for-ftp-probe".into()),
         })
         .unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -2184,7 +2201,57 @@ mod tests {
         let resp = recv_text(&mut ws).await;
         assert!(resp.contains(r#""class":"endpoint_scheme_unsupported""#));
         assert!(!resp.contains("api.example.com"), "probe leaked host: {resp}");
-        assert!(!resp.contains("sk-for-https-probe"), "probe leaked secret: {resp}");
+        assert!(!resp.contains("sk-for-ftp-probe"), "probe leaked secret: {resp}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn settings_probe_cloud_http_accepts_https_and_reports_cert_untrusted_against_fake_https_server() {
+        // PR 11: Ein Fake-HTTPS-Server mit selbstsigniertem Cert (das
+        // webpki-roots NICHT trauen). Probe mit der Default-Client-
+        // Config muss `cert_untrusted` oder `cert_invalid` melden —
+        // **nicht** stillschweigend als „ok" durchlaufen.
+        use crate::providers::text::tests::{start_fake_https_server, FakeHttpsMode};
+        let _g = ENV_LOCK.lock().unwrap();
+        let dir = scoped_settings_dir("ch-probe-cert-untrusted");
+        let app = build_cloud_http_chain_app(&dir);
+        let (port, _trust, _handle) = start_fake_https_server(FakeHttpsMode::Ok("cloud")).await;
+        // Achtung: wir nutzen BEWUSST `localhost` (matcht DNS-SAN des
+        // Fake-Certs) und **nicht** `127.0.0.1` (dort würde rustls
+        // wegen IP-SAN-Mismatch früher failen).
+        app.update_cloud_http_config(crate::app::SettingsCloudHttpConfigUpdate {
+            enabled: true,
+            endpoint: Some(format!("https://localhost:{port}/v1/chat")),
+            model: None,
+            request_timeout_seconds: Some(3),
+        })
+        .unwrap();
+        app.set_cloud_http_api_key(crate::app::SettingsCloudHttpSecretUpdate {
+            api_key: Some("sk-for-cert-untrusted".into()),
+        })
+        .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"settings_probe_cloud_http"}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(
+            resp.contains(r#""class":"cert_untrusted""#)
+                || resp.contains(r#""class":"cert_invalid""#)
+                || resp.contains(r#""class":"tls_handshake_failed""#),
+            "expected cert_untrusted/cert_invalid/tls_handshake_failed; got: {resp}",
+        );
+        assert!(!resp.contains("sk-for-cert-untrusted"), "probe leaked secret: {resp}");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

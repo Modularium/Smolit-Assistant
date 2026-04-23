@@ -967,6 +967,54 @@ gegen einen lokalen Fake-HTTP-Server plus ein Shell-Skript als
   Secret-Edit bleibt nach Status-Tick leer, Status-Label
   spiegelt `secret_present`-Flag, Edit-Feld ist sofort nach Save
   geleert). Alle übrigen UI-Smokes grün; Headless-Boot sauber.
+- **PR 11 — TLS für `cloud_http` + sicherer Probe-/Request-Pfad
+  (Ist).** Der `cloud_http`-Provider akzeptiert jetzt zusätzlich
+  zu `http://` auch `https://`. Der HTTPS-Pfad läuft über
+  `tokio-rustls` (pure-Rust, `ring`-Crypto-Provider) mit dem in
+  `webpki-roots` eingebetteten Mozilla-Trust-Store — hermetisch
+  kompiliert, **keine** Abhängigkeit auf System-Cert-Stores oder
+  native TLS-Libraries. Keine stille Zertifikats-Deaktivierung,
+  kein UI-Schalter „unsichere TLS-Verbindung erlauben", keine
+  `accept_invalid_certs`-Abkürzung. Die bestehende harte
+  `https://`-Ablehnung aus PR 10 fällt weg; `endpoint_scheme_unsupported`
+  meldet jetzt nur noch nicht-http/https-Schemes (z. B. `ftp://`).
+  Der interne `http_request_with_header` bekommt einen fünften
+  Parameter [`CloudHttpScheme`](../core/src/providers/text.rs)
+  plus einen `Arc<rustls::ClientConfig>`, und ein gemeinsamer
+  `do_http_exchange<S>`-Helfer teilt den Write/Read-Pfad zwischen
+  TcpStream und `tokio_rustls::client::TlsStream`. Neue
+  Fehlerklassen in `classify_error` (alle stabil und kuratiert):
+  `tls_handshake_failed`, `cert_untrusted` (UnknownIssuer),
+  `cert_invalid` (Expired / NotYetValid / BadSignature /
+  DNS-Mismatch). Der Probe-Pfad in `App::probe_cloud_http` macht
+  für `https://` jetzt einen echten TLS-Handshake (noch kein
+  Completion-Roundtrip und kein Bearer-Header auf der Leitung —
+  die Rückgabe-Klassen unterscheiden aber sauber zwischen
+  Transport-Problemen, Cert-Problemen und Config-Problemen) und
+  meldet `"ok"` nur, wenn der Handshake gelang. Für `http://`
+  bleibt der TCP-Connect-only-Pfad und die Rückmeldung
+  `"ok_http"` kennzeichnet den Transport ehrlich. UI-Seite: ein
+  kleiner Insecure-Transport-Hinweis, der sichtbar wird, sobald
+  der Nutzer einen `http://`-Endpoint tippt (kein Toggle, kein
+  Bypass). Tests: fünf neue Provider-Unit-Tests, davon einer mit
+  einem **echten** HTTPS-Fake-Server (rcgen selbstsigniertes
+  Cert, injiziert über `CloudHttpProvider::new_with_tls_config`)
+  plus Regressions-Guards für den plaintext-HTTP-Pfad, einer für
+  `cert_untrusted` gegen den Produktions-Trust-Store, einer für
+  `tls_handshake_failed` (HTTPS-Client gegen Plain-HTTP-Port),
+  einer für `unauthorized` (401), und ein IPC-Ende-zu-Ende-Test,
+  der die Probe-Fehlerklasse gegen den Fake-HTTPS-Server in der
+  Produktions-Config prüft. **Secret-Leak-Guards bleiben aktiv:
+  weder der Bearer-Wert noch der Endpoint tauchen je in
+  TLS-Fehlermeldungen oder Probe-Responses auf.** Gesamttests:
+  Core 268 PASS (+8 vs. PR 10); UI-`settings-shell-smoke` +3
+  Assertions (`http://`-Hint erscheint, verweist auf `https://`,
+  bleibt bei `https://` leer). Alle übrigen UI-Smokes grün;
+  Headless-Boot sauber. **Bewusste Restschuld:** Probe macht
+  noch keinen authentifizierten HTTP-Request über TLS (der
+  Handshake ist erstmal die Grenze; ein `unauthorized`-Tag in
+  `classify_error` existiert schon für den Run-Pfad, wird in der
+  Probe aber erst mit dem nächsten Ausbau erreichbar).
 
 Zwischenprinzipien:
 
@@ -1014,7 +1062,7 @@ aufgehoben werden.
 
 ---
 
-## 11. Secrets- und Sensitive-Config-Kategorien (Ist, PR 5 + PR 7 + PR 8 + PR 9 + PR 10)
+## 11. Secrets- und Sensitive-Config-Kategorien (Ist, PR 5 + PR 7 + PR 8 + PR 9 + PR 10 + PR 11)
 
 Ab PR 5 existiert in
 [`core/src/settings_store.rs`](../core/src/settings_store.rs) ein
@@ -1107,9 +1155,14 @@ aber wie eine sensitive-lite-Ressource behandelt:
   PR 5/7/8).
 - Antworten auf Schreibaktionen spiegeln ausschließlich den
   StatusPayload — kein Raw-Echo der Eingabe.
-- Probe-Aktionen (`settings_probe_{llamafile,stt,tts,local_http}`) sind
-  Side-Effect-frei im Sinne der Nutzer-Intention und liefern
+- Probe-Aktionen (`settings_probe_{llamafile,stt,tts,local_http,cloud_http}`)
+  sind Side-Effect-frei im Sinne der Nutzer-Intention und liefern
   kuratierte Tags. STT/TTS-Probes greifen ausdrücklich nicht auf
   Mikrofon oder Audio-Output zu; der `local_http`-Probe macht
   einen TCP-Connect auf `host:port`, aber **keinen**
-  Completion-Request und sendet keine Prompt-Daten.
+  Completion-Request und sendet keine Prompt-Daten. Der
+  `cloud_http`-Probe macht seit PR 11 für `https://` zusätzlich
+  einen echten TLS-Handshake (dann kuratierte Klassen
+  `tls_handshake_failed` / `cert_untrusted` / `cert_invalid` vs.
+  `ok`), aber **weiterhin keinen** Completion-Request und
+  **keinen** Bearer-Header auf der Leitung.

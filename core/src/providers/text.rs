@@ -250,8 +250,8 @@ impl TextProviderImpl {
         let chain: Vec<String> = err.chain().map(|e| e.to_string()).collect();
         let joined = chain.join(" | ").to_ascii_lowercase();
 
-        // cloud_http-spezifische Tags (PR 10). Zuerst geprüft, damit
-        // spätere generischere Muster nicht versehentlich greifen.
+        // cloud_http-spezifische Tags (PR 10 + PR 11). Zuerst geprüft,
+        // damit spätere generischere Muster nicht versehentlich greifen.
         if joined.contains("cloud_http") {
             if joined.contains("is disabled") {
                 return "disabled";
@@ -262,6 +262,30 @@ impl TextProviderImpl {
             if joined.contains("secret is not set") {
                 return "secret_missing";
             }
+            // PR 11: TLS-Grenzen zuerst prüfen. rustls-Fehlermeldungen
+            // enthalten Phrasen wie `InvalidCertificate(NotValidYet)`,
+            // `InvalidCertificate(Expired)`, `InvalidCertificate(UnknownIssuer)`,
+            // `InvalidCertificate(BadSignature)` usw. Wir klassifizieren
+            // defensiv und stabil.
+            if joined.contains("tls handshake") || joined.contains("handshake") && joined.contains("tls") {
+                if joined.contains("unknownissuer") || joined.contains("unknown issuer") {
+                    return "cert_untrusted";
+                }
+                if joined.contains("notvalidyet")
+                    || joined.contains("expired")
+                    || joined.contains("badsignature")
+                    || joined.contains("invalidcertificate")
+                    || joined.contains("notvaliddns")
+                    || joined.contains("revoked")
+                {
+                    return "cert_invalid";
+                }
+                return "tls_handshake_failed";
+            }
+            // PR 11: Scheme-Reject bleibt erhalten für andere Schemes
+            // (`ftp://`, `file://` usw.). `https://` wird NICHT mehr
+            // auf diese Klasse abgebildet — der Provider baut stattdessen
+            // eine TLS-Verbindung auf.
             if joined.contains("endpoint must start with http://") {
                 return "endpoint_scheme_unsupported";
             }
@@ -1087,6 +1111,23 @@ impl LocalHttpProvider {
 //     POST JSON mit `{ "<prompt_field>": "<input>", "stream": false,
 //     "model"?: "<model>" }`, Antwort enthält `<response_field>`.
 
+/// Transport-Scheme für den `cloud_http`-Provider (PR 11). Seit PR 11
+/// sind **beide** Varianten zulässig — `Https` geht durch tokio-rustls
+/// mit dem webpki-roots-Trust-Store, `Http` bleibt der bisherige
+/// Plaintext-Pfad (für Reverse-Proxies im vertrauten Netz oder den
+/// Test-Pfad). Andere Schemes werden beim Parse abgelehnt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloudHttpScheme {
+    Http,
+    Https,
+}
+
+impl CloudHttpScheme {
+    pub fn is_secure(self) -> bool {
+        matches!(self, Self::Https)
+    }
+}
+
 #[derive(Clone)]
 pub struct CloudHttpConfigView {
     pub enabled: bool,
@@ -1125,37 +1166,65 @@ impl std::fmt::Debug for CloudHttpConfigView {
 #[derive(Clone)]
 pub struct CloudHttpProvider {
     config: CloudHttpConfigView,
+    /// Optional injizierter TLS-Client-Config. `None` (Produktion) →
+    /// [`default_cloud_http_tls_config`] wird genutzt (webpki-roots-
+    /// Trust-Store). `Some(_)` ist für Integrations-Tests gedacht, in
+    /// denen ein selbstsigniertes Zertifikat über einen Test-spezifischen
+    /// `RootCertStore` vertraut werden muss. Niemals für produktive
+    /// Abkürzungen („accept invalid certs") verwendet.
+    tls_config_override: Option<Arc<rustls::ClientConfig>>,
 }
 
 impl std::fmt::Debug for CloudHttpProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CloudHttpProvider")
             .field("config", &self.config)
+            .field("tls_config_override", &self.tls_config_override.is_some())
             .finish()
     }
 }
 
 impl CloudHttpProvider {
     pub fn new(config: CloudHttpConfigView) -> Self {
-        Self { config }
+        Self {
+            config,
+            tls_config_override: None,
+        }
     }
 
-    /// Kleiner URL-Parser. Spiegel zu [`LocalHttpProvider::parse_endpoint`],
-    /// aber mit eigenem Fehler-Prefix (`cloud_http`), damit die
-    /// Klassifikation die richtige Tag-Familie trifft. `https://`
-    /// wird hart abgelehnt.
-    pub fn parse_endpoint(endpoint: &str) -> Result<(String, u16, String)> {
+    /// Konstruiert einen Provider mit einer expliziten
+    /// TLS-Client-Config. Nur für Integrations-Tests: der Test erzeugt
+    /// ein selbstsigniertes Zertifikat (`rcgen`), baut einen
+    /// `RootCertStore` mit **genau diesem** Cert als Trust-Anchor und
+    /// gibt ihn hier rein. Produktionspfade setzen diese Methode nie.
+    #[cfg(test)]
+    pub fn new_with_tls_config(
+        config: CloudHttpConfigView,
+        tls_config: Arc<rustls::ClientConfig>,
+    ) -> Self {
+        Self {
+            config,
+            tls_config_override: Some(tls_config),
+        }
+    }
+
+    /// Kleiner URL-Parser. Seit PR 11 akzeptiert `cloud_http` sowohl
+    /// `http://` als auch `https://`; andere Schemes werden weiterhin
+    /// hart abgelehnt. Der zurückgegebene [`CloudHttpScheme`] entscheidet,
+    /// ob der Request-Pfad TLS aufsetzt.
+    pub fn parse_endpoint(endpoint: &str) -> Result<(CloudHttpScheme, String, u16, String)> {
         let trimmed = endpoint.trim();
         if trimmed.is_empty() {
             bail!("cloud_http endpoint is not configured");
         }
-        if trimmed.starts_with("https://") {
+        let (scheme, rest, default_port) = if let Some(r) = trimmed.strip_prefix("https://") {
+            (CloudHttpScheme::Https, r, 443u16)
+        } else if let Some(r) = trimmed.strip_prefix("http://") {
+            (CloudHttpScheme::Http, r, 80u16)
+        } else {
             bail!(
-                "cloud_http endpoint must start with http:// (https:// is not supported in this build)"
+                "cloud_http endpoint url is not parseable (missing http:// or https:// prefix)"
             );
-        }
-        let Some(rest) = trimmed.strip_prefix("http://") else {
-            bail!("cloud_http endpoint url is not parseable (missing http:// prefix)");
         };
         if rest.contains('@') {
             bail!("cloud_http endpoint url is not parseable (user-info in url not supported)");
@@ -1175,12 +1244,12 @@ impl CloudHttpProvider {
                 })?;
                 (h.to_string(), p_num)
             }
-            None => (authority.to_string(), 80u16),
+            None => (authority.to_string(), default_port),
         };
         if host.is_empty() {
             bail!("cloud_http endpoint url is not parseable (empty host)");
         }
-        Ok((host, port, path.to_string()))
+        Ok((scheme, host, port, path.to_string()))
     }
 
     /// Validator für den Header-Namen aus der Config. Blockiert
@@ -1219,7 +1288,7 @@ impl CloudHttpProvider {
             .context("provider cloud_http secret is not set")?;
         let auth_header = Self::validate_auth_header_name(&self.config.auth_header)?;
 
-        let (host, port, path) = Self::parse_endpoint(endpoint)?;
+        let (scheme, host, port, path) = Self::parse_endpoint(endpoint)?;
         let prompt_field = if self.config.prompt_field.trim().is_empty() {
             "prompt"
         } else {
@@ -1252,7 +1321,12 @@ impl CloudHttpProvider {
         let auth_value = format!("Bearer {api_key}");
 
         let timeout_secs = self.config.request_timeout_seconds.max(1);
+        let tls_cfg = self
+            .tls_config_override
+            .clone()
+            .unwrap_or_else(default_cloud_http_tls_config);
         let (status, response_body) = match http_request_with_header(
+            scheme,
             &host,
             port,
             "POST",
@@ -1261,14 +1335,21 @@ impl CloudHttpProvider {
             timeout_secs,
             auth_header,
             &auth_value,
+            tls_cfg,
         )
         .await
         {
             Ok(v) => v,
             Err(err) => {
                 // Kontext-Prefix für classify_error; auf keinen Fall
-                // den Bearer-Wert in den Kontext aufnehmen.
-                let msg = format!("{err}");
+                // den Bearer-Wert in den Kontext aufnehmen. TLS-Fehler
+                // tragen bereits „tls handshake" / „certificate" im
+                // inneren Kontext, die vom Classifier unten erkannt
+                // werden.
+                let msg = format!("{err}").to_ascii_lowercase();
+                if msg.contains("tls handshake") {
+                    return Err(err.context("cloud_http TLS handshake failed"));
+                }
                 if msg.contains("connect timed out") || msg.contains("connect failed") {
                     return Err(err.context("cloud_http HTTP connect failed"));
                 }
@@ -1370,18 +1451,23 @@ async fn check_health(host: &str, port: u16, timeout_secs: u64) -> bool {
 }
 
 /// Variante von [`http_request`] mit einem zusätzlichen Header
-/// (typischerweise `Authorization`). **Nicht** für den llamafile-
-/// oder local_http-Pfad benutzt — dort wollen wir keine
-/// Auth-Header. Nur der `cloud_http`-Provider schickt Bearer-
-/// Tokens, darum lebt die Variante separat, damit ein
-/// Implementierungsfehler nicht versehentlich Secrets an einen
-/// nicht-authentifizierten Endpoint streut.
+/// (typischerweise `Authorization`) **und** scheme-abhängigem
+/// Transport. Für `http://` läuft der Request wie bisher über einen
+/// nackten `TcpStream`; für `https://` wird der Stream mit
+/// `tokio-rustls` in eine TLS-Session gehüllt. **Nicht** für den
+/// llamafile- oder local_http-Pfad benutzt — dort wollen wir keine
+/// Auth-Header und kein TLS.
 ///
 /// Das Fehler-Kontextprefix ist bewusst `cloud_http`, damit
 /// [`TextProviderImpl::classify_error`] die Fehlerklasse eindeutig
 /// dem Cloud-Pfad zuordnet, ohne dass der Bearer-Wert jemals im
-/// Fehlerbody auftaucht.
+/// Fehlerbody auftaucht. TLS-Fehler aus rustls tragen den Kontext
+/// `"cloud_http TLS handshake"` oder `"cloud_http TLS certificate"` —
+/// dort wird nie Secret-Material aus dem Bearer-Header zitiert, weil
+/// rustls den Handshake **vor** der ersten Bytes des Application-
+/// Layers abbricht.
 async fn http_request_with_header(
+    scheme: CloudHttpScheme,
     host: &str,
     port: u16,
     method: &str,
@@ -1390,16 +1476,28 @@ async fn http_request_with_header(
     timeout_secs: u64,
     auth_header_name: &str,
     auth_header_value: &str,
+    tls_config: Arc<rustls::ClientConfig>,
 ) -> Result<(u16, String)> {
     let addr = format!("{host}:{port}");
     let total_timeout = Duration::from_secs(timeout_secs.max(1));
 
     let mut request = String::new();
     request.push_str(&format!("{method} {path} HTTP/1.1\r\n"));
-    request.push_str(&format!("Host: {host}:{port}\r\n"));
+    // Der Host-Header trägt den konfigurierten Hostnamen, bei
+    // Default-Port ohne Port-Suffix — sonst lehnen manche Server den
+    // Request ab.
+    let default_port = match scheme {
+        CloudHttpScheme::Http => 80,
+        CloudHttpScheme::Https => 443,
+    };
+    if port == default_port {
+        request.push_str(&format!("Host: {host}\r\n"));
+    } else {
+        request.push_str(&format!("Host: {host}:{port}\r\n"));
+    }
     request.push_str("Connection: close\r\n");
     // Defensive: Header-Name fix enthält keine CR/LF aus der Config
-    // (Validator lehnt das ab, siehe `validate_header_token`); Value
+    // (Validator lehnt das ab, siehe `validate_auth_header_name`); Value
     // darf ein Secret sein → wird **nicht** geloggt und nie in
     // Fehlermeldungen zurückgespiegelt.
     request.push_str(&format!("{auth_header_name}: {auth_header_value}\r\n"));
@@ -1412,10 +1510,50 @@ async fn http_request_with_header(
         request.push_str(b);
     }
 
-    let mut stream = timeout(total_timeout, TcpStream::connect(&addr))
+    // TCP-Verbindung aufbauen (für beide Schemes gemeinsam).
+    let tcp = timeout(total_timeout, TcpStream::connect(&addr))
         .await
         .context("cloud_http HTTP connect timed out")?
         .context("cloud_http HTTP connect failed")?;
+
+    match scheme {
+        CloudHttpScheme::Http => {
+            let (status, body_out) =
+                do_http_exchange(tcp, &request, total_timeout).await?;
+            Ok((status, body_out))
+        }
+        CloudHttpScheme::Https => {
+            // `ServerName` ist die Geometrie, auf die rustls die
+            // Peer-Certificate-Identity prüft. `try_from` trennt
+            // sauber zwischen DNS- und IP-Namen — für IP-only-Ziele
+            // muss das Cert einen IP-SAN tragen.
+            let server_name =
+                rustls_pki_types::ServerName::try_from(host.to_string()).map_err(|_| {
+                    anyhow::anyhow!("cloud_http TLS server name invalid")
+                })?;
+            let connector = tokio_rustls::TlsConnector::from(tls_config);
+            let tls_stream = timeout(total_timeout, connector.connect(server_name, tcp))
+                .await
+                .context("cloud_http TLS handshake timed out")?
+                .context("cloud_http TLS handshake failed")?;
+            let (status, body_out) =
+                do_http_exchange(tls_stream, &request, total_timeout).await?;
+            Ok((status, body_out))
+        }
+    }
+}
+
+/// Gemeinsamer HTTP-Exchange-Pfad für beide Transport-Schemes. Nimmt
+/// einen Stream, der `AsyncRead + AsyncWrite + Unpin` erfüllt, und
+/// führt Write → Read-to-End → Status-/Body-Split aus.
+async fn do_http_exchange<S>(
+    mut stream: S,
+    request: &str,
+    total_timeout: Duration,
+) -> Result<(u16, String)>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
     timeout(total_timeout, stream.write_all(request.as_bytes()))
         .await
         .context("cloud_http HTTP write timed out")?
@@ -1439,6 +1577,33 @@ async fn http_request_with_header(
         .split_once("\r\n\r\n")
         .context("cloud_http HTTP response has no body separator")?;
     Ok((status, body_out.to_string()))
+}
+
+/// Lazy-initialisierter default `rustls::ClientConfig` für den
+/// `cloud_http`-Provider (PR 11). Nutzt den in `webpki-roots`
+/// eingebauten Mozilla-Trust-Store — hermetisch, **keine** Abhängigkeit
+/// auf System-Cert-Stores oder native TLS-Libraries.
+///
+/// Pinnt den `ring`-Krypto-Provider explizit. Wir rufen **kein**
+/// `install_default()` (das wäre globaler Seiteneffekt, der in Tests
+/// reibungsanfällig ist), sondern nutzen `with_provider(...)` direkt.
+pub fn default_cloud_http_tls_config() -> Arc<rustls::ClientConfig> {
+    static CONFIG: std::sync::OnceLock<Arc<rustls::ClientConfig>> =
+        std::sync::OnceLock::new();
+    CONFIG
+        .get_or_init(|| {
+            let mut roots = rustls::RootCertStore::empty();
+            roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            let config = rustls::ClientConfig::builder_with_provider(Arc::new(
+                rustls::crypto::ring::default_provider(),
+            ))
+            .with_safe_default_protocol_versions()
+            .expect("rustls default protocol versions must be supported by ring provider")
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+            Arc::new(config)
+        })
+        .clone()
 }
 
 /// `POST /completion` gegen einen lokalen llama.cpp-kompatiblen Server.
@@ -1777,7 +1942,7 @@ impl std::fmt::Debug for TextProviderResolver {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn abrain_item() -> TextProviderChainItem {
@@ -2052,6 +2217,118 @@ mod tests {
             }
         });
         (port, handle)
+    }
+
+    /// PR 11 — Verhalten eines Fake-HTTPS-Servers. Gibt es klein und
+    /// erweiterbar, damit Tests den Request-/Response-Pfad und den
+    /// Unauth-Pfad getrennt prüfen können.
+    #[allow(dead_code)]
+    pub(crate) enum FakeHttpsMode {
+        /// `200 OK` mit `{"content":"<value>"}`.
+        Ok(&'static str),
+        /// `401 Unauthorized` mit leerem Body.
+        Unauthorized,
+    }
+
+    /// Startet einen lokalen HTTPS-Server mit selbstsigniertem
+    /// Zertifikat (`rcgen`). Liefert den Port, einen `Arc<ClientConfig>`,
+    /// der genau dieses Cert vertraut (für Integrationstests), und ein
+    /// `JoinHandle` auf den Accept-Loop.
+    ///
+    /// Zum Matching des DNS-SAN `localhost` müssen Tests den Endpoint
+    /// als `https://localhost:{port}/...` konfigurieren, nicht als
+    /// `https://127.0.0.1:{port}/...` — sonst schlägt rustls wegen
+    /// IP-SAN-Mismatch fehl.
+    pub(crate) async fn start_fake_https_server(
+        mode: FakeHttpsMode,
+    ) -> (u16, Arc<rustls::ClientConfig>, JoinHandle<()>) {
+        use rcgen::{CertifiedKey, generate_simple_self_signed};
+        use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+        use tokio_rustls::TlsAcceptor;
+
+        // Selbstsigniertes Cert mit DNS-SAN `localhost`. rcgen 0.13
+        // liefert `CertifiedKey { cert, key_pair }` zurück.
+        let CertifiedKey { cert, key_pair } =
+            generate_simple_self_signed(vec!["localhost".to_string()])
+                .expect("generate self-signed cert");
+        let cert_der = CertificateDer::from(cert.der().to_vec());
+        let key_der = PrivatePkcs8KeyDer::from(key_pair.serialize_der());
+
+        // Server-Config: trägt genau dieses eine Cert.
+        let server_config = rustls::ServerConfig::builder_with_provider(Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .expect("rustls default protocol versions")
+        .with_no_client_auth()
+        .with_single_cert(
+            vec![cert_der.clone()],
+            PrivateKeyDer::Pkcs8(key_der),
+        )
+        .expect("build server config");
+        let acceptor = TlsAcceptor::from(Arc::new(server_config));
+
+        // Client-Config für Tests: trust store enthält exakt unser
+        // selbst signiertes Cert — und sonst nichts.
+        let mut trust = rustls::RootCertStore::empty();
+        trust
+            .add(cert_der.clone())
+            .expect("add test cert to trust store");
+        let trust_client_config = Arc::new(
+            rustls::ClientConfig::builder_with_provider(Arc::new(
+                rustls::crypto::ring::default_provider(),
+            ))
+            .with_safe_default_protocol_versions()
+            .expect("rustls default protocol versions")
+            .with_root_certificates(trust)
+            .with_no_client_auth(),
+        );
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        let content: Option<&'static str> = match mode {
+            FakeHttpsMode::Ok(c) => Some(c),
+            FakeHttpsMode::Unauthorized => None,
+        };
+        let handle = tokio::spawn(async move {
+            loop {
+                let Ok((tcp, _)) = listener.accept().await else {
+                    return;
+                };
+                let acceptor = acceptor.clone();
+                tokio::spawn(async move {
+                    let Ok(mut tls_stream) = acceptor.accept(tcp).await else {
+                        return;
+                    };
+                    let mut buf = [0u8; 4096];
+                    let Ok(n) = tls_stream.read(&mut buf).await else {
+                        let _ = tls_stream.shutdown().await;
+                        return;
+                    };
+                    let request = String::from_utf8_lossy(&buf[..n]);
+                    let (status_line, body) = match content {
+                        Some(c) => {
+                            if request.starts_with("POST /") {
+                                (
+                                    "HTTP/1.1 200 OK",
+                                    format!(r#"{{"content":"{c}"}}"#),
+                                )
+                            } else {
+                                ("HTTP/1.1 404 Not Found", String::new())
+                            }
+                        }
+                        None => ("HTTP/1.1 401 Unauthorized", String::new()),
+                    };
+                    let response = format!(
+                        "{status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len(),
+                    );
+                    let _ = tls_stream.write_all(response.as_bytes()).await;
+                    let _ = tls_stream.shutdown().await;
+                });
+            }
+        });
+        (port, trust_client_config, handle)
     }
 
     /// Wie `start_fake_llama_server`, aber der Server liefert immer
@@ -2687,17 +2964,42 @@ mod tests {
 
     #[test]
     fn cloud_http_endpoint_parser_accepts_http_url() {
-        let (h, p, path) =
+        let (scheme, h, p, path) =
             CloudHttpProvider::parse_endpoint("http://example.invalid:8443/v1/chat").unwrap();
+        assert_eq!(scheme, CloudHttpScheme::Http);
         assert_eq!(h, "example.invalid");
         assert_eq!(p, 8443);
         assert_eq!(path, "/v1/chat");
     }
 
     #[test]
-    fn cloud_http_endpoint_parser_rejects_https() {
-        let err = CloudHttpProvider::parse_endpoint("https://example.invalid/").unwrap_err();
-        assert!(format!("{err}").contains("must start with http://"));
+    fn cloud_http_endpoint_parser_accepts_https_url_with_default_port_443() {
+        // PR 11: https:// wird jetzt akzeptiert. Ohne expliziten Port
+        // fällt der Parser auf 443 (für http:// bleibt der Default 80).
+        let (scheme, h, p, path) =
+            CloudHttpProvider::parse_endpoint("https://api.example.com/v1/chat").unwrap();
+        assert_eq!(scheme, CloudHttpScheme::Https);
+        assert_eq!(h, "api.example.com");
+        assert_eq!(p, 443);
+        assert_eq!(path, "/v1/chat");
+    }
+
+    #[test]
+    fn cloud_http_endpoint_parser_accepts_https_with_explicit_port() {
+        let (scheme, h, p, _path) =
+            CloudHttpProvider::parse_endpoint("https://api.example.com:9443/v1").unwrap();
+        assert_eq!(scheme, CloudHttpScheme::Https);
+        assert_eq!(h, "api.example.com");
+        assert_eq!(p, 9443);
+    }
+
+    #[test]
+    fn cloud_http_endpoint_parser_rejects_non_http_scheme() {
+        // ftp:// / file:// werden weiterhin abgelehnt — wir akzeptieren
+        // ausdrücklich nur http:// und https://.
+        let err = CloudHttpProvider::parse_endpoint("ftp://example.invalid/").unwrap_err();
+        assert!(format!("{err}").contains("not parseable"));
+        assert!(format!("{err}").contains("http:// or https://"));
     }
 
     #[test]
@@ -2832,6 +3134,90 @@ mod tests {
         assert_eq!(status.configured, "cloud_http");
         assert_eq!(status.active, "abrain");
         assert!(!status.cloud, "fallback from cloud → local must mark cloud=false");
+    }
+
+    // --- PR 11: TLS-Pfad ---------------------------------------------
+
+    #[tokio::test]
+    async fn cloud_http_run_succeeds_over_https_against_fake_tls_server() {
+        let (port, trust_cfg, _server) =
+            start_fake_https_server(FakeHttpsMode::Ok("tls antwort")).await;
+        let view = cloud_http_view_with(
+            format!("https://localhost:{port}/v1/chat"),
+            Some("sk-tls-test".into()),
+        );
+        let provider = CloudHttpProvider::new_with_tls_config(view, trust_cfg);
+        let response = provider.run("frage?").await.expect("https completion must succeed");
+        assert_eq!(response, "tls antwort");
+    }
+
+    #[tokio::test]
+    async fn cloud_http_run_over_https_with_untrusted_cert_classifies_cert_untrusted() {
+        // Fake-Server läuft; Provider nutzt die PRODUKTIVE ClientConfig
+        // (webpki-roots), die das Fake-Cert NICHT kennt. Erwartet:
+        // cert_untrusted.
+        let (port, _trust, _server) = start_fake_https_server(FakeHttpsMode::Ok("no")).await;
+        let view = cloud_http_view_with(
+            format!("https://localhost:{port}/v1/chat"),
+            Some("sk-test".into()),
+        );
+        let provider = CloudHttpProvider::new(view); // default tls config
+        let err = provider.run("x").await.unwrap_err();
+        let class = TextProviderImpl::classify_error(&err);
+        assert!(
+            class == "cert_untrusted"
+                || class == "cert_invalid"
+                || class == "tls_handshake_failed",
+            "expected cert-family class, got {class}",
+        );
+    }
+
+    #[tokio::test]
+    async fn cloud_http_run_over_https_against_plain_http_port_classifies_tls_handshake_failed() {
+        // Fake-HTTP-Server (kein TLS) — ein HTTPS-Client-Handshake
+        // dagegen muss fehlschlagen. Mit den Test-Trust-Roots
+        // (die irrelevant sind, weil der Handshake schon vor der
+        // Zertifikat-Prüfung scheitert).
+        let (port, _http) = start_fake_llama_server("unused").await;
+        let view = cloud_http_view_with(
+            format!("https://localhost:{port}/x"),
+            Some("sk-test".into()),
+        );
+        let provider = CloudHttpProvider::new(view);
+        let err = provider.run("x").await.unwrap_err();
+        let class = TextProviderImpl::classify_error(&err);
+        assert!(
+            class == "tls_handshake_failed" || class == "cert_invalid",
+            "expected tls_handshake_failed, got {class}",
+        );
+    }
+
+    #[tokio::test]
+    async fn cloud_http_run_over_https_returns_401_classifies_as_unauthorized() {
+        let (port, trust_cfg, _server) =
+            start_fake_https_server(FakeHttpsMode::Unauthorized).await;
+        let view = cloud_http_view_with(
+            format!("https://localhost:{port}/v1/chat"),
+            Some("sk-bad".into()),
+        );
+        let provider = CloudHttpProvider::new_with_tls_config(view, trust_cfg);
+        let err = provider.run("x").await.unwrap_err();
+        assert_eq!(TextProviderImpl::classify_error(&err), "unauthorized");
+    }
+
+    #[tokio::test]
+    async fn cloud_http_run_over_http_still_works_without_regression() {
+        // Der bestehende plaintext-Pfad darf durch die TLS-Erweiterung
+        // nicht regressieren. Gleiches Fake-Server-Framework, gleiche
+        // Antwort-Shape.
+        let (port, _http) = start_fake_llama_server("plain antwort").await;
+        let view = cloud_http_view_with(
+            format!("http://127.0.0.1:{port}/completion"),
+            Some("sk-plain".into()),
+        );
+        let provider = CloudHttpProvider::new(view);
+        let response = provider.run("x").await.expect("http path still works");
+        assert_eq!(response, "plain antwort");
     }
 
     // --- Chain + Llamafile lifecycle accessors (PR 4) -----------------

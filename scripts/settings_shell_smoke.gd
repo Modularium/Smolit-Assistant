@@ -78,6 +78,8 @@ func _init() -> void:
 	_check_cloud_http_editor_never_populates_secret_edit_from_status()
 	_check_cloud_http_editor_secret_present_flag_mirrored_in_status_label()
 	_check_cloud_http_editor_save_secret_clears_edit_field()
+	_check_cloud_http_editor_shows_insecure_hint_for_http_endpoint()
+	_check_cloud_http_editor_hides_insecure_hint_for_https_endpoint()
 
 	print("---")
 	if _fail == 0:
@@ -1124,6 +1126,35 @@ func _check_cloud_http_editor_save_secret_clears_edit_field() -> void:
 	_assert(
 		String(snap.get("secret_edit_text", "")).find(marker) < 0,
 		"cloud_http-editor: Marker taucht nicht mehr im Edit-Feld auf")
+	_despawn_panel(panel)
+
+
+func _check_cloud_http_editor_shows_insecure_hint_for_http_endpoint() -> void:
+	# PR 11: sobald der Nutzer einen `http://`-Endpoint eintippt, muss
+	# der kleine Insecure-Hint-Label einen klaren Hinweistext zeigen.
+	var panel := _spawn_panel()
+	panel.apply_status({"cloud_http_enabled": true})
+	panel.open_panel()
+	panel.simulate_cloud_http_endpoint_input_for_test("http://api.example.invalid:8443/v1")
+	var snap: Dictionary = panel.cloud_http_editor_snapshot()
+	var hint := String(snap.get("insecure_hint", ""))
+	_assert(hint.find("insecure") >= 0 or hint.find("plaintext") >= 0,
+		"cloud_http-editor: Insecure-Hint erscheint bei http://-Endpoint")
+	_assert(hint.find("https://") >= 0,
+		"cloud_http-editor: Hint verweist auf https:// als bevorzugte Alternative")
+	_despawn_panel(panel)
+
+
+func _check_cloud_http_editor_hides_insecure_hint_for_https_endpoint() -> void:
+	# PR 11: für `https://` darf der Hint leer sein — dort gibt's
+	# nichts zu warnen.
+	var panel := _spawn_panel()
+	panel.apply_status({"cloud_http_enabled": true})
+	panel.open_panel()
+	panel.simulate_cloud_http_endpoint_input_for_test("https://api.example.invalid/v1")
+	var snap: Dictionary = panel.cloud_http_editor_snapshot()
+	_assert(String(snap.get("insecure_hint", "")) == "",
+		"cloud_http-editor: Insecure-Hint bleibt bei https://-Endpoint leer")
 	_despawn_panel(panel)
 
 

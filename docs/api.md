@@ -1159,15 +1159,16 @@ Die UI muss Auswahl-Zustand in mindestens diesen Fällen aktiv verwerfen:
   hier, Execution läuft weiterhin über das bestehende Interaction-
   Backend inkl. Approval.
 
-### 2.10 Settings-Schreib-/Probe-Pfad (Ist-Zustand, PR 5 + PR 7 + PR 8 + PR 9 + PR 10)
+### 2.10 Settings-Schreib-/Probe-Pfad (Ist-Zustand, PR 5 + PR 7 + PR 8 + PR 9 + PR 10 + PR 11)
 
 Kleine, kuratierte Schreib-/Diagnose-Oberfläche für die Settings-
 Shell. Additiv zum bestehenden Protokoll, keine neue
 Nachrichtenfamilie. Der heutige Scope umfasst `llamafile_local`-Felder
 (PR 5), STT-/TTS-Command-Provider (PR 7), den lokalen HTTP-
 Text-Provider `local_http` (PR 8), die Text-Provider-Fallback-
-Kette (PR 9) und den ersten Cloud-/Remote-Text-Provider
-`cloud_http` mit dediziertem Secret-Pfad (PR 10).
+Kette (PR 9), den ersten Cloud-/Remote-Text-Provider `cloud_http`
+mit dediziertem Secret-Pfad (PR 10) und seit PR 11 sicheres
+HTTPS/TLS für `cloud_http`.
 
 **Eingang:** `settings_set_llamafile_config`.
 
@@ -1380,7 +1381,7 @@ antwortet mit einem frischen `status`-Envelope. `text_provider_chain`
 spiegelt sofort die neue Reihenfolge, `llamafile_in_chain` /
 `local_http_in_chain` werden entsprechend aktualisiert.
 
-#### 2.10d Cloud-HTTP-Schreib-/Probe-Pfad + Secret-Pfad (PR 10)
+#### 2.10d Cloud-HTTP-Schreib-/Probe-Pfad + Secret-Pfad (PR 10 + PR 11)
 
 PR 10 führt den **ersten Cloud-/Remote-Text-Provider** `cloud_http`
 ein — mit einem **dedizierten Secret-Pfad**. Sensitive Werte (API-
@@ -1398,10 +1399,13 @@ Keys) wandern durch eine andere IPC-Message als operationale Werte
 - `enabled` (bool, Pflicht) — Master-Schalter. Cloud ist
   opt-in; ohne `true` bleibt der Provider inert, selbst wenn er
   in der Chain steht und ein Key gespeichert ist.
-- `endpoint` (string|null, optional) — `http://host:port/path`.
-  `https://` wird hart abgelehnt (Error-Klasse
-  `endpoint_scheme_unsupported`); TLS ist einem Folge-PR
-  vorbehalten. Ein leerer String / nur Whitespace löscht den Wert.
+- `endpoint` (string|null, optional) — `http://host:port/path`
+  **oder** `https://host:port/path`. Seit PR 11 akzeptiert der
+  Parser beide Schemes; `https://` geht durch `tokio-rustls` mit
+  dem in `webpki-roots` eingebetteten Mozilla-Trust-Store. Andere
+  Schemes (z. B. `ftp://`) werden hart abgelehnt (Error-Klasse
+  `endpoint_scheme_unsupported`). Ein leerer String / nur
+  Whitespace löscht den Wert.
 - `model` (string|null, optional) — optionaler Modellname, wird
   als `model`-Feld in den Request-Body aufgenommen.
 - `request_timeout_seconds` (u64|null, optional) — `0` wird
@@ -1428,24 +1432,45 @@ mit genau einem neuen Feld:
 in der Antwort niemals auf, auch nicht in einer gekürzten oder
 gehashten Form.**
 
-**Probe:** `settings_probe_cloud_http`. TCP-Connect gegen den
-geparsten Endpoint; **kein** Completion-Request, **kein**
-Bearer-Header auf der Leitung. Kuratierte Klassen:
+**Probe:** `settings_probe_cloud_http`. Für `http://`-Endpoints
+ein reiner TCP-Connect (wie in PR 10); für `https://`-Endpoints
+seit PR 11 zusätzlich ein echter TLS-Handshake gegen den
+`default_cloud_http_tls_config` (webpki-roots). **Kein**
+Completion-Request, **kein** Bearer-Header auf der Leitung. Der
+Handshake-Fehler wird ehrlich klassifiziert — keine stillen
+Fallbacks, keine „accept invalid certs"-Abkürzung.
+
+Kuratierte Klassen (PR 10 + PR 11):
 
 - `"not_in_chain"` / `"disabled"` / `"not_configured"` —
   Config-Stufen.
 - `"secret_missing"` — enabled, Endpoint gesetzt, aber kein Key
   im Secrets-Store.
-- `"endpoint_scheme_unsupported"` — `https://` (noch) nicht
-  unterstützt.
+- `"endpoint_scheme_unsupported"` — Scheme ist weder `http://`
+  noch `https://` (z. B. `ftp://`).
 - `"endpoint_unparseable"` — URL-Parser-Fehler.
-- `"http_connect_failed"` / `"timeout"` — Netzwerk.
-- `"ok"` — TCP-Connect erfolgreich; der Server hat keinen
-  Completion-Roundtrip gesehen.
+- `"http_connect_failed"` / `"timeout"` — TCP-Schicht.
+- `"tls_handshake_failed"` (PR 11) — TLS-Handshake scheiterte
+  aus einem Grund, der nicht als Zertifikatsproblem klassifiziert
+  werden kann (z. B. Protokoll-Mismatch; Peer spricht kein TLS).
+- `"cert_untrusted"` (PR 11) — Peer-Cert wurde zurückgewiesen,
+  weil der Issuer nicht im Trust-Store steht
+  (`UnknownIssuer`-Familie).
+- `"cert_invalid"` (PR 11) — Peer-Cert liegt außerhalb seiner
+  Gültigkeit (expired / not-yet-valid), hat eine ungültige
+  Signatur, einen nicht passenden Hostnamen oder wurde aus einem
+  anderen `InvalidCertificate(…)`-Grund abgelehnt.
+- `"ok"` — für `https://`: TLS-Handshake erfolgreich; für
+  `http://`: TCP-Connect erfolgreich (dann `"ok_http"`, siehe
+  unten). Es wurde **kein** Completion-Roundtrip gemacht.
+- `"ok_http"` (PR 11) — TCP-Connect über Plaintext erfolgreich;
+  Probe kennzeichnet bewusst, dass der konfigurierte Pfad kein
+  TLS anbietet und nur über ein vertrauenswürdiges Netz sicher
+  nutzbar ist.
 
 Antwort: `settings_probe_result` mit `axis="cloud_http"`.
 `message` und `class` sind kuratiert; **weder Endpoint noch Key
-tauchen im Response auf.**
+tauchen im Response auf — auch nicht im Fehlerpfad.**
 
 **Eingang:** `settings_reset_text_provider_chain`.
 

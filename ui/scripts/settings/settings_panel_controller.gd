@@ -118,6 +118,11 @@ var _cloud_http_apply_status_label: Label = null
 var _cloud_http_probe_status_label: Label = null
 var _cloud_http_secret_status_label: Label = null
 var _cloud_http_external_warning_label: Label = null
+## PR 11 — kleiner Insecure-Transport-Hinweis: wird sichtbar, wenn der
+## Nutzer einen `http://`-Endpoint eingibt. Kein Schalter, keine
+## moralische Flut — nur ein ehrlicher Hinweistext, dass TLS bevorzugt
+## wird, sobald der Server es anbietet.
+var _cloud_http_insecure_hint_label: Label = null
 
 ## PR 9 — Text-Provider-Chain-Editor. Bewusst klein: eine Liste der
 ## bekannten Kinds mit Enable-CheckBox + Up/Down-Buttons, Apply-Knopf
@@ -420,6 +425,7 @@ func _render_sections() -> void:
 	_cloud_http_probe_status_label = null
 	_cloud_http_secret_status_label = null
 	_cloud_http_external_warning_label = null
+	_cloud_http_insecure_hint_label = null
 
 	for section in _SectionsRef.all_sections():
 		_content_vbox.add_child(_build_section(section))
@@ -1621,9 +1627,22 @@ func _build_cloud_http_editor_block() -> Control:
 	endpoint_label.custom_minimum_size = Vector2(90, 0)
 	endpoint_row.add_child(endpoint_label)
 	_cloud_http_endpoint_edit = LineEdit.new()
-	_cloud_http_endpoint_edit.placeholder_text = "http://host:port/path  (https:// in dieser Stufe noch nicht unterstützt)"
+	# PR 11: beide Schemes sind jetzt erlaubt; der Hinweis unten
+	# markiert http:// als insecure.
+	_cloud_http_endpoint_edit.placeholder_text = "http://host:port/path or https://host:port/path"
 	_cloud_http_endpoint_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_cloud_http_endpoint_edit.text_changed.connect(_on_cloud_http_endpoint_text_changed)
 	endpoint_row.add_child(_cloud_http_endpoint_edit)
+
+	# PR 11: kleiner Insecure-Transport-Hinweis direkt unter der
+	# Endpoint-Zeile. Sichtbar, wenn `http://` statt `https://`
+	# konfiguriert ist. Kein Toggle — nur ehrliche Info.
+	_cloud_http_insecure_hint_label = Label.new()
+	_cloud_http_insecure_hint_label.text = ""
+	_cloud_http_insecure_hint_label.modulate = Color(1, 0.85, 0.45, 0.9)
+	_cloud_http_insecure_hint_label.add_theme_font_size_override("font_size", 10)
+	_cloud_http_insecure_hint_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(_cloud_http_insecure_hint_label)
 
 	var model_row := HBoxContainer.new()
 	model_row.add_theme_constant_override("separation", 6)
@@ -1728,7 +1747,30 @@ func _sync_cloud_http_widgets_from_status() -> void:
 		else:
 			_cloud_http_secret_status_label.text = "key: not set ✗"
 			_cloud_http_secret_status_label.modulate = Color(0.9, 0.5, 0.5, 0.9)
+	_refresh_cloud_http_insecure_hint()
 	_syncing_cloud_http_widgets = false
+
+
+## PR 11 — reagiert auf Nutzer-Eingaben im Endpoint-Feld und aktualisiert
+## den Insecure-Hint in Echtzeit. Kein Validierungs-Fallback, kein
+## Toggle — nur ein kurzer ehrlicher Hinweis.
+func _on_cloud_http_endpoint_text_changed(_new_text: String) -> void:
+	_refresh_cloud_http_insecure_hint()
+
+
+## Aktualisiert den Insecure-Transport-Hinweis basierend auf dem
+## aktuellen Text im Endpoint-Feld. Leeres Feld oder `https://` →
+## kein Hinweis; `http://...` → knapper Hinweis.
+func _refresh_cloud_http_insecure_hint() -> void:
+	if _cloud_http_insecure_hint_label == null or _cloud_http_endpoint_edit == null:
+		return
+	var text := _cloud_http_endpoint_edit.text.strip_edges().to_lower()
+	if text.begins_with("http://"):
+		_cloud_http_insecure_hint_label.text = (
+			"insecure transport: http:// sends the api key in plaintext. Prefer https:// or a trusted reverse proxy."
+		)
+	else:
+		_cloud_http_insecure_hint_label.text = ""
 
 
 func _on_cloud_http_apply_pressed() -> void:
@@ -1845,6 +1887,7 @@ func cloud_http_editor_snapshot() -> Dictionary:
 			"apply_status": "",
 			"probe_status": "",
 			"external_warning": "",
+			"insecure_hint": "",
 		}
 	return {
 		"built": true,
@@ -1856,6 +1899,7 @@ func cloud_http_editor_snapshot() -> Dictionary:
 		"apply_status": _cloud_http_apply_status_label.text if _cloud_http_apply_status_label != null else "",
 		"probe_status": _cloud_http_probe_status_label.text if _cloud_http_probe_status_label != null else "",
 		"external_warning": _cloud_http_external_warning_label.text if _cloud_http_external_warning_label != null else "",
+		"insecure_hint": _cloud_http_insecure_hint_label.text if _cloud_http_insecure_hint_label != null else "",
 	}
 
 
@@ -1866,3 +1910,12 @@ func simulate_cloud_http_save_secret_for_test(value: String) -> void:
 	if _cloud_http_secret_edit != null:
 		_cloud_http_secret_edit.text = value
 	_on_cloud_http_save_secret_pressed()
+
+
+## PR 11 — Test-Hook: simuliert, dass der Nutzer einen Endpoint ins
+## Feld tippt. Löst denselben Hint-Refresh aus wie der echte
+## `text_changed`-Signal-Pfad.
+func simulate_cloud_http_endpoint_input_for_test(value: String) -> void:
+	if _cloud_http_endpoint_edit != null:
+		_cloud_http_endpoint_edit.text = value
+	_refresh_cloud_http_insecure_hint()
