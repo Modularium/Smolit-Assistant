@@ -76,6 +76,15 @@
 #                   sowie Scene-Verhalten des Controllers (set_utterance,
 #                   clear_utterance, leere/whitespace-Eingaben, Replace,
 #                   wiederholte Updates). Exit 0 = alle PASS.
+#   speech-sync-smoke
+#                 — Führt scripts/speech_sync_smoke.gd aus (PR 14).
+#                   Prüft das TTS-Lebenszyklus-Wiring in der UI:
+#                   EventBus-Signale, IpcClient-Routing, Avatar-
+#                   Controller-Handler und das konservative Utterance-
+#                   Bubble-Verhalten (Response-Bubble bleibt sichtbar,
+#                   Heard-/Leer-Zustände werden nicht umgedeutet,
+#                   speaking_ended ist ein No-op auf dem Bubble-Pfad).
+#                   Exit 0 = alle PASS.
 #   avatar-render-polish-smoke
 #                 — Führt scripts/avatar_render_polish_smoke.gd aus.
 #                   Prüft den Phase-3.2-Render-Polish:
@@ -297,6 +306,18 @@ case "${CASE}" in
     # wiederholte Updates). Keine IPC, kein EventBus-Roundtrip.
     exec godot --headless --path "${UI_DIR}" \
       --script "${REPO_ROOT}/scripts/utterance_bubble_smoke.gd"
+    ;;
+  speech-sync-smoke)
+    # Spezialfall: Smoke für das TTS-Lebenszyklus-Wiring (PR 14).
+    # Prüft `speaking_started` / `speaking_ended` von der
+    # Protokoll-Projektion in der UI bis zur konservativen
+    # Utterance-Bubble-Reaktion. Ein Headless-Scene-Spawn des
+    # Avatar-Controllers würde den Autoload-Kontext brauchen, den
+    # `--script` nicht liefert — deshalb prüft der Smoke die
+    # Avatar-Verdrahtung auf Quelltext-Ebene und die Bubble auf
+    # Scene-Ebene.
+    exec godot --headless --path "${UI_DIR}" \
+      --script "${REPO_ROOT}/scripts/speech_sync_smoke.gd"
     ;;
   avatar-render-polish-smoke)
     # Spezialfall: Smoke für den Phase-3.2-Render-Polish

@@ -404,6 +404,10 @@ func _handle_frame(raw: String) -> void:
 			EventBus.target_cleared_received.emit(_extract_payload(parsed))
 		"settings_probe_result":
 			EventBus.settings_probe_result_received.emit(_extract_payload(parsed))
+		"speaking_started":
+			EventBus.speaking_started_received.emit(_extract_payload(parsed))
+		"speaking_ended":
+			EventBus.speaking_ended_received.emit(_extract_payload(parsed))
 		_:
 			if _debug:
 				push_warning("[ipc] unknown message type: %s" % type)

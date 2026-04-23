@@ -62,3 +62,17 @@ signal target_cleared_received(payload: Dictionary)
 ## (auf Validation-Fehler). Read-only: die UI trifft keine Provider-
 ## Entscheidung, sie spiegelt den Core-Stand und zeigt Probe-Ergebnisse.
 signal settings_probe_result_received(payload: Dictionary)
+
+## TTS-Lebenszyklus (PR 14, siehe docs/api.md §2.11). Der Core
+## emittiert genau dann `speaking_started` / `speaking_ended`, wenn
+## ein TTS-Provider tatsächlich anläuft — sowohl im aktiven
+## `speak_text`-Pfad als auch im passiven `auto_speak`-Pfad nach einer
+## `response`. Payload-Felder: `source` (`"speak_text"` | `"auto_speak"`),
+## `provider` (primärer bzw. tatsächlich aktiver Kind-Name, heute nur
+## `"command"`), optional `action_id`. `speaking_ended` ergänzt
+## `ok: bool` und optional `error_class`. UI-Konsumenten müssen
+## defensiv sein: bleibt ein `speaking_ended` aus (z. B. abgebrochene
+## Verbindung), fallen die bestehenden Hold-Timer weiterhin korrekt
+## zurück auf `idle`.
+signal speaking_started_received(payload: Dictionary)
+signal speaking_ended_received(payload: Dictionary)

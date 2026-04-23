@@ -16,8 +16,12 @@ extends Control
 ##     Aktionen, keine Policy-Kopplung.
 ##   * **Leichtes Fallback.** Leere Texte blenden die Bubble stumm aus,
 ##     ohne Crash und ohne kaputte Restdarstellung.
-##   * **Kein TTS-Sync.** Die Bubble reagiert nicht auf TTS-Lebenszyklus;
-##     das ist bewusst einer späteren Phase vorbehalten.
+##   * **Weicher TTS-Sync.** Seit PR 14 verlängert ein eintreffendes
+##     `speaking_started` den Anzeige-Timer einmalig, solange aktuell
+##     eine `response`-Bubble sichtbar ist — damit die Antwort nicht
+##     ausfadet, während Smolit noch spricht. Kein Phonem-Stream, kein
+##     Audio-Timing; `speaking_ended` lässt den normalen Display-Timer
+##     zu Ende laufen.
 ##
 ## Lifecycle:
 ##   * Bubble startet unsichtbar. `heard`/`response` löst Fade-in +
@@ -99,6 +103,13 @@ func _connect_event_bus() -> void:
 		bus.response_received.connect(_on_response)
 	if bus.has_signal("ipc_disconnected"):
 		bus.ipc_disconnected.connect(_on_ipc_disconnected)
+	# PR 14 — optionaler TTS-Sync. Wenn der Autoload die neuen Signale
+	# kennt, hängen wir uns an; ältere Cores schicken sie nicht, dann
+	# bleibt die Bubble beim bisherigen Timer-Verhalten.
+	if bus.has_signal("speaking_started_received"):
+		bus.speaking_started_received.connect(_on_speaking_started)
+	if bus.has_signal("speaking_ended_received"):
+		bus.speaking_ended_received.connect(_on_speaking_ended)
 
 
 # --- Event handlers ------------------------------------------------------
@@ -117,6 +128,30 @@ func _on_ipc_disconnected() -> void:
 	# würdig. Harter Reset ohne Fade-out, damit ein Reconnect mit einem
 	# sauberen, leeren Zustand startet.
 	clear_utterance()
+
+
+func _on_speaking_started(_payload: Dictionary) -> void:
+	# PR 14 — Wenn die Bubble gerade eine `response` zeigt und TTS
+	# wirklich anläuft, setzen wir den Anzeige-Timer einmal zurück. So
+	# liest der User die Antwort nicht weg, während sie noch gesprochen
+	# wird. `heard`-Bubbles und leere Zustände lassen wir bewusst in
+	# Ruhe — der `heard`-Timer markiert den STT-Moment, nicht die
+	# Sprechdauer.
+	if _current_kind != _StateRef.Kind.RESPONSE:
+		return
+	if _hide_timer == null:
+		return
+	_hide_timer.stop()
+	_hide_timer.wait_time = max(0.1, _StateRef.display_seconds_for(_StateRef.Kind.RESPONSE))
+	_hide_timer.start()
+	_hide_scheduled = true
+
+
+func _on_speaking_ended(_payload: Dictionary) -> void:
+	# Bewusst leer: der normale Display-Timer läuft weiter und blendet
+	# die Bubble regulär aus. Wir wollen nicht am Sprechende hart
+	# abschneiden — das wäre ein harter UX-Knick.
+	pass
 
 
 # --- Öffentliche, test-freundliche API ----------------------------------

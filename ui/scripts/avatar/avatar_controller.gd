@@ -59,6 +59,13 @@ const TALK_HOLD_SECONDS: float = 1.8
 const ERROR_HOLD_SECONDS: float = 1.2
 const ACTING_SUCCESS_HOLD_SECONDS: float = 0.9
 
+## PR 14 — Kurzer Settle-Hold, wenn der Core echtes `speaking_ended`
+## meldet. Ersetzt den Fallback-`TALK_HOLD_SECONDS` in genau dem Moment,
+## in dem wir wissen, dass TTS wirklich fertig ist — kein weiteres
+## Raten über die Sprechdauer. Bewusst kürzer als `TALK_HOLD_SECONDS`,
+## damit der Avatar nach tatsächlichem Ende zügig auf `idle` zurückfällt.
+const TALK_SETTLE_SECONDS: float = 0.35
+
 const IDLE_TEXTURE: Texture2D = preload("res://assets/avatar/smolit_idle.png")
 const ACTIVE_TEXTURE: Texture2D = preload("res://assets/avatar/smolit_active.png")
 
@@ -188,6 +195,14 @@ func _ready() -> void:
 	EventBus.action_completed_received.connect(_on_action_completed)
 	EventBus.action_failed_received.connect(_on_action_failed)
 	EventBus.action_cancelled_received.connect(_on_action_cancelled)
+
+	# PR 14 — echter TTS-Lebenszyklus statt Fallback-Hold-Timer. Beide
+	# Handler ergänzen den bestehenden Pfad `response → TALKING → Hold`
+	# additiv: wenn der Core keine Lifecycle-Events schickt (älterer
+	# Core, TTS-Kette nicht einsatzbereit), greift weiterhin der
+	# `TALK_HOLD_SECONDS`-Fallback aus `_on_response`.
+	EventBus.speaking_started_received.connect(_on_speaking_started)
+	EventBus.speaking_ended_received.connect(_on_speaking_ended)
 
 	var initial: int = AvatarStateRef.State.IDLE if IpcClient.is_connected_to_core() \
 		else AvatarStateRef.State.DISCONNECTED
@@ -612,6 +627,48 @@ func _on_action_cancelled(_payload: Dictionary) -> void:
 	var next: int = AvatarStateRef.State.IDLE if IpcClient.is_connected_to_core() \
 		else AvatarStateRef.State.DISCONNECTED
 	_set_state(next)
+
+
+# --- PR 14: TTS-Lebenszyklus -------------------------------------------
+#
+# Minimum-MVP: `speaking_started` übernimmt die Steuerung vom Fallback-
+# `TALK_HOLD_SECONDS`-Timer aus `_on_response`, sobald wir wissen, dass
+# tatsächlich gesprochen wird. `speaking_ended` klappert die TALKING-
+# Phase kurz zu `idle` hinunter. Beide Handler sind defensiv: unbekannte
+# Payload-Felder werden still ignoriert, ein fehlendes `speaking_ended`
+# (Verbindungsabbruch) lässt den bereits laufenden Hold-Timer aus
+# `_on_response` zu Ende laufen.
+
+
+func _on_speaking_started(_payload: Dictionary) -> void:
+	# Schon in einem anderen State? Wir wollen kein ACTING oder ERROR
+	# hart überschreiben, während der Core gerade eine andere Aktion
+	# rendert. Der typische Pfad ist aber entweder TALKING (nach
+	# `response`) oder IDLE (bei `speak_text`, weil dort weder
+	# `response` noch `thinking` läuft).
+	if _state == AvatarStateRef.State.ERROR or _state == AvatarStateRef.State.ACTING:
+		return
+	_hold_timer.stop()
+	_set_state(AvatarStateRef.State.TALKING)
+
+
+func _on_speaking_ended(payload: Dictionary) -> void:
+	# Nur greifen, wenn die Figur wirklich noch „talking" zeigt. Sonst
+	# würde ein verspätet eintreffendes `speaking_ended` (z. B. nach
+	# Reconnect) einen ungewollten State-Sprung auslösen.
+	if _state != AvatarStateRef.State.TALKING:
+		return
+	# `ok=false` wird sanft über den bestehenden ERROR-Pfad gerendert,
+	# damit ein fehlgeschlagener Sprechversuch sichtbar, aber nicht
+	# theatralisch abschließt. Erfolg schrumpft den Hold-Timer auf
+	# `TALK_SETTLE_SECONDS` — der Core hat jetzt den Takt vorgegeben,
+	# wir müssen nicht mehr über die Sprechdauer raten.
+	var ok: bool = bool(payload.get("ok", true))
+	if not ok:
+		_set_state(AvatarStateRef.State.ERROR)
+		_start_hold(ERROR_HOLD_SECONDS)
+		return
+	_start_hold(TALK_SETTLE_SECONDS)
 
 
 # --- Template-Capability-Helfer -----------------------------------------
