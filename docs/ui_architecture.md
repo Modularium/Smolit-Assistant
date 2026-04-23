@@ -903,8 +903,9 @@ Theme-Effekten ab (insgesamt 32 Assertions, alle PASS unter
 
 - Keine alternativen Figuren (Roboter / Mensch / Tier / Nebel) —
   siehe §8b.1.
-- Kein Template-Marktplatz, kein User-Upload-Pfad — siehe §8b.4
-  (Stufe C bleibt Ziel-Zustand).
+- Kein Template-Marktplatz, kein User-Upload-Pfad — Stage C ist
+  ausdrücklich nicht begonnen, siehe §8b.9 und
+  [`docs/avatar_stage_c_research.md`](./avatar_stage_c_research.md).
 - Kein Nutzerprofil, kein Account, keine Cloud-Sync. Die lokalen
   UI-Preferences sind bewusst auf die drei Phase-A-Felder begrenzt
   und landen in derselben ConfigFile, die schon die Avatar-Position
@@ -924,7 +925,9 @@ Phase B öffnet den Identity-Punkt aus §8b.2 ausdrücklich **klein und
 kuratiert**: vier Identity-IDs sind Teil des MVPs —
 `smolit_salamander` (Default), `robot_head`, `humanoid_head` und
 `orb`. Das ist kein Template-Marktplatz und kein User-Upload-Pfad;
-Stufe C aus §8b.4 bleibt Ziel-Zustand. Die Linie ist seit dem
+Stage C ist ausdrücklich nicht begonnen und bleibt Forschungs-/
+Designraum (siehe §8b.9 und
+[`docs/avatar_stage_c_research.md`](./avatar_stage_c_research.md)). Die Linie ist seit dem
 Hardening-PR kein reiner „Identity-Name-Katalog" mehr, sondern ein
 kleiner **Template-Capability-Contract**: jedes Template deklariert
 explizit, welche Avatar-States es trägt und wie stark es die fünf
@@ -1094,6 +1097,83 @@ identity-Einträge ab.
 - Kein Default-Austausch. Smolit bleibt Referenz und erste Option
   im Picker.
 
+### 8b.9 Stage C — Forschungs- und Designraum (nicht begonnen)
+
+Stage C der Appearance-Linie ist **ausdrücklich nicht begonnen**.
+Sie ist weder eine laufende Implementierungsphase noch ein fest
+zugesagter Ausbaupfad, sondern ein gesondert dokumentierter
+Forschungs-/Designraum. Stage B ist bewusst geschlossen und wird nicht
+stillschweigend in offene Avatar-Erweiterbarkeit überführt.
+
+Die Begründung, die offenen Fragen, die harten Nicht-Ziele, das
+Sicherheits- und Vertrauensmodell, der Vergleich möglicher
+Architekturpfade (C1–C4) sowie die Exit-Kriterien für einen späteren
+echten Implementierungsstart stehen vollständig und ausschließlich in
+[`docs/avatar_stage_c_research.md`](./avatar_stage_c_research.md).
+
+Für diesen Abschnitt gelten drei harte Klarstellungen:
+
+- **Stage C öffnet heute keinen neuen Codepfad.** Es gibt keinen
+  Asset-Loader, keinen Manifest-Parser, keinen File-Picker für
+  Avatar-Inhalte, keinen Plugin-Kontrakt. Der Capability-Contract aus
+  §8b.8 ist intern und bleibt intern.
+- **Stage C bleibt security-gated.** Ein späterer Übergang in eine
+  Implementierungsphase ist erst zulässig, wenn die Exit-Kriterien
+  in [`docs/avatar_stage_c_research.md` §10](./avatar_stage_c_research.md)
+  erfüllt sind — insbesondere ein beschlossenes Sicherheitsmodell,
+  konkrete Formatgrenzen, eine Teststrategie und deterministische
+  Fallback-Regeln.
+- **Trennung bleibt bindend.** Auch unter Stage C ändert sich nichts
+  an der Grundregel Appearance ≠ Behavior ≠ Personality ≠ Policy aus
+  §8b.3. Keine erweiterte Avatar-Quelle darf Assistant-Rechte,
+  Approval-Flows, Action-Execution, Permissions oder ABrain-
+  Entscheidungen beeinflussen.
+
+### 8b.10 Stage-C-Guardrails für spätere PRs
+
+Operationale Leitplanken für jeden zukünftigen PR, der Stage-C-Themen
+berührt. Sie ersetzen nicht §8b.9 oder
+[`docs/avatar_stage_c_research.md`](./avatar_stage_c_research.md),
+sondern fassen deren Konsequenzen für den PR-Review-Alltag zusammen.
+
+- **Research-/Security-Bezug ist Voraussetzung.** Ein Stage-C-PR muss
+  explizit auf einen beschlossenen Abschnitt in
+  [`docs/avatar_stage_c_research.md`](./avatar_stage_c_research.md)
+  verweisen — insbesondere auf die Exit-Kriterien in §10 dort. Ohne
+  diesen Bezug ist der PR research-gated und nicht mergefähig.
+- **Keine Runtime-Vorimplementierung ohne explizite Entscheidung.**
+  Kein Asset-Loader, kein Manifest-Parser, kein File-Picker, kein
+  Import-Dialog, keine neue Scene, kein neues Runtime-Skript für
+  Avatar-Import unter dem Vorwand „Vorbereitung" oder „nur
+  Skelett". Auch Prototypen gehören nicht in den Produktivpfad,
+  solange das Sicherheitsmodell nicht beschlossen ist.
+- **Keine User-Import-Wege ohne festes Vertrauensmodell.** Jede Form
+  von nutzerseitigem Input in die Avatar-Linie (lokale Bundles,
+  externe Assets, Drag-and-Drop) ist nur zulässig, nachdem die
+  Vertrauensklasse (§5 der Research-Doku), die Formatgrenzen und
+  die Refusal-Semantik (§7) als Entscheidung stehen — nicht im
+  selben PR.
+- **Kein Vermischen von Avatar-Look und Assistant-Fähigkeiten.**
+  Ein Stage-C-PR darf keinen Pfad öffnen, in dem Avatar-Wahl,
+  Theme, Identity oder Bundle-Inhalt Approval-Flows, Policy,
+  Permissions, Action-Execution oder ABrain-Prompts beeinflusst —
+  weder direkt noch über neue Felder oder Metadaten.
+- **Default-Smolit und Fallback-Verhalten bleiben geschützt.**
+  Smolit Salamander bleibt Default, Referenz und einziger
+  Endfallback. Jeder Fehlerpfad landet deterministisch dort. Kein
+  Stage-C-PR darf diesen Fallback aufweichen, austauschbar machen
+  oder hinter einem Flag versteckt deaktivieren.
+- **Kein Core-/IPC-Druck durch Avatar-Arbeit.** Wenn ein Stage-C-
+  Entwurf Änderungen am Core, am IPC-Protokoll (siehe
+  [`docs/api.md`](./api.md)) oder an ABrain erzwingen würde, ist
+  die korrekte Reaktion, den Entwurf zu reduzieren — nicht, den
+  Core/ABrain nachzuziehen. Appearance bleibt UI-lokal.
+
+Reviewer dürfen sich auf diese Guardrails direkt berufen.
+Stage-C-Inhalt, der eine dieser Leitplanken verletzt, ist nicht
+„nur eine Änderungsbitte" — er ist außerhalb des Scopes, solange
+die Research-Exit-Kriterien nicht erfüllt sind.
+
 ---
 
 ## 8c. Dev-/MVP-Steuerung für Workflow-Overlay und Avatar-Appearance
@@ -1101,8 +1181,11 @@ identity-Einträge ab.
 Kleine, dev-/preview-orientierte Hilfsschicht. Ausdrücklich **kein**
 Settings-System, **kein** Customization-Marktplatz, **kein**
 Persistenzsystem — sie macht nur die beiden bestehenden UI-Linien
-(Workflow-Overlay, Avatar-Appearance Phase A) zur Laufzeit
-beobachtbar und umschaltbar.
+(Workflow-Overlay, Avatar-Appearance Phase A + Phase B) zur Laufzeit
+beobachtbar und umschaltbar. Die Avatar-Seite schaltet dabei
+ausschließlich die **kuratierte** Stage-B-Template-Linie durch; sie
+öffnet keinen Stage-C-Importpfad, keine neue Avatar-Quelle und keine
+Kopplung an Assistant-Logik, Policy oder Core-/IPC-Modell.
 
 **Gating.** Das Panel ist standardmäßig unsichtbar und stumm.
 Sichtbar wird es ausschließlich mit
@@ -1172,8 +1255,11 @@ beeinflusst nur den Overlay-Renderer.
 - Kein Workflow-Authoring, kein Graph-Editor, kein Action-
   Auslöser. Die sechs Preview-Phasen sind canned Snapshots, keine
   Event-Erzeugung.
-- Kein alternatives Avatar-Template, kein User-Upload, kein 3D-
-  Editor — Phase A bleibt Smolit Salamander only.
+- Kein neues Avatar-Template, kein User-Upload, kein 3D-Editor —
+  die Steuerung schaltet nur zwischen den vier kuratierten Stage-B-
+  Identities (Smolit / Robot-Head / Humanoid-Head / Orb) um.
+  Default-Smolit bleibt erster-Klasse und harter Fallback; unbekannte
+  Identity-Werte werden auf Smolit zurückgeklemmt (§8b.8).
 - Keine Auswirkung auf Presence-Controller, Approval-/Action-/
   Discovery-Banner, Compact-Input, Overlay/Click-through/AOT,
   Window-Behavior-Backend-Familie.

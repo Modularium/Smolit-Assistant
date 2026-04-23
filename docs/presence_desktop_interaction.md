@@ -286,8 +286,17 @@ Wichtig — **ohne jede Ausnahme**:
   Permission-Grenzen.
 
 Status: **Phase A implementiert, Phase B als kuratierter Spike
-aktiv, Rest Ziel-Zustand.** Default bleibt Smolit Salamander;
-Alternativen kommen additiv hinzu und ersetzen den Default nicht.
+aktiv, Stage C ausdrücklich nicht begonnen (Forschungs-/Designraum).**
+Default bleibt Smolit Salamander; Alternativen kommen additiv hinzu
+und ersetzen den Default nicht. Was „Stage C" in Zukunft überhaupt
+bedeuten könnte — inklusive harter Nicht-Ziele, Sicherheitsmodell
+und Exit-Kriterien für einen späteren echten Implementierungsstart —
+ist separat in
+[`avatar_stage_c_research.md`](./avatar_stage_c_research.md)
+dokumentiert. Aus Presence-Sicht wichtig: eine spätere Stage C ändert
+nichts an der Trennung „Avatar ≠ Assistentenlogik" aus dem nächsten
+Unterabschnitt; visuelle Personalisierung bleibt rein visuell, auch
+wenn ihr Quellenraum wächst.
 
 Der aktuelle Phase-B-Spike (siehe
 [`ui_architecture.md` §8b.8](./ui_architecture.md)) ergänzt drei

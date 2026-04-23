@@ -375,7 +375,7 @@ Desktop Interaction Layer, die UI projiziert nur.
 
 ---
 
-## Phase 4b – Avatar Appearance & Personalization (parallele Linie, Phase A Ist, sonst Ziel-Zustand)
+## Phase 4b – Avatar Appearance & Personalization (parallele Linie; Stufen A und B Ist, Stufe C research-/security-gated)
 
 Parallele Linie zu Phase 4 (Behavioral Layer). Diese Phase beschreibt
 die Erweiterung der bestehenden Avatar-/Presence-Linie um ein
@@ -386,10 +386,15 @@ Sicherheits-/Permission-Modelle.
 **Status.** Stufe A ist als MVP-Spike implementiert (nur
 Smolit-Salamander, vier markentreue Themes, drei UI-Behavior-
 Profiles, kleine Appearance-Overrides, Env-gesteuerte Opt-in-
-Konfiguration). Stufen B (kuratierte Templates mit alternativen
-Figuren) und C (User-supplied Avatare) bleiben vollständig
-Ziel-Zustand. Der Default-Avatar (Smolit Salamander) bleibt
-unverändert und erster-Klasse.
+Konfiguration). Stufe B ist gelandet und gehärtet (drei zusätzliche
+prozedurale Identities neben Smolit und ein Template-Capability-
+Contract; Details siehe §4b.5 unten). Stufe C ist ausdrücklich
+**nicht begonnen**; sie ist in diesem Zyklus ein dokumentierter
+Forschungs-/Designraum mit eigenen Nicht-Zielen, Sicherheitsmodell
+und Exit-Kriterien —
+[`docs/avatar_stage_c_research.md`](./docs/avatar_stage_c_research.md).
+Der Default-Avatar (Smolit Salamander) bleibt unverändert und
+erster-Klasse.
 
 **Bindende Abgrenzungen:**
 
@@ -532,11 +537,22 @@ Stufe A ist implementiert; B und C bleiben Ziel-Zustand.
   Bewusst **nicht** Teil dieses Schritts: weitere Figuren über die
   vier hinaus, animierte Prozeduralformen, alternative State-
   Maschinen, Asset-Imports, Plug-in-Contract-Sprache, User-Uploads.
-- **Stufe C — User-supplied Avatare (später, Ziel-Zustand).**
-  Eigene Icons / Figuren, template-basiert validiert. Erst nach
-  stabiler Stufe B und mit klarem Validierungspfad (Größe,
-  Zustandsabdeckung, Sicherheits-/Content-Leitplanken). Nicht
-  Teil dieses PRs.
+- **Stufe C — Forschungs- und Designraum (research-gated,
+  security-gated; nicht begonnen).** Stage C ist in diesem Zyklus
+  ausdrücklich **keine** aktive Build-Phase. Es existiert weder
+  Asset-Loader noch Manifest-Parser noch File-Picker für Avatar-
+  Inhalte; der Capability-Contract aus Stufe B bleibt intern. Was
+  „Stage C" in Zukunft überhaupt meinen könnte — mögliche
+  Architekturpfade (nur mehr kuratierte Templates, repo-gepflegte
+  statische Assets, deklarative lokale Bundles, echte User-Imports),
+  harte Nicht-Ziele (kein Plugin-System, kein Marktplatz, keine
+  ausführbaren Fremdskripte, keine stillen Netzwerkzugriffe, keine
+  Vermischung mit Personality / Policy / Permissions / ABrain),
+  Sicherheits- und Vertrauensmodell sowie Exit-Kriterien für einen
+  späteren echten Implementierungsstart — steht konsolidiert in
+  [`docs/avatar_stage_c_research.md`](./docs/avatar_stage_c_research.md).
+  Ein Übergang von Research in Implementation ist erst legitim, wenn
+  die dort in §10 aufgeführten Kriterien erfüllt sind.
 
 ### 4b.6 Nicht-Ziele
 

@@ -44,7 +44,11 @@ Smolit soll sich nicht wie ein klassischer Chatbot anfühlen, sondern wie ein pr
   Theme / Appearance Overrides / Behavior Profile, rein
   darstellerisch) — ohne dass sich funktionale Identität,
   Logik oder Sicherheitsmodell ändern; Smolit Salamander bleibt
-  Default
+  Default und erster-Klasse. Eine offenere Avatar-Erweiterbarkeit
+  (externe Assets, User-Uploads, Avatar-Bundles) ist **kein
+  beschlossener Pfad**, sondern research-/security-gated und in
+  [docs/avatar_stage_c_research.md](./avatar_stage_c_research.md)
+  als reiner Forschungs-/Designraum dokumentiert.
 
 ### AI
 
@@ -659,7 +663,10 @@ Das Schema muss offen bleiben für:
 
 * Toolsystem
 * Multimodalität
-* tiefe Personalisierung
+* tiefe Personalisierung (assistant-seitig: Nutzerprofil, Memory,
+  Kontext — nicht als Zusage eines offenen Avatar-Quellenraums;
+  Avatar-Personalisierung bleibt rein visuell und kuratiert, siehe
+  [docs/avatar_stage_c_research.md](./avatar_stage_c_research.md))
 * produktionsreifer Hintergrundassistent im Smolit-Ökosystem
 
 ---
