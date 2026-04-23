@@ -1163,6 +1163,173 @@ regulären Start der Main-Scene geprüft.
   vom Core wäre eine additive Protokoll-Erweiterung — PR 16 führt
   bewusst keines ein.
 
+### 8.4d Approval UX v1 — Card + Integrationen (PR 17, Ist-Zustand)
+
+Leitprinzip: **Control > Autonomy.** Smolit darf geplante Aktionen
+erklären und um Zustimmung bitten; PR 17 führt **keine gefährlichen
+Aktionen** ein. Die Schicht bündelt drei ehrliche Bausteine:
+eine neue Approval-Card-UI, eine additive Erweiterung des Workflow-
+Visibility-Overlays aus §8.4c und einen weichen Avatar-Expression-
+Hook aus §8.4b. Der Core bekommt ein additives `risk`-Feld und
+einen **harmlosen Demo-Pfad**, damit die UX evaluiert werden kann,
+ohne Desktop-Automation oder andere gefährliche Seiteneffekte zu
+triggern.
+
+**Datei-Layout.**
+
+```text
+core/src/approvals/request.rs        # + `risk` (ApprovalRequest)
+                                     # + `source` (ApprovalResolvedPayload)
+                                     # + sanitize_risk/KNOWN_RISKS
+core/src/ipc/protocol.rs             # + approval_approve / approval_deny
+                                     # + request_approval_demo (incoming)
+core/src/app.rs                      # + request_approval_demo (no-op
+                                     #   after resolve; no backend action)
+
+ui/scripts/approval/
+├── approval_model.gd                # NEU: Risk-Sanitizer, Summary-Trim,
+│                                    #      Decision-Outcome-Mapping
+└── approval_card.gd                 # NEU: Scene-Controller
+
+ui/scenes/approval/
+└── approval_card.tscn               # NEU: PanelContainer-Root
+
+ui/autoload/ipc_client.gd            # + approval_approve / approval_deny
+                                     # + request_approval_demo Helfer
+
+ui/scripts/workflow/workflow_visibility_model.gd
+                                     # + StepKind.APPROVAL
+                                     # + apply_approval_requested/resolved
+
+ui/scripts/avatar/avatar_controller.gd
+                                     # + weicher Expression-Hook
+
+ui/scripts/dev_controls/dev_controls_controller.gd
+                                     # + drei harmlose Demo-Auslöser
+                                     #   (low / medium / high)
+
+scripts/
+└── approval_card_smoke.gd           # NEU: Smoke für Card + Model
+```
+
+**Approval-Card.** Ein schmaler `PanelContainer`, der genau einen
+offenen Approval anzeigt:
+
+- **Header** — kurzer `title` (gekürzt auf `MAX_TITLE_CHARS = 80`) plus
+  ein kleiner `risk`-Badge mit stabiler Farbtabelle
+  (`low` = grünlich, `medium` = gelblich, `high` = rötlich).
+- **Summary** — kurze `message` des Core, gekürzt auf
+  `MAX_SUMMARY_CHARS = 140` mit Ellipsis. **Keine** langen
+  Full-Payloads; sensible Inhalte sollen nicht in die UX leaken.
+- **Buttons** — zwei nebeneinander: `Approve` und `Deny`. Klick
+  sendet direkt `approval_approve` bzw. `approval_deny` (fallback auf
+  den älteren kombinierten Command `approval_response`).
+
+Nach einem Klick geht die Card in einen **Resolving-Zustand**: beide
+Buttons sind deaktiviert, der Status zeigt „waiting for core…". Das
+Pairing wird durch das Core-seitige `approval_resolved` abgeschlossen;
+der Status wird kurz finalisiert (`resolved: approved (user)`) und
+der Slot geleert. Doppelte Klicks sind durch den Core-Registry-Pfad
+idempotent gesichert: ein zweiter `approve`/`deny` landet als
+`error`-Frame, nicht als zweites `approval_resolved`.
+
+**Ist die Card klickfähig?** Die Card selbst läuft auf
+`MOUSE_FILTER_PASS`; Klicks auf die Buttons werden entgegengenommen,
+der übrige Bereich leitet Klicks weiter. Bei `ipc_disconnected`
+werden beide Buttons disabled und der Status zeigt
+„offline — buttons disabled"; die Card versteckt sich nicht hart,
+damit ein nachträglich eintreffendes `approval_resolved` mit
+`source: timeout` sauber in der Historie-Zeile landen kann.
+
+**Integration in das Workflow Visibility Overlay (§8.4c).** Ein neuer
+Step-Kind **`APPROVAL`** kommt zu den acht bestehenden hinzu. Der
+Workflow-Step wird bei `approval_requested` auf `ACTIVE` gesetzt
+(Snippet: `[risk] title`) und bei `approval_resolved` je nach
+Decision-Outcome umgemappt:
+
+| decision    | Workflow-Status                      |
+|-------------|--------------------------------------|
+| `approved`  | `DONE`                               |
+| `denied`    | `FAILED`                             |
+| `cancelled` | `FAILED`                             |
+| `timed_out` | `SKIPPED`                            |
+| `expired`   | `SKIPPED`                            |
+| unbekannt   | `SKIPPED` (defensiv, kein DONE-Leak) |
+
+Der APPROVAL-Step bleibt in der linearen Kette sichtbar — kein
+eigenes Historien-System, kein Export.
+
+**Avatar-Expression-Hook (§8.4b).** Sehr weich: `approval_requested`
+zieht den Ausdruck auf `curious` (transient), sofern wir gerade
+nicht in `ACTING` oder `ERROR` sind. `approval_resolved` mit
+`denied` / `cancelled` / `timed_out` / `expired` kippt auf
+`error_soft` (transient). `approved` ist bewusst stumm — eine
+reguläre `action_*`-Kette übernimmt meist die Expression danach.
+Die PR-14- und PR-15-Guards bleiben intakt: keine Überschreibung
+von ACTING/ERROR, keine neue State-Maschine.
+
+**Demo-Auslöser in Dev-Controls.** Drei kleine Buttons im bereits
+env-gateten Dev-Panel (`SMOLIT_UI_DEV_CONTROLS=1`) — einer pro
+Risikostufe. Klick → IpcClient sendet `request_approval_demo` mit
+festen, harmlosen Default-Texten. Der Core issued ein
+`approval_requested`, startet den üblichen Timeout-Watchdog und
+resolvet nach Approve/Deny mit **keiner** weiteren Aktion. Kein
+`action_cancelled` folgt; es gibt keine zweite Action-Kette.
+
+**Harte Grenzen (Scope-Kuratierung).**
+
+- **Keine gefährlichen Aktionen.** PR 17 führt **keinen** Tool-
+  Gating-Pfad aus, keine echte Desktop-Automation, keinen Shell-
+  Call, keinen AdminBot. Der Demo-Pfad ist bewusst ein No-Op.
+- **Keine neuen Sicherheitsgarantien.** Der Loopback-WebSocket
+  bleibt Vertrauensgrenze wie in §2.7; PR 17 verändert die
+  Approval-Engine nicht, sondern baut nur UX drumherum.
+- **Keine sensiblen Full-Payloads in der UI.** Summary ist auf
+  140 Zeichen hart gekürzt; Titel auf 80. Fremde Strings werden
+  sanitisiert (`risk`) bzw. defensiv gerendert.
+- **Keine Persistenz, keine Approval-Historie.** Ein Card-Slot
+  lebt, solange der Core kein `approval_resolved` geschickt hat.
+  Kein Export, kein Speichern.
+- **Keine Provider-/Settings-/Approval-Policy-Änderung.** Der
+  bestehende Interaction-Approval-Flow aus §2.7 bleibt unverändert;
+  die Card und die Banner-UI (ApprovalBanner in `main.tscn`) laufen
+  parallel — beide sehen dasselbe `approval_requested`.
+- **Keine Umbenennung existierender Envelopes.** `approval_response`
+  bleibt gültig. `approval_approve` / `approval_deny` sind rein
+  additive, schmale Commands für UI-Code-Stil-Präferenzen.
+- **Idempotente Resolution bleibt bindend.** Ein zweiter approve/
+  deny am gleichen `approval_id` kommt als `error`-Frame zurück,
+  niemals als zweites `approval_resolved`.
+
+**Verifikation.**
+
+- Core: `cargo test` deckt `sanitize_risk`, die neuen Protokoll-
+  Encoder/Decoder und den Demo-Flow ab (Approve/Deny mit
+  `source: user`, keine Folgeevents, doppelter Approve = Error,
+  Risk-Sanitization). Der bestehende Interaction-Approval-Flow
+  bleibt grün (`interaction_approval_request_carries_risk_medium_by_default`).
+- UI: `scripts/approval_card_smoke.gd` (Harness-Case
+  `approval-card-smoke`) prüft pure `SmolitApprovalModel`-Logik
+  und das Card-Scene-Verhalten (Default-hidden, Render bei
+  `approval_requested`, Resolving-Flow mit Idempotenz,
+  Mismatched-ID-Ignore, Disconnect-Pfad, Missing-Fields,
+  `reset_for_tests`). `scripts/workflow_visibility_smoke.gd` wurde
+  um `APPROVAL`-Step-Mapping erweitert.
+
+**Offene Restschuld (nicht Teil von PR 17).**
+
+- **Echtes Tool-Gating.** Ein Policy-Layer, der ausgewählte
+  Core-Aktionen automatisch durch den Approval-Pfad zwingt, bleibt
+  Folgearbeit — PR 17 bietet nur die UX dafür.
+- **Feinere Risk-Achse.** Heute sind nur drei Stufen kuratiert;
+  ein „unknown risk" wird defensiv auf `medium` gemappt. Eine
+  feinere Skala (Risiko-Score, Begründung) kann additiv folgen.
+- **Persistenz / Audit-Trail.** Kein „remember this choice", kein
+  Log ins Dateisystem. Ein späterer Audit-Log-Pfad wäre eine
+  eigene Design-Entscheidung.
+- **Multi-Seat / Multi-Window.** Die UX nimmt weiterhin genau einen
+  entscheidenden UI-Client an.
+
 ### 8.5 Visual Action Mode (UI-Staging MVP, Phase 3.3, Ist-Zustand)
 
 Kleine, ehrliche MVP-Umsetzung der Produktachse aus

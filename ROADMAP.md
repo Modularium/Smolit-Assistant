@@ -485,6 +485,36 @@ Desktop Interaction Layer, die UI projiziert nur.
       **Offene Restschuld:** Detail-Layer (Zeitleiste, Dauer-Balken),
       parallele Workflows, Export/Persistenz, optional zukünftige
       Core-Emission eines `workflow_snapshot`-Envelopes.
+- [x] **Approval UX v1 — Card + Integrationen (PR 17)** —
+      `control > autonomy`. Smolit darf geplante Aktionen erklären
+      und um Zustimmung bitten; **keine** gefährlichen Aktionen
+      landen in diesem PR. Additive Core-Erweiterung: `risk` auf
+      `ApprovalRequest` (`low` / `medium` / `high`, Default
+      `medium`), `source` auf `ApprovalResolvedPayload` (`user` /
+      `timeout` / `system`), neue schmalere Commands
+      `approval_approve` / `approval_deny` (wire-äquivalent zu
+      `approval_response`) und ein **harmloser Demo-Auslöser**
+      `request_approval_demo`, der eine Approval-Kette ohne
+      Backend-Aktion öffnet. Neue UI: `ApprovalCard`
+      (`ui/scenes/approval/approval_card.tscn`) mit Titel/Summary/
+      Risk-Badge und Approve/Deny-Buttons, Resolving-Zustand,
+      Disconnect-Gate, Summary-Kürzung auf 140 Zeichen. Integration
+      in PR 16 (neuer Step-Kind `APPROVAL`), weicher Avatar-
+      Expression-Hook (PR 15; `curious` bei Request, `error_soft`
+      bei Denied/Cancelled/TimedOut/Expired) und Dev-Panel-Knöpfe
+      für alle drei Risikostufen (session-only). Verifiziert durch
+      `scripts/approval_card_smoke.gd` (Harness-Case
+      `approval-card-smoke`) plus Core-Tests für Demo-Flow,
+      Risk-Sanitization und Idempotenz. Details in
+      [docs/api.md §2.7](./docs/api.md),
+      [docs/ui_architecture.md §8.4d](./docs/ui_architecture.md)
+      und [docs/security/APPROVAL_UX.md](./docs/security/APPROVAL_UX.md).
+      **Ausdrücklich NICHT Teil von PR 17:** echte Tool-Gating-
+      Integration, Desktop-Automation, Shell-Zugriff, AdminBot-
+      Call, Policy-Engine, Persistenz, Approval-Historie, sensible
+      Full-Payloads im UI, langer Text. Der Core-Approval-Kanal
+      ist weiterhin Loopback-WebSocket; PR 17 erweitert nur die
+      UX-Oberfläche darüber.
 - [ ] Emotion-Mapping Core → UI (setzt Protokollerweiterung um
       `emotion` voraus)
 - [x] Speech-Sync (TTS-Lebenszyklus-Events → Animation) — MVP via
@@ -1619,9 +1649,15 @@ PR 16 ergänzt das **Workflow Visibility Overlay v1** — ein read-only
 Panel, das die bestehenden UI-Events als kleine lineare Kette
 sichtbar macht (siehe
 [docs/ui_architecture.md §8.4c](./docs/ui_architecture.md)).
+PR 17 setzt darauf die **Approval UX v1** auf: neue Approval-Card,
+additives `risk`/`source` am bestehenden Approval-Protokoll, plus
+ein **harmloser Demo-Pfad** (`request_approval_demo`) — **keine**
+echte Tool-Ausführung, keine Desktop-Automation, kein AdminBot
+(siehe [docs/ui_architecture.md §8.4d](./docs/ui_architecture.md)
+und [docs/security/APPROVAL_UX.md](./docs/security/APPROVAL_UX.md)).
 Tieferer Speech-Sync (Phonem, Audio-Timeline) und Emotion-Mapping
-aus ABrain bleiben in Phase C geparkt — weder PR 15 noch PR 16
-ändern ein Protokoll.
+aus ABrain bleiben in Phase C geparkt — weder PR 15, PR 16 noch
+PR 17 ändern das Protokoll über additive Felder hinaus.
 
 Für den Desktop Interaction Layer läuft jetzt ein konkreter
 **Approval / Confirmation Flow MVP**: freigabepflichtige Aktionen

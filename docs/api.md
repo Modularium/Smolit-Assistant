@@ -822,16 +822,47 @@ sie eindeutig einem `action_id` zuordnen.
   Idempotent: eine zweite Antwort mit gleicher `approval_id` erzeugt
   einen `error`-Frame.
 
+- `approval_approve` — schmaler Pfad (PR 17), entspricht wire-seitig
+  `approval_response` mit `decision="approved"`. Beide Commands
+  teilen sich dieselbe Pending-Approval-Registry; die Idempotenz
+  gilt envelope-übergreifend.
+  Felder: `approval_id: string`.
+
+- `approval_deny` — Gegenstück zu `approval_approve` mit
+  `decision="denied"`. Felder: `approval_id: string`.
+
+- `request_approval_demo` — **harmloser Demo-Auslöser** (PR 17).
+  Erzeugt ein pending Approval **ohne** Backend-Aktion; nach dem
+  `approval_resolved`-Envelope passiert *nichts* weiter. Dient
+  ausschließlich zur UX-Evaluation der Approval-Card. Felder (alle
+  optional):
+  - `title: string` (Default: "Demo approval")
+  - `summary: string` (Default: kurzer Sicherheitshinweis)
+  - `risk: "low" | "medium" | "high"` (Default: `medium`; unbekannte
+    Werte fallen auf `medium`)
+
+  **Nicht** erlaubt in diesem Command: echte Aktionen, Shell-
+  Invokation, Desktop-Automation, Provider-Aufrufe.
+
 #### Ausgehend (Core → UI)
 
 - `approval_requested` — Core bittet um Freigabe. `payload` ist eine
   `ApprovalRequest` mit den Feldern `approval_id`, `action_id`,
   `action_kind`, `title`, `message`, `target`, optional `reason`,
-  `timeout_seconds`.
+  `timeout_seconds`. PR 17 fügt additiv `risk: "low" | "medium" |
+  "high"` hinzu (Default `medium`; ältere Emitter kommen weiterhin
+  an — das Feld wird mit einem serde-Default ergänzt). Für
+  `request_approval_demo`-Approvals ist `action_id` ein **leerer
+  String** (kein Backend-Action vorhanden); UIs müssen das tolerieren.
 - `approval_resolved` — Endergebnis der Freigabe. `payload.decision`
   ist einer der Strings `approved`, `denied`, `cancelled`,
   `timed_out`. Wird vor dem endgültigen `action_completed` bzw.
-  `action_cancelled` emittiert.
+  `action_cancelled` emittiert. PR 17 fügt additiv
+  `source: "user" | "timeout" | "system"` hinzu (Default `user`):
+  `user` für UI-Entscheidungen, `timeout` für den Watchdog, `system`
+  für core-interne Abbrüche. Für `request_approval_demo`-Approvals
+  folgt **kein** `action_cancelled` — die Demo-Kette endet mit dem
+  Resolve-Envelope.
 
 `approval_resolved` ist eine Bestätigung für die UI, unabhängig vom
 anschließenden Action-Event-Strom. `timed_out` tritt nur core-intern
