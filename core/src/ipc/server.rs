@@ -163,6 +163,19 @@ async fn dispatch(app: &Arc<App>, raw: &str) -> Vec<OutgoingMessage> {
             approval_id,
             decision,
         } => handle_approval_response(app, approval_id, decision),
+        IncomingMessage::ApprovalApprove { approval_id } => handle_approval_response(
+            app,
+            approval_id,
+            crate::approvals::IncomingApprovalDecision::Approved,
+        ),
+        IncomingMessage::ApprovalDeny { approval_id } => handle_approval_response(
+            app,
+            approval_id,
+            crate::approvals::IncomingApprovalDecision::Denied,
+        ),
+        IncomingMessage::RequestApprovalDemo { title, summary, risk } => {
+            handle_request_approval_demo(app, title, summary, risk).await
+        }
         IncomingMessage::SettingsSetLlamafileConfig(update) => {
             handle_settings_set_llamafile_config(app, update)
         }
@@ -427,6 +440,26 @@ fn handle_approval_response(
         Ok(()) => Vec::new(),
         Err(message) => vec![OutgoingMessage::Error { message }],
     }
+}
+
+/// PR 17 — IPC handler for `request_approval_demo`. Returns the
+/// `approval_requested` envelope inline; the matching
+/// `approval_resolved` envelope arrives later via the broadcast
+/// channel once the UI sends a decision (or the watchdog fires).
+/// Explicitly narrow: no Desktop Automation, no provider call, no
+/// shell, no AdminBot, no side effects after the resolution.
+async fn handle_request_approval_demo(
+    app: &Arc<App>,
+    title: Option<String>,
+    summary: Option<String>,
+    risk: Option<String>,
+) -> Vec<OutgoingMessage> {
+    app.request_approval_demo(
+        title.unwrap_or_default(),
+        summary.unwrap_or_default(),
+        risk.unwrap_or_default(),
+    )
+    .await
 }
 
 fn planned(
@@ -3753,5 +3786,169 @@ mod tests {
         let got = recv_text(&mut ws).await;
         assert!(got.contains(r#""accessibility_probe":"#));
         assert!(got.contains(r#""accessibility_probe_reason":"#));
+    }
+
+    // PR 17 — Approval UX v1. Demo path + new approve/deny commands.
+
+    #[tokio::test]
+    async fn request_approval_demo_emits_requested_with_risk() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"request_approval_demo","title":"Demo","summary":"Test","risk":"high"}"#
+                .into(),
+        ))
+        .await
+        .unwrap();
+        let requested = recv_text(&mut ws).await;
+        assert!(requested.contains(r#""type":"approval_requested""#));
+        assert!(requested.contains(r#""risk":"high""#));
+        assert!(requested.contains(r#""title":"Demo""#));
+        // Demo path carries no action — `action_id` is the empty string.
+        assert!(requested.contains(r#""action_id":"""#));
+    }
+
+    #[tokio::test]
+    async fn request_approval_demo_risk_falls_back_to_medium_on_unknown() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"request_approval_demo","title":"D","summary":"s","risk":"CRITICAL"}"#
+                .into(),
+        ))
+        .await
+        .unwrap();
+        let requested = recv_text(&mut ws).await;
+        assert!(requested.contains(r#""risk":"medium""#));
+    }
+
+    #[tokio::test]
+    async fn request_approval_demo_approve_resolves_without_action_events() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(r#"{"type":"request_approval_demo"}"#.into()))
+            .await
+            .unwrap();
+        let requested = recv_text(&mut ws).await;
+        assert!(requested.contains(r#""type":"approval_requested""#));
+        let approval_id = extract_approval_id(&requested);
+
+        let approve =
+            format!(r#"{{"type":"approval_approve","approval_id":"{approval_id}"}}"#);
+        ws.send(Message::Text(approve)).await.unwrap();
+
+        let resolved = recv_text(&mut ws).await;
+        assert!(resolved.contains(r#""type":"approval_resolved""#));
+        assert!(resolved.contains(r#""decision":"approved""#));
+        assert!(resolved.contains(r#""source":"user""#));
+
+        // Explicitly NO follow-up `action_cancelled` or anything else —
+        // the demo path has no backend action. We give the runtime a
+        // short window to prove nothing else arrives.
+        let peek = tokio::time::timeout(std::time::Duration::from_millis(250), ws.next()).await;
+        assert!(peek.is_err(), "demo approval must not emit follow-up frames: {peek:?}");
+    }
+
+    #[tokio::test]
+    async fn request_approval_demo_deny_resolves_as_denied_without_cancel() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(r#"{"type":"request_approval_demo"}"#.into()))
+            .await
+            .unwrap();
+        let requested = recv_text(&mut ws).await;
+        let approval_id = extract_approval_id(&requested);
+
+        let deny = format!(r#"{{"type":"approval_deny","approval_id":"{approval_id}"}}"#);
+        ws.send(Message::Text(deny)).await.unwrap();
+
+        let resolved = recv_text(&mut ws).await;
+        assert!(resolved.contains(r#""decision":"denied""#));
+        assert!(resolved.contains(r#""source":"user""#));
+
+        let peek = tokio::time::timeout(std::time::Duration::from_millis(250), ws.next()).await;
+        assert!(peek.is_err(), "deny on demo approval must not cancel or follow up: {peek:?}");
+    }
+
+    #[tokio::test]
+    async fn request_approval_demo_double_approve_is_idempotent() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(r#"{"type":"request_approval_demo"}"#.into()))
+            .await
+            .unwrap();
+        let requested = recv_text(&mut ws).await;
+        let approval_id = extract_approval_id(&requested);
+
+        let approve =
+            format!(r#"{{"type":"approval_approve","approval_id":"{approval_id}"}}"#);
+        ws.send(Message::Text(approve.clone())).await.unwrap();
+        let first_resolved = recv_text(&mut ws).await;
+        assert!(first_resolved.contains(r#""type":"approval_resolved""#));
+
+        ws.send(Message::Text(approve)).await.unwrap();
+        let second = recv_text(&mut ws).await;
+        // Second approve for the same id lands as an error, never as a
+        // second `approval_resolved` — idempotency is enforced by the
+        // pending-approval registry.
+        assert!(second.contains(r#""type":"error""#));
+        assert!(second.contains(&approval_id));
+    }
+
+    #[tokio::test]
+    async fn approval_approve_on_unknown_id_returns_error() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 5 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"approval_approve","approval_id":"apr_ghost"}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let err = recv_text(&mut ws).await;
+        assert!(err.contains(r#""type":"error""#));
+        assert!(err.contains("apr_ghost"));
+    }
+
+    #[tokio::test]
+    async fn interaction_approval_request_carries_risk_medium_by_default() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 5 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_open_application","application":"calendar"}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let _planned = recv_text(&mut ws).await;
+        let requested = recv_text(&mut ws).await;
+        assert!(requested.contains(r#""type":"approval_requested""#));
+        assert!(requested.contains(r#""risk":"medium""#));
     }
 }

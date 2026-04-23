@@ -16,7 +16,8 @@ use crate::actions::{
 };
 use crate::approvals::{
     ApprovalDecision, ApprovalRequest, ApprovalResolvedPayload, PendingApprovalError,
-    PendingApprovalRegistry,
+    PendingApprovalRegistry, RISK_MEDIUM, SOURCE_SYSTEM, SOURCE_TIMEOUT, SOURCE_USER,
+    sanitize_risk,
 };
 use crate::config::{
     validate_llamafile_mode, AudioConfig, CloudHttpConfig, Config, LlamafileConfig,
@@ -913,6 +914,99 @@ impl App {
         }
     }
 
+    /// PR 17 — Approval UX demo path.
+    ///
+    /// Issues an approval **without** triggering any backend action
+    /// afterwards. The core:
+    ///
+    ///   1. emits `approval_requested` with a sanitized risk,
+    ///   2. awaits a decision (or a timeout),
+    ///   3. emits exactly one `approval_resolved` — and stops.
+    ///
+    /// No Desktop Automation, no provider call, no shell, no
+    /// AdminBot-style escalation. This is purely a UX harness so the
+    /// Approval Card (and a future policy integration) can be
+    /// evaluated without exposing the user to dangerous side effects.
+    /// The path is intentionally narrow — the only caller is the
+    /// `request_approval_demo` IPC command.
+    pub async fn request_approval_demo(
+        self: &Arc<Self>,
+        title: String,
+        summary: String,
+        risk: String,
+    ) -> Vec<OutgoingMessage> {
+        let approval_id = self.next_approval_id();
+        let timeout_seconds = self.config.approval.timeout_seconds;
+        let sanitized_risk = sanitize_risk(risk);
+        let safe_title = if title.trim().is_empty() {
+            "Demo approval".to_string()
+        } else {
+            title
+        };
+        let safe_summary = if summary.trim().is_empty() {
+            "This is a harmless demo approval. No action runs after the decision.".to_string()
+        } else {
+            summary
+        };
+        let request = ApprovalRequest {
+            approval_id: approval_id.clone(),
+            // Demo path has no backend action — the UI tolerates an
+            // empty `action_id`.
+            action_id: String::new(),
+            action_kind: crate::interaction::InteractionKind::OpenApplication,
+            title: safe_title,
+            message: safe_summary,
+            target: crate::actions::ActionTarget::unknown(),
+            reason: Some("demo".to_string()),
+            timeout_seconds,
+            selected_target: None,
+            risk: sanitized_risk,
+        };
+        let rx = self.pending_approvals.register(&approval_id);
+
+        let app = Arc::clone(self);
+        let approval_id_task = approval_id.clone();
+        tokio::spawn(async move {
+            app.await_and_resolve_demo(approval_id_task, rx, timeout_seconds)
+                .await;
+        });
+
+        vec![OutgoingMessage::ApprovalRequested { payload: request }]
+    }
+
+    async fn await_and_resolve_demo(
+        self: Arc<Self>,
+        approval_id: String,
+        rx: tokio::sync::oneshot::Receiver<ApprovalDecision>,
+        timeout_seconds: u64,
+    ) {
+        let (decision, source) = match timeout(Duration::from_secs(timeout_seconds), rx).await {
+            Ok(Ok(decision)) => (decision, SOURCE_USER.to_string()),
+            Ok(Err(_)) => (ApprovalDecision::Cancelled, SOURCE_SYSTEM.to_string()),
+            Err(_) => {
+                let _ = self.pending_approvals.take(&approval_id);
+                (ApprovalDecision::TimedOut, SOURCE_TIMEOUT.to_string())
+            }
+        };
+        info!(
+            approval_id = %approval_id,
+            decision = decision.as_str(),
+            source = %source,
+            "demo approval resolved",
+        );
+        // Demo path: no action to run afterwards — we emit exactly
+        // the resolution envelope and stop. No `action_cancelled`
+        // follow-up, no Desktop Automation.
+        self.broadcast(OutgoingMessage::ApprovalResolved {
+            payload: ApprovalResolvedPayload {
+                approval_id,
+                action_id: String::new(),
+                decision: decision.as_str().to_string(),
+                source,
+            },
+        });
+    }
+
     /// Entry point for IPC handlers. Plans the interaction, checks
     /// policy, and either:
     ///   * refuses the action (layer disabled / kind disallowed),
@@ -958,6 +1052,10 @@ impl App {
             reason: None,
             timeout_seconds,
             selected_target,
+            // PR 17 — Desktop-Interaction-Approvals zählen wir per Default
+            // als `medium`. Eine feinere Risikoklassifikation wäre eine
+            // eigene Policy-Linie (außerhalb PR 17).
+            risk: RISK_MEDIUM.to_string(),
         };
         let rx = self.pending_approvals.register(&approval_id);
         out.push(OutgoingMessage::ApprovalRequested { payload: request });
@@ -978,17 +1076,19 @@ impl App {
         rx: tokio::sync::oneshot::Receiver<ApprovalDecision>,
         timeout_seconds: u64,
     ) {
-        let decision = match timeout(Duration::from_secs(timeout_seconds), rx).await {
-            Ok(Ok(decision)) => decision,
+        let (decision, source) = match timeout(Duration::from_secs(timeout_seconds), rx).await {
+            Ok(Ok(decision)) => (decision, SOURCE_USER.to_string()),
             Ok(Err(_)) => {
-                // Sender dropped without sending — treat as cancelled.
-                ApprovalDecision::Cancelled
+                // Sender dropped without sending — treat as a core-
+                // internal cancellation (source=system), not as a user
+                // action.
+                (ApprovalDecision::Cancelled, SOURCE_SYSTEM.to_string())
             }
             Err(_) => {
                 // Timed out: remove the pending entry ourselves so any
                 // late `approval_response` is rejected as Unknown.
                 let _ = self.pending_approvals.take(&approval_id);
-                ApprovalDecision::TimedOut
+                (ApprovalDecision::TimedOut, SOURCE_TIMEOUT.to_string())
             }
         };
 
@@ -996,6 +1096,7 @@ impl App {
             approval_id = %approval_id,
             action_id = %action.action_id,
             decision = decision.as_str(),
+            source = %source,
             "approval resolved"
         );
 
@@ -1004,6 +1105,7 @@ impl App {
                 approval_id: approval_id.clone(),
                 action_id: action.action_id.clone(),
                 decision: decision.as_str().to_string(),
+                source,
             },
         });
 

@@ -55,6 +55,31 @@ pub enum IncomingMessage {
         approval_id: String,
         decision: IncomingApprovalDecision,
     },
+    /// PR 17 — narrow split of `approval_response`. `approval_approve`
+    /// and `approval_deny` are functionally equivalent to their
+    /// unified counterpart; the UI may use whichever matches its code
+    /// style. Idempotency is handled by the pending-approval registry:
+    /// a second arrival for the same `approval_id` is rejected with
+    /// an `error` envelope (never a second `approval_resolved`).
+    ApprovalApprove { approval_id: String },
+    /// PR 17 — see [`IncomingMessage::ApprovalApprove`].
+    ApprovalDeny { approval_id: String },
+    /// PR 17 — harmless demo-approval trigger. Creates a pending
+    /// approval **without** running any backend action afterwards.
+    /// All fields are optional; the core fills sensible, short
+    /// defaults if they are missing. The payload is bounded (no long
+    /// free-form content is expected here) — the UI must still tolerate
+    /// arbitrary strings from the core's side but the demo trigger
+    /// itself never exposes sensitive data. No Desktop Automation, no
+    /// shell, no provider call follows.
+    RequestApprovalDemo {
+        #[serde(default)]
+        title: Option<String>,
+        #[serde(default)]
+        summary: Option<String>,
+        #[serde(default)]
+        risk: Option<String>,
+    },
     /// PR 5 — erster echter Schreibpfad für Settings. Aktualisiert die
     /// editierbaren Felder der `llamafile_local`-Provider-Config und
     /// rebuildet den Resolver. Core antwortet mit einem `status`-
@@ -317,6 +342,91 @@ mod tests {
             }
             _ => panic!("wrong variant"),
         }
+    }
+
+    // PR 17 — new Approval UX commands.
+
+    #[test]
+    fn parses_approval_approve_and_deny_commands() {
+        match parse_incoming(r#"{"type":"approval_approve","approval_id":"apr_000001"}"#).unwrap() {
+            IncomingMessage::ApprovalApprove { approval_id } => {
+                assert_eq!(approval_id, "apr_000001");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+        match parse_incoming(r#"{"type":"approval_deny","approval_id":"apr_000002"}"#).unwrap() {
+            IncomingMessage::ApprovalDeny { approval_id } => {
+                assert_eq!(approval_id, "apr_000002");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_request_approval_demo_full_payload() {
+        let raw = r#"{"type":"request_approval_demo","title":"Demo","summary":"Test the card.","risk":"high"}"#;
+        match parse_incoming(raw).unwrap() {
+            IncomingMessage::RequestApprovalDemo { title, summary, risk } => {
+                assert_eq!(title.as_deref(), Some("Demo"));
+                assert_eq!(summary.as_deref(), Some("Test the card."));
+                assert_eq!(risk.as_deref(), Some("high"));
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_request_approval_demo_empty_payload() {
+        let raw = r#"{"type":"request_approval_demo"}"#;
+        match parse_incoming(raw).unwrap() {
+            IncomingMessage::RequestApprovalDemo { title, summary, risk } => {
+                assert!(title.is_none());
+                assert!(summary.is_none());
+                assert!(risk.is_none());
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn encodes_approval_resolved_includes_source_and_decision() {
+        let encoded = encode_outgoing(&OutgoingMessage::ApprovalResolved {
+            payload: crate::approvals::ApprovalResolvedPayload {
+                approval_id: "apr_000001".into(),
+                action_id: "".into(),
+                decision: "denied".into(),
+                source: "user".into(),
+            },
+        });
+        // Additive: `source` is present; existing receivers that
+        // ignore the field still parse the frame.
+        assert!(encoded.contains(r#""type":"approval_resolved""#));
+        assert!(encoded.contains(r#""approval_id":"apr_000001""#));
+        assert!(encoded.contains(r#""decision":"denied""#));
+        assert!(encoded.contains(r#""source":"user""#));
+    }
+
+    #[test]
+    fn encodes_approval_requested_includes_risk_default_medium() {
+        use crate::actions::ActionTarget;
+        use crate::approvals::{ApprovalRequest, RISK_MEDIUM};
+        use crate::interaction::InteractionKind;
+        let encoded = encode_outgoing(&OutgoingMessage::ApprovalRequested {
+            payload: ApprovalRequest {
+                approval_id: "apr_000001".into(),
+                action_id: "act_000001".into(),
+                action_kind: InteractionKind::OpenApplication,
+                title: "Open calendar".into(),
+                message: "Open calendar?".into(),
+                target: ActionTarget::unknown(),
+                reason: None,
+                timeout_seconds: 20,
+                selected_target: None,
+                risk: RISK_MEDIUM.to_string(),
+            },
+        });
+        assert!(encoded.contains(r#""type":"approval_requested""#));
+        assert!(encoded.contains(r#""risk":"medium""#));
     }
 
     #[test]

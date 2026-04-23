@@ -21,6 +21,11 @@ pub mod request;
 pub mod response;
 pub mod state;
 
-pub use request::{ApprovalRequest, ApprovalResolvedPayload};
+pub use request::{
+    ApprovalRequest, ApprovalResolvedPayload, RISK_MEDIUM, SOURCE_SYSTEM, SOURCE_TIMEOUT,
+    SOURCE_USER, sanitize_risk,
+};
+#[allow(unused_imports)]
+pub use request::{KNOWN_RISKS, RISK_HIGH, RISK_LOW};
 pub use response::{ApprovalDecision, IncomingApprovalDecision};
 pub use state::{PendingApprovalError, PendingApprovalRegistry};
