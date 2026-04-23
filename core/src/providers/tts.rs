@@ -28,8 +28,58 @@ use crate::audio::types::{AudioFeatureState, split_command};
 use crate::config::AudioConfig;
 
 pub const PROVIDER_NAME_TTS_COMMAND: &str = "command";
-#[allow(dead_code)]
 pub const KNOWN_TTS_KINDS: &[&str] = &[PROVIDER_NAME_TTS_COMMAND];
+
+/// Default-TTS-Kette (PR 13). Reset-Pfad und Startup-Fallback.
+pub const DEFAULT_TTS_PROVIDER_CHAIN: &[&str] = &[PROVIDER_NAME_TTS_COMMAND];
+
+/// Fehlerklassen für die TTS-Chain-Validierung (PR 13).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TtsChainValidationError {
+    Empty,
+    UnknownKind(String),
+    Duplicate(String),
+}
+
+impl std::fmt::Display for TtsChainValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Empty => write!(
+                f,
+                "tts provider chain is empty (use reset to restore default)",
+            ),
+            Self::UnknownKind(k) => write!(
+                f,
+                "unknown tts provider kind `{k}` (known: {})",
+                KNOWN_TTS_KINDS.join(", "),
+            ),
+            Self::Duplicate(k) => write!(f, "duplicate tts provider kind `{k}` in chain"),
+        }
+    }
+}
+
+impl std::error::Error for TtsChainValidationError {}
+
+/// Validiert und normalisiert eine Chain-Eingabe für den TTS-
+/// Provider (PR 13). Regeln identisch zu `validate_stt_chain` und
+/// `validate_text_chain`.
+pub fn validate_tts_chain(raw: &[String]) -> Result<Vec<String>, TtsChainValidationError> {
+    if raw.is_empty() {
+        return Err(TtsChainValidationError::Empty);
+    }
+    let mut out: Vec<String> = Vec::with_capacity(raw.len());
+    for item in raw {
+        let normalized = item.trim().to_ascii_lowercase();
+        if normalized.is_empty() || !KNOWN_TTS_KINDS.iter().any(|k| *k == normalized) {
+            return Err(TtsChainValidationError::UnknownKind(normalized));
+        }
+        if out.iter().any(|existing| existing == &normalized) {
+            return Err(TtsChainValidationError::Duplicate(normalized));
+        }
+        out.push(normalized);
+    }
+    Ok(out)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TtsProviderError {
@@ -463,13 +513,27 @@ mod tests {
             &audio_with(true, Some("/bin/false")),
         );
         let err = r.run("x").await.unwrap_err();
+        // /bin/false kann in seltenen Fällen sofort stdin schließen,
+        // bevor unser write_all durch ist — dann entsteht
+        // `stdin_write_failed` statt `exit_nonzero`. Beide
+        // Klassen sind ehrlich und kuratiert; die Probe-UX
+        // unterscheidet sie nicht. Wir akzeptieren beide, um den
+        // inhärenten Kernel-Race nicht als Test-Flake zu
+        // reproduzieren.
         match err {
-            TtsProviderError::AllFailed(class) => assert_eq!(class, "exit_nonzero"),
+            TtsProviderError::AllFailed(class) => assert!(
+                class == "exit_nonzero" || class == "stdin_write_failed",
+                "unexpected class: {class}",
+            ),
             other => panic!("unexpected: {other:?}"),
         }
         let st = r.status();
         assert_eq!(st.availability, "unavailable");
-        assert_eq!(st.last_error.as_deref(), Some("exit_nonzero"));
+        let le = st.last_error.as_deref().unwrap_or("");
+        assert!(
+            le == "exit_nonzero" || le == "stdin_write_failed",
+            "unexpected last_error: {le}",
+        );
     }
 
     #[test]
@@ -482,5 +546,53 @@ mod tests {
         assert_eq!(TtsProviderImpl::classify_error(&err), "stdin_write_failed");
         let err = anyhow::anyhow!("TTS command `/bin/false` failed with status exit status: 1");
         assert_eq!(TtsProviderImpl::classify_error(&err), "exit_nonzero");
+    }
+
+    // --- Chain-Validator (PR 13) ---
+
+    #[test]
+    fn validate_tts_chain_accepts_command_kind() {
+        assert_eq!(
+            validate_tts_chain(&["command".to_string()]).unwrap(),
+            vec!["command"]
+        );
+    }
+
+    #[test]
+    fn validate_tts_chain_normalizes_case_and_whitespace() {
+        assert_eq!(
+            validate_tts_chain(&["  COMMAND ".to_string()]).unwrap(),
+            vec!["command"]
+        );
+    }
+
+    #[test]
+    fn validate_tts_chain_rejects_empty() {
+        let err = validate_tts_chain(&[]).unwrap_err();
+        assert_eq!(err, TtsChainValidationError::Empty);
+    }
+
+    #[test]
+    fn validate_tts_chain_rejects_unknown_kind() {
+        let err = validate_tts_chain(&["command".into(), "azure_neural".into()]).unwrap_err();
+        match err {
+            TtsChainValidationError::UnknownKind(k) => assert_eq!(k, "azure_neural"),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_tts_chain_rejects_duplicates() {
+        let err = validate_tts_chain(&["command".into(), "command".into()]).unwrap_err();
+        match err {
+            TtsChainValidationError::Duplicate(k) => assert_eq!(k, "command"),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn known_tts_kinds_stable_set() {
+        assert_eq!(KNOWN_TTS_KINDS, &["command"]);
+        assert_eq!(DEFAULT_TTS_PROVIDER_CHAIN, &["command"]);
     }
 }

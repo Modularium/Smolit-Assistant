@@ -192,6 +192,18 @@ async fn dispatch(app: &Arc<App>, raw: &str) -> Vec<OutgoingMessage> {
             handle_settings_set_cloud_http_secret(app, update)
         }
         IncomingMessage::SettingsProbeCloudHttp => handle_settings_probe_cloud_http(app).await,
+        IncomingMessage::SettingsSetSttProviderChain(update) => {
+            handle_settings_set_stt_provider_chain(app, update)
+        }
+        IncomingMessage::SettingsResetSttProviderChain => {
+            handle_settings_reset_stt_provider_chain(app)
+        }
+        IncomingMessage::SettingsSetTtsProviderChain(update) => {
+            handle_settings_set_tts_provider_chain(app, update)
+        }
+        IncomingMessage::SettingsResetTtsProviderChain => {
+            handle_settings_reset_tts_provider_chain(app)
+        }
     }
 }
 
@@ -356,6 +368,54 @@ async fn handle_settings_probe_cloud_http(app: &Arc<App>) -> Vec<OutgoingMessage
     vec![OutgoingMessage::SettingsProbeResult {
         payload: app.probe_cloud_http().await,
     }]
+}
+
+// --- PR 13: STT/TTS-Chain-Editor-Dispatch -------------------------------
+//
+// Spiegel zum Text-Chain-Pfad: Validation-Fehler → `error`-Envelope
+// mit kuratierter Meldung; Erfolg → frischer `status`-Envelope mit
+// der neuen `stt_provider_chain` / `tts_provider_chain`-Reihenfolge.
+
+fn handle_settings_set_stt_provider_chain(
+    app: &Arc<App>,
+    update: crate::app::SettingsSttProviderChainUpdate,
+) -> Vec<OutgoingMessage> {
+    match app.update_stt_provider_chain(update) {
+        Ok(()) => vec![OutgoingMessage::Status {
+            payload: app.build_status_payload(),
+        }],
+        Err(message) => vec![OutgoingMessage::Error { message }],
+    }
+}
+
+fn handle_settings_reset_stt_provider_chain(app: &Arc<App>) -> Vec<OutgoingMessage> {
+    match app.reset_stt_provider_chain() {
+        Ok(()) => vec![OutgoingMessage::Status {
+            payload: app.build_status_payload(),
+        }],
+        Err(message) => vec![OutgoingMessage::Error { message }],
+    }
+}
+
+fn handle_settings_set_tts_provider_chain(
+    app: &Arc<App>,
+    update: crate::app::SettingsTtsProviderChainUpdate,
+) -> Vec<OutgoingMessage> {
+    match app.update_tts_provider_chain(update) {
+        Ok(()) => vec![OutgoingMessage::Status {
+            payload: app.build_status_payload(),
+        }],
+        Err(message) => vec![OutgoingMessage::Error { message }],
+    }
+}
+
+fn handle_settings_reset_tts_provider_chain(app: &Arc<App>) -> Vec<OutgoingMessage> {
+    match app.reset_tts_provider_chain() {
+        Ok(()) => vec![OutgoingMessage::Status {
+            payload: app.build_status_payload(),
+        }],
+        Err(message) => vec![OutgoingMessage::Error { message }],
+    }
 }
 
 fn handle_approval_response(
@@ -1171,6 +1231,7 @@ mod tests {
     /// und `llamafile_mode`.
     #[tokio::test]
     async fn settings_set_llamafile_config_applies_and_echoes_status() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = scoped_settings_dir("apply-echo");
         let app = build_llamafile_chain_app(&dir);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1220,6 +1281,7 @@ mod tests {
     /// secret-frei: kein Pfad, keine Roh-Stringifizierung des Clients.
     #[tokio::test]
     async fn settings_set_llamafile_config_rejects_unknown_mode() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = scoped_settings_dir("reject-mode");
         let app = build_llamafile_chain_app(&dir);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1251,6 +1313,7 @@ mod tests {
     /// Spawn diagnostizieren können.
     #[tokio::test]
     async fn settings_probe_llamafile_reports_not_configured_without_path() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = scoped_settings_dir("probe-notcfg");
         let app = build_llamafile_chain_app(&dir);
         // enable, aber Pfad nicht setzen.
@@ -1289,6 +1352,7 @@ mod tests {
     /// oder `class` auftauchen — das wäre ein Secret-Disziplin-Bruch.
     #[tokio::test]
     async fn settings_probe_llamafile_reports_path_missing_without_leaking_path() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = scoped_settings_dir("probe-missing");
         let app = build_llamafile_chain_app(&dir);
         let secret_looking_path = "/nonexistent/smolit-probe-test-binary-please-do-not-leak";
@@ -1327,6 +1391,7 @@ mod tests {
     /// Wir nutzen `/bin/true` als garantiert vorhandenes Binary.
     #[tokio::test]
     async fn settings_probe_llamafile_reports_ok_for_executable_path() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = scoped_settings_dir("probe-ok");
         let app = build_llamafile_chain_app(&dir);
         app.update_llamafile_config(crate::app::SettingsLlamafileUpdate {
@@ -1364,6 +1429,7 @@ mod tests {
 
     #[tokio::test]
     async fn settings_set_stt_config_applies_and_echoes_status() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = scoped_settings_dir("stt-apply-echo");
         let app = build_llamafile_chain_app(&dir);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1397,6 +1463,7 @@ mod tests {
 
     #[tokio::test]
     async fn settings_set_tts_config_updates_auto_speak() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = scoped_settings_dir("tts-apply-auto");
         let app = build_llamafile_chain_app(&dir);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1428,6 +1495,7 @@ mod tests {
 
     #[tokio::test]
     async fn settings_probe_stt_reports_not_configured_without_command() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = scoped_settings_dir("stt-probe-notcfg");
         let app = build_llamafile_chain_app(&dir);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1453,6 +1521,7 @@ mod tests {
 
     #[tokio::test]
     async fn settings_probe_tts_reports_ok_for_executable_command() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = scoped_settings_dir("tts-probe-ok");
         let app = build_llamafile_chain_app(&dir);
         // enabled=true mit /bin/true als ausführbarem Command.
@@ -1486,6 +1555,7 @@ mod tests {
 
     #[tokio::test]
     async fn settings_probe_stt_does_not_leak_command() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = scoped_settings_dir("stt-probe-noleak");
         let app = build_llamafile_chain_app(&dir);
         let secret_looking_cmd =
@@ -1625,6 +1695,7 @@ mod tests {
 
     #[tokio::test]
     async fn settings_set_local_http_config_applies_and_echoes_status() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = scoped_settings_dir("lh-apply-echo");
         let app = build_local_http_chain_app(&dir);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1663,6 +1734,7 @@ mod tests {
 
     #[tokio::test]
     async fn settings_set_local_http_config_rejects_zero_timeout() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = scoped_settings_dir("lh-reject-timeout");
         let app = build_local_http_chain_app(&dir);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1687,6 +1759,7 @@ mod tests {
 
     #[tokio::test]
     async fn settings_probe_local_http_reports_not_configured_without_endpoint() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = scoped_settings_dir("lh-probe-notcfg");
         let app = build_local_http_chain_app(&dir);
         app.update_local_http_config(crate::app::SettingsLocalHttpUpdate {
@@ -1718,6 +1791,7 @@ mod tests {
 
     #[tokio::test]
     async fn settings_probe_local_http_reports_scheme_unsupported_for_https() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = scoped_settings_dir("lh-probe-https");
         let app = build_local_http_chain_app(&dir);
         let secret_looking_endpoint = "https://sekrit-host.test/v1/sekritroute";
@@ -1752,6 +1826,7 @@ mod tests {
 
     #[tokio::test]
     async fn settings_probe_local_http_reports_connect_failed_for_closed_port() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = scoped_settings_dir("lh-probe-connect");
         let app = build_local_http_chain_app(&dir);
         // Port 59998 ist hoffentlich zu — niemand lauscht.
@@ -1795,6 +1870,7 @@ mod tests {
 
     #[tokio::test]
     async fn settings_set_text_provider_chain_applies_and_echoes_status() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = scoped_settings_dir("tc-apply-echo");
         let app = build_local_http_chain_app(&dir);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1834,6 +1910,7 @@ mod tests {
 
     #[tokio::test]
     async fn settings_set_text_provider_chain_rejects_unknown_kind() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = scoped_settings_dir("tc-reject-unknown");
         let app = build_local_http_chain_app(&dir);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1860,6 +1937,7 @@ mod tests {
 
     #[tokio::test]
     async fn settings_set_text_provider_chain_rejects_duplicates() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = scoped_settings_dir("tc-reject-dup");
         let app = build_local_http_chain_app(&dir);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1884,6 +1962,7 @@ mod tests {
 
     #[tokio::test]
     async fn settings_set_text_provider_chain_rejects_empty() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = scoped_settings_dir("tc-reject-empty");
         let app = build_local_http_chain_app(&dir);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1908,6 +1987,7 @@ mod tests {
 
     #[tokio::test]
     async fn settings_reset_text_provider_chain_returns_to_abrain_default() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = scoped_settings_dir("tc-reset");
         let app = build_local_http_chain_app(&dir);
         // Vorher auf eine Dreier-Kette gehen.
@@ -1943,6 +2023,7 @@ mod tests {
 
     #[tokio::test]
     async fn settings_set_text_provider_chain_normalizes_case_and_whitespace() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = scoped_settings_dir("tc-normalize");
         let app = build_local_http_chain_app(&dir);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1962,6 +2043,229 @@ mod tests {
         let resp = recv_text(&mut ws).await;
         assert!(resp.contains(r#""type":"status""#));
         assert!(resp.contains(r#""text_provider_chain":["abrain","llamafile_local"]"#));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // -------------------------------------------------------------------
+    // PR 13 — STT/TTS-Chain-Editor E2E-Tests.
+    //
+    // Bewusst klein: heute gibt es pro Achse nur das Kind `command`.
+    // Happy-Path + Reject-Unknown + Reject-Empty + Reset + Normalize
+    // decken die Validator-Geometrie ab. Der Chain-Editor selbst
+    // wird erst durch weitere Provider-Kinds (zukünftige PRs) visuell
+    // ausgebaut — die Persistenz-/IPC-/Validator-Schicht ist bereits
+    // vorbereitet.
+    // -------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn settings_set_stt_provider_chain_applies_and_echoes_status() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = scoped_settings_dir("stt-chain-apply");
+        let app = build_local_http_chain_app(&dir);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"settings_set_stt_provider_chain","chain":["command"]}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.contains(r#""type":"status""#));
+        assert!(resp.contains(r#""stt_provider_chain":["command"]"#));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn settings_set_stt_provider_chain_rejects_unknown_kind() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = scoped_settings_dir("stt-chain-unknown");
+        let app = build_local_http_chain_app(&dir);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"settings_set_stt_provider_chain","chain":["cloud_whisper"]}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.starts_with(r#"{"type":"error""#));
+        assert!(resp.contains("unknown stt provider kind"));
+        assert!(resp.contains("cloud_whisper"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn settings_set_stt_provider_chain_rejects_empty() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = scoped_settings_dir("stt-chain-empty");
+        let app = build_local_http_chain_app(&dir);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"settings_set_stt_provider_chain","chain":[]}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.starts_with(r#"{"type":"error""#));
+        assert!(resp.contains("empty"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn settings_reset_stt_provider_chain_returns_to_command_default() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = scoped_settings_dir("stt-chain-reset");
+        let app = build_local_http_chain_app(&dir);
+        // Vorher keine Änderung nötig — wir setzen die Kette explizit
+        // auf `["command"]` über den Update-Pfad, simulieren dann einen
+        // Reset und erwarten wieder `["command"]`.
+        app.update_stt_provider_chain(crate::app::SettingsSttProviderChainUpdate {
+            chain: vec!["command".into()],
+        })
+        .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"settings_reset_stt_provider_chain"}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.contains(r#""type":"status""#));
+        assert!(resp.contains(r#""stt_provider_chain":["command"]"#));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn settings_set_stt_provider_chain_normalizes_case_and_whitespace() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = scoped_settings_dir("stt-chain-normalize");
+        let app = build_local_http_chain_app(&dir);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"settings_set_stt_provider_chain","chain":["  COMMAND "]}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.contains(r#""type":"status""#));
+        assert!(resp.contains(r#""stt_provider_chain":["command"]"#));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn settings_set_tts_provider_chain_applies_and_echoes_status() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = scoped_settings_dir("tts-chain-apply");
+        let app = build_local_http_chain_app(&dir);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"settings_set_tts_provider_chain","chain":["command"]}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.contains(r#""type":"status""#));
+        assert!(resp.contains(r#""tts_provider_chain":["command"]"#));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn settings_set_tts_provider_chain_rejects_duplicates() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = scoped_settings_dir("tts-chain-dup");
+        let app = build_local_http_chain_app(&dir);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"settings_set_tts_provider_chain","chain":["command","command"]}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.starts_with(r#"{"type":"error""#));
+        assert!(resp.contains("duplicate"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn settings_reset_tts_provider_chain_returns_to_command_default() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = scoped_settings_dir("tts-chain-reset");
+        let app = build_local_http_chain_app(&dir);
+        app.update_tts_provider_chain(crate::app::SettingsTtsProviderChainUpdate {
+            chain: vec!["command".into()],
+        })
+        .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"settings_reset_tts_provider_chain"}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.contains(r#""type":"status""#));
+        assert!(resp.contains(r#""tts_provider_chain":["command"]"#));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

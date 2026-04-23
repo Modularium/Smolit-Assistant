@@ -288,6 +288,23 @@ static func tts_lines(status: Dictionary) -> Array:
 ## Defensiv: fehlende Felder → Dash.
 static func _audio_provider_lines(status: Dictionary, prefix: String) -> Array:
 	var lines: Array = []
+	# PR 13 — Chain-Zeile zuerst rendern, damit der Nutzer sofort
+	# sieht, welche Reihenfolge der Core aktuell fährt. Fehlt das
+	# Feld (alter Core), zeigt die Zeile einen ehrlichen „—".
+	var chain_field := prefix + "_chain"
+	var chain_raw: Variant = status.get(chain_field, null)
+	if typeof(chain_raw) == TYPE_ARRAY:
+		if (chain_raw as Array).is_empty():
+			lines.append(_row("Chain", "—", true))
+		else:
+			var items: Array[String] = []
+			for entry in chain_raw:
+				items.append(String(entry))
+			lines.append(_row("Chain", " → ".join(items)))
+	else:
+		lines.append(_row("Chain",
+			"Core liefert kein %s-Feld (alter Build).".replace("%s", chain_field),
+			true))
 	lines.append(_row("Configured",
 		_stringify_or_dash(status, prefix + "_configured")))
 	lines.append(_row("Active",

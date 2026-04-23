@@ -1057,6 +1057,49 @@ gegen einen lokalen Fake-HTTP-Server plus ein Shell-Skript als
   Produktion aktiv werden kann). Sobald ein Admin-UX für
   Custom-CA-Bundles kommt, kann der Probe-Trust-Store
   konfigurierbar werden.
+- **PR 13 — STT/TTS Chain-Editor in der Settings-Shell (Ist).**
+  Spiegel zum Text-Chain-Editor aus PR 9, aufgesetzt auf die
+  Audio-Achsen. Beide Achsen bekommen eine Whitelist
+  ([`crate::providers::stt::KNOWN_STT_KINDS`](../core/src/providers/stt.rs)
+  und
+  [`crate::providers::tts::KNOWN_TTS_KINDS`](../core/src/providers/tts.rs) —
+  heute pro Achse nur `command`), einen `validate_*_chain`-Helper
+  (Empty-Reject / UnknownKind / Duplicate / Trim+Lowercase) und
+  je einen `DEFAULT_*_PROVIDER_CHAIN`-Reset-Default. `App`
+  bekommt `update_stt_provider_chain` / `reset_stt_provider_chain` /
+  `update_tts_provider_chain` / `reset_tts_provider_chain`;
+  `live_audio.{stt,tts}_provider_chain` ist seit PR 13 der
+  Source-of-Truth-Stand (die Startup-`config.audio`-Kette wirkt
+  nur noch als erster Startwert). Der Settings-Store erweitert
+  die Override-Dateien um `stt_chain.json` und `tts_chain.json`
+  (gleiches `AudioChainOverrideFile { chain: Option<Vec<String>> }`-
+  Format, gleiche atomare Write-/0600-Linie wie
+  `text_chain.json`). Neue IPC-Messages
+  `settings_set_{stt,tts}_provider_chain` /
+  `settings_reset_{stt,tts}_provider_chain` sind additiv; bei
+  Erfolg frischer `status`-Envelope mit `stt_provider_chain` /
+  `tts_provider_chain` als neuer Reihenfolge, bei Validation-
+  Fehler kuratiertes `error`-Envelope. UI-Seite: ein gemeinsamer
+  `_build_audio_chain_editor_block(axis)`-Helper baut beide
+  Editoren parametrisiert; die axis-spezifischen State-Variablen
+  (`_stt_chain_*` / `_tts_chain_*`) und Whitelists (`_KNOWN_STT_KINDS` /
+  `_KNOWN_TTS_KINDS`) spiegeln die Core-Whitelists 1:1. Ein
+  kleines Info-Label in jedem Editor weist ehrlich darauf hin,
+  dass heute nur `command` verfügbar ist — die UI verspricht
+  keine zusätzlichen Provider, die nicht existieren.
+  `settings_sections::stt_lines` / `tts_lines` rendern das neue
+  `stt_provider_chain` / `tts_provider_chain`-Feld als
+  „Chain"-Zeile; fehlt das Feld (alter Core), bleibt die Zeile
+  mit einem ehrlichen „—" stehen. Tests: sechs neue Validator-
+  Unit-Tests pro Achse (Happy-Path, Normalisierung, Empty,
+  Unknown, Duplicate, Frozen-Set), sechs neue `settings_store`-
+  Unit-Tests (Roundtrip, Reject-Empty, Clear-Idempotenz pro
+  Achse), vier neue Protocol-Parser-Tests, sieben neue IPC-
+  Ende-zu-Ende-Tests, sechs neue UI-Smoke-Blöcke (Build + Sync
+  pro Achse, Empty-Guard pro Achse, Single-Kind-Info-Hinweis,
+  Readout-Chain-Zeile). Gesamttests: Core 302 PASS (+30 vs.
+  PR 12); UI-`settings-shell-smoke` +6 Assertions. Alle übrigen
+  UI-Smokes grün; Headless-Boot sauber.
 
 Zwischenprinzipien:
 
@@ -1104,7 +1147,7 @@ aufgehoben werden.
 
 ---
 
-## 11. Secrets- und Sensitive-Config-Kategorien (Ist, PR 5 + PR 7 + PR 8 + PR 9 + PR 10 + PR 11 + PR 12)
+## 11. Secrets- und Sensitive-Config-Kategorien (Ist, PR 5 + PR 7 + PR 8 + PR 9 + PR 10 + PR 11 + PR 12 + PR 13)
 
 Ab PR 5 existiert in
 [`core/src/settings_store.rs`](../core/src/settings_store.rs) ein
@@ -1149,10 +1192,11 @@ aber wie eine sensitive-lite-Ressource behandelt:
 
 **Schreib-/Persistenz-Pfade.**
 
-- **Editierbare Operational-Werte.** Fünf kleine Override-Dateien
+- **Editierbare Operational-Werte.** Sieben kleine Override-Dateien
   im Settings-Verzeichnis:
   `llamafile_local.json` (PR 5), `stt.json` (PR 7), `tts.json`
-  (PR 7), `local_http.json` (PR 8), `text_chain.json` (PR 9).
+  (PR 7), `local_http.json` (PR 8), `text_chain.json` (PR 9),
+  `stt_chain.json` + `tts_chain.json` (PR 13).
   Auflösungsreihenfolge:
   `SMOLIT_SETTINGS_DIR` → `$XDG_CONFIG_HOME/smolit-assistant/` →
   `$HOME/.config/smolit-assistant/`. Atomarer Write
@@ -1162,11 +1206,14 @@ aber wie eine sensitive-lite-Ressource behandelt:
   Felder (`enabled`, `command`, TTS zusätzlich `auto_speak`);
   `local_http`-Override persistiert nur `enabled`, `endpoint` und
   `request_timeout_seconds` — Prompt-/Response-Feldnamen bleiben
-  env-/Startup-gesteuert. `text_chain.json` persistiert eine
-  bereits validierte Reihenfolge bekannter Kinds (Validator läuft
-  im App-Schreibpfad, nicht im Store). STT-/TTS-Provider-Chains
-  bleiben weiterhin env-gesteuert, damit ein altes Override-File
-  eine zukünftige Cloud-Kette nicht überstimmt.
+  env-/Startup-gesteuert. `text_chain.json` / `stt_chain.json` /
+  `tts_chain.json` persistieren jeweils eine bereits validierte
+  Reihenfolge bekannter Kinds (Validator läuft im App-Schreibpfad,
+  nicht im Store). Die Audio-Chains sind seit PR 13
+  UI-editierbar; andere Env-Gated-Felder (Prompt-/Response-Feldnamen
+  von `local_http`, Timeouts, Auth-Header) bleiben weiterhin
+  env-gesteuert, damit ein altes Override-File keine späteren
+  Feature-Entscheidungen überstimmt.
 - **Sensitive-Werte.** Seit PR 10 existiert ein eigener Secrets-
   Store ([`core/src/secrets_store.rs`](../core/src/secrets_store.rs))
   in einer **separaten** Datei `secrets.json` (gleiche

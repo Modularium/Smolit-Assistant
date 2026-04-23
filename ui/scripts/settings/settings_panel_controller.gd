@@ -158,6 +158,29 @@ const _LLAMAFILE_MODE_OPTIONS: Array = [
 ## sichtbar (unknown kind) und beschädigt keine Persistenz.
 const _KNOWN_TEXT_KINDS: Array[String] = ["abrain", "llamafile_local", "local_http"]
 
+## PR 13 — Whitelists für die Audio-Chain-Editoren. Heute pro Achse
+## nur ein Kind. Der Chain-Editor lebt trotzdem, damit spätere Kinds
+## ohne UI-Refactor dazukommen können.
+const _KNOWN_STT_KINDS: Array[String] = ["command"]
+const _KNOWN_TTS_KINDS: Array[String] = ["command"]
+
+## PR 13 — State-Spiegel der STT-/TTS-Chain-Editoren. Analog zum
+## `_text_chain_state`-Modell. Jeder Eintrag:
+## `{"kind": String, "in_chain": bool}`.
+var _stt_chain_rows_vbox: VBoxContainer = null
+var _stt_chain_apply_button: Button = null
+var _stt_chain_reset_button: Button = null
+var _stt_chain_apply_status_label: Label = null
+var _stt_chain_info_label: Label = null
+var _stt_chain_state: Array = []
+var _tts_chain_rows_vbox: VBoxContainer = null
+var _tts_chain_apply_button: Button = null
+var _tts_chain_reset_button: Button = null
+var _tts_chain_apply_status_label: Label = null
+var _tts_chain_info_label: Label = null
+var _tts_chain_state: Array = []
+var _syncing_audio_chain_widgets: bool = false
+
 ## Tag-basierte Farbgebung der Probe-Ergebnisse. Nur kuratierte Tags —
 ## unbekannte Klassen landen in `_neutral`.
 const _PROBE_CLASS_COLORS: Dictionary = {
@@ -413,6 +436,18 @@ func _render_sections() -> void:
 	_text_chain_reset_button = null
 	_text_chain_apply_status_label = null
 	_text_chain_state = []
+	_stt_chain_rows_vbox = null
+	_stt_chain_apply_button = null
+	_stt_chain_reset_button = null
+	_stt_chain_apply_status_label = null
+	_stt_chain_info_label = null
+	_stt_chain_state = []
+	_tts_chain_rows_vbox = null
+	_tts_chain_apply_button = null
+	_tts_chain_reset_button = null
+	_tts_chain_apply_status_label = null
+	_tts_chain_info_label = null
+	_tts_chain_state = []
 	_cloud_http_enabled_check = null
 	_cloud_http_endpoint_edit = null
 	_cloud_http_model_edit = null
@@ -448,8 +483,12 @@ func _render_sections() -> void:
 			_content_vbox.add_child(_build_local_http_editor_block())
 			_content_vbox.add_child(_build_cloud_http_editor_block())
 		elif section == _SectionsRef.SectionId.STT:
+			# PR 13: Chain-Editor zuerst (analog zur Text-Achse),
+			# dann der Per-Kind-Command-Editor.
+			_content_vbox.add_child(_build_audio_chain_editor_block("stt"))
 			_content_vbox.add_child(_build_stt_editor_block())
 		elif section == _SectionsRef.SectionId.TTS:
+			_content_vbox.add_child(_build_audio_chain_editor_block("tts"))
 			_content_vbox.add_child(_build_tts_editor_block())
 
 
@@ -1923,3 +1962,321 @@ func simulate_cloud_http_endpoint_input_for_test(value: String) -> void:
 	if _cloud_http_endpoint_edit != null:
 		_cloud_http_endpoint_edit.text = value
 	_refresh_cloud_http_insecure_hint()
+
+
+# --- STT/TTS-Chain-Editoren (PR 13) -------------------------------------
+#
+# Parametrisiert über `axis` ("stt" | "tts"). Die State-Variablen und
+# das Whitelist-Array werden dynamisch pro Achse ausgewählt — der Rest
+# ist derselbe Code wie der Text-Chain-Editor.
+
+
+func _build_audio_chain_editor_block(axis: String) -> Control:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 4)
+
+	var title := Label.new()
+	title.text = "%s provider chain · Edit" % axis
+	title.add_theme_font_size_override("font_size", 11)
+	title.modulate = Color(1, 1, 1, 0.85)
+	box.add_child(title)
+
+	var note := Label.new()
+	note.text = "Reihenfolge der %s-Provider-Fallback-Kette. Aktiviere/Deaktiviere Kinds; Up/Down ordnen aktive Einträge." % axis.to_upper()
+	note.modulate = Color(1, 1, 1, 0.45)
+	note.add_theme_font_size_override("font_size", 10)
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(note)
+
+	var info_label := Label.new()
+	var known := _audio_chain_known_kinds_for(axis)
+	if known.size() <= 1:
+		info_label.text = "Heute ist nur `command` als %s-Kind verfügbar. Der Editor bleibt für zukünftige Kinds vorbereitet." % axis.to_upper()
+	else:
+		info_label.text = ""
+	info_label.modulate = Color(1, 1, 1, 0.45)
+	info_label.add_theme_font_size_override("font_size", 10)
+	info_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(info_label)
+
+	var rows_vbox := VBoxContainer.new()
+	rows_vbox.add_theme_constant_override("separation", 2)
+	box.add_child(rows_vbox)
+
+	var actions_row := HBoxContainer.new()
+	actions_row.add_theme_constant_override("separation", 6)
+	box.add_child(actions_row)
+	var apply_button := Button.new()
+	apply_button.text = "Apply"
+	apply_button.tooltip_text = "Sendet die aktuelle %s-Reihenfolge als settings_set_%s_provider_chain an den Core." % [axis.to_upper(), axis]
+	apply_button.pressed.connect(_on_audio_chain_apply_pressed.bind(axis))
+	actions_row.add_child(apply_button)
+	var reset_button := Button.new()
+	reset_button.text = "Reset"
+	reset_button.tooltip_text = "Setzt die %s-Kette auf Default [\"command\"] zurück und löscht den persistierten Override." % axis.to_upper()
+	reset_button.pressed.connect(_on_audio_chain_reset_pressed.bind(axis))
+	actions_row.add_child(reset_button)
+	var apply_status_label := Label.new()
+	apply_status_label.text = ""
+	apply_status_label.modulate = Color(1, 1, 1, 0.6)
+	apply_status_label.add_theme_font_size_override("font_size", 10)
+	actions_row.add_child(apply_status_label)
+
+	var sep := HSeparator.new()
+	sep.modulate = Color(1, 1, 1, 0.2)
+	box.add_child(sep)
+
+	if axis == "stt":
+		_stt_chain_rows_vbox = rows_vbox
+		_stt_chain_apply_button = apply_button
+		_stt_chain_reset_button = reset_button
+		_stt_chain_apply_status_label = apply_status_label
+		_stt_chain_info_label = info_label
+	else:
+		_tts_chain_rows_vbox = rows_vbox
+		_tts_chain_apply_button = apply_button
+		_tts_chain_reset_button = reset_button
+		_tts_chain_apply_status_label = apply_status_label
+		_tts_chain_info_label = info_label
+
+	_sync_audio_chain_widgets_from_status(axis)
+	return box
+
+
+func _audio_chain_known_kinds_for(axis: String) -> Array[String]:
+	if axis == "stt":
+		return _KNOWN_STT_KINDS
+	return _KNOWN_TTS_KINDS
+
+
+func _audio_chain_status_field_for(axis: String) -> String:
+	return "%s_provider_chain" % axis
+
+
+func _audio_chain_rows_vbox_for(axis: String) -> VBoxContainer:
+	if axis == "stt":
+		return _stt_chain_rows_vbox
+	return _tts_chain_rows_vbox
+
+
+func _audio_chain_state_for(axis: String) -> Array:
+	if axis == "stt":
+		return _stt_chain_state
+	return _tts_chain_state
+
+
+func _audio_chain_apply_status_label_for(axis: String) -> Label:
+	if axis == "stt":
+		return _stt_chain_apply_status_label
+	return _tts_chain_apply_status_label
+
+
+func _set_audio_chain_state(axis: String, state: Array) -> void:
+	if axis == "stt":
+		_stt_chain_state = state
+	else:
+		_tts_chain_state = state
+
+
+func _sync_audio_chain_widgets_from_status(axis: String) -> void:
+	var rows_vbox := _audio_chain_rows_vbox_for(axis)
+	if rows_vbox == null:
+		return
+	_syncing_audio_chain_widgets = true
+	var known := _audio_chain_known_kinds_for(axis)
+	var state: Array = []
+	var chain_raw: Variant = _last_status.get(_audio_chain_status_field_for(axis), null)
+	var chain_kinds: Array[String] = []
+	if typeof(chain_raw) == TYPE_ARRAY:
+		for entry in chain_raw:
+			var e := String(entry)
+			if e in known and not (e in chain_kinds):
+				chain_kinds.append(e)
+	for kind in known:
+		if not (kind in chain_kinds):
+			state.append({"kind": kind, "in_chain": false})
+	var front: Array = []
+	for kind in chain_kinds:
+		front.append({"kind": kind, "in_chain": true})
+	state = front + state
+	_set_audio_chain_state(axis, state)
+	_render_audio_chain_rows(axis)
+	_syncing_audio_chain_widgets = false
+
+
+func _render_audio_chain_rows(axis: String) -> void:
+	var rows_vbox := _audio_chain_rows_vbox_for(axis)
+	if rows_vbox == null:
+		return
+	for child in rows_vbox.get_children():
+		child.queue_free()
+	var state := _audio_chain_state_for(axis)
+	for i in range(state.size()):
+		var entry: Dictionary = state[i]
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 6)
+		rows_vbox.add_child(row)
+
+		var enabled_check := CheckBox.new()
+		enabled_check.text = String(entry.get("kind", "?"))
+		enabled_check.button_pressed = bool(entry.get("in_chain", false))
+		enabled_check.tooltip_text = "Provider in der %s-Fallback-Kette aktiv." % axis.to_upper()
+		enabled_check.toggled.connect(_on_audio_chain_row_toggled.bind(axis, i))
+		enabled_check.custom_minimum_size = Vector2(220, 0)
+		row.add_child(enabled_check)
+
+		var up_button := Button.new()
+		up_button.text = "↑"
+		up_button.disabled = i == 0 or not bool(entry.get("in_chain", false))
+		up_button.tooltip_text = "Ein Slot nach oben."
+		up_button.pressed.connect(_on_audio_chain_row_move.bind(axis, i, -1))
+		row.add_child(up_button)
+
+		var down_button := Button.new()
+		down_button.text = "↓"
+		var has_in_chain_below := false
+		for j in range(i + 1, state.size()):
+			var next_entry: Dictionary = state[j]
+			if bool(next_entry.get("in_chain", false)):
+				has_in_chain_below = true
+				break
+		down_button.disabled = not has_in_chain_below or not bool(entry.get("in_chain", false))
+		down_button.tooltip_text = "Ein Slot nach unten."
+		down_button.pressed.connect(_on_audio_chain_row_move.bind(axis, i, 1))
+		row.add_child(down_button)
+
+
+func _on_audio_chain_row_toggled(pressed: bool, axis: String, row_index: int) -> void:
+	if _syncing_audio_chain_widgets:
+		return
+	var state := _audio_chain_state_for(axis)
+	if row_index < 0 or row_index >= state.size():
+		return
+	var entry: Dictionary = state[row_index]
+	entry["in_chain"] = pressed
+	state[row_index] = entry
+	var enabled_rows: Array = []
+	var disabled_rows: Array = []
+	for e in state:
+		if bool(e.get("in_chain", false)):
+			enabled_rows.append(e)
+		else:
+			disabled_rows.append(e)
+	state = enabled_rows + disabled_rows
+	_set_audio_chain_state(axis, state)
+	var lbl := _audio_chain_apply_status_label_for(axis)
+	if lbl != null:
+		lbl.text = ""
+	_render_audio_chain_rows(axis)
+
+
+func _on_audio_chain_row_move(axis: String, row_index: int, direction: int) -> void:
+	if _syncing_audio_chain_widgets:
+		return
+	var state := _audio_chain_state_for(axis)
+	var target := row_index + direction
+	if row_index < 0 or row_index >= state.size():
+		return
+	if target < 0 or target >= state.size():
+		return
+	var tmp: Dictionary = state[row_index]
+	state[row_index] = state[target]
+	state[target] = tmp
+	_set_audio_chain_state(axis, state)
+	var lbl := _audio_chain_apply_status_label_for(axis)
+	if lbl != null:
+		lbl.text = ""
+	_render_audio_chain_rows(axis)
+
+
+func _on_audio_chain_apply_pressed(axis: String) -> void:
+	var rows_vbox := _audio_chain_rows_vbox_for(axis)
+	if rows_vbox == null:
+		return
+	var chain: Array[String] = []
+	for entry in _audio_chain_state_for(axis):
+		if bool(entry.get("in_chain", false)):
+			chain.append(String(entry.get("kind", "")))
+	var lbl := _audio_chain_apply_status_label_for(axis)
+	if chain.is_empty():
+		if lbl != null:
+			lbl.text = "chain empty — enable at least one provider"
+			lbl.modulate = Color(0.9, 0.5, 0.5, 0.9)
+		return
+	var client: Node = null
+	if is_inside_tree():
+		client = get_node_or_null("/root/IpcClient")
+	if client == null or not client.has_method("is_connected_to_core") \
+			or not client.is_connected_to_core():
+		if lbl != null:
+			lbl.text = "offline"
+			lbl.modulate = Color(0.9, 0.5, 0.5, 0.9)
+		return
+	var method_name := "settings_set_%s_provider_chain" % axis
+	if client.has_method(method_name):
+		client.call(method_name, chain)
+	if lbl != null:
+		lbl.text = "sent"
+		lbl.modulate = Color(1, 1, 1, 0.55)
+
+
+func _on_audio_chain_reset_pressed(axis: String) -> void:
+	var lbl := _audio_chain_apply_status_label_for(axis)
+	var client: Node = null
+	if is_inside_tree():
+		client = get_node_or_null("/root/IpcClient")
+	if client == null or not client.has_method("is_connected_to_core") \
+			or not client.is_connected_to_core():
+		if lbl != null:
+			lbl.text = "offline"
+			lbl.modulate = Color(0.9, 0.5, 0.5, 0.9)
+		return
+	var method_name := "settings_reset_%s_provider_chain" % axis
+	if client.has_method(method_name):
+		client.call(method_name)
+	if lbl != null:
+		lbl.text = "reset sent"
+		lbl.modulate = Color(1, 1, 1, 0.55)
+
+
+## Snapshot für Smoke-Tests — Analog zu `text_chain_editor_snapshot`,
+## aber axis-parametrisiert.
+func audio_chain_editor_snapshot(axis: String) -> Dictionary:
+	var rows_vbox := _audio_chain_rows_vbox_for(axis)
+	var built := rows_vbox != null
+	if not built:
+		return {"built": false, "rows": [], "apply_status": "", "info_hint": ""}
+	var rows: Array = []
+	for entry in _audio_chain_state_for(axis):
+		rows.append({
+			"kind": String(entry.get("kind", "")),
+			"in_chain": bool(entry.get("in_chain", false)),
+		})
+	var lbl := _audio_chain_apply_status_label_for(axis)
+	var info: String = ""
+	if axis == "stt" and _stt_chain_info_label != null:
+		info = _stt_chain_info_label.text
+	elif axis == "tts" and _tts_chain_info_label != null:
+		info = _tts_chain_info_label.text
+	return {
+		"built": true,
+		"rows": rows,
+		"apply_status": lbl.text if lbl != null else "",
+		"info_hint": info,
+	}
+
+
+## Test-Hooks (analog zu den Text-Chain-Hooks) — erlauben Smoke-Tests
+## Toggle / Move / Apply-Empty-Guard zu prüfen, ohne IpcClient.
+func simulate_audio_chain_toggle_for_test(axis: String, row_index: int, pressed: bool) -> void:
+	_on_audio_chain_row_toggled(pressed, axis, row_index)
+
+
+func simulate_audio_chain_move_for_test(axis: String, row_index: int, direction: int) -> void:
+	_on_audio_chain_row_move(axis, row_index, direction)
+
+
+## PR 13 — Test-Hook für den Apply-Button des Chain-Editors; umgeht
+## den Tree-Walk und triggert exakt den axis-spezifischen Handler.
+func simulate_audio_chain_apply_for_test(axis: String) -> void:
+	_on_audio_chain_apply_pressed(axis)

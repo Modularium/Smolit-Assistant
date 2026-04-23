@@ -234,12 +234,19 @@ pub struct StatusPayload {
     /// Ob der zuletzt aktive STT-Provider Cloud-Komponenten hat. Heute
     /// immer `false` (kein Cloud-Kind implementiert).
     pub stt_provider_cloud: bool,
+    /// Geordnete Liste der produktiv instanziierten STT-Kinds (PR 13).
+    /// Spiegel zu `text_provider_chain` — unbekannte Env-Kinds sind
+    /// hier bereits verworfen. Seit PR 13 über
+    /// `settings_set_stt_provider_chain` editierbar.
+    pub stt_provider_chain: Vec<String>,
     // --- TTS Provider (PR 6, additiv) ------------------------------
     pub tts_provider_configured: String,
     pub tts_provider_active: String,
     pub tts_provider_availability: String,
     pub tts_provider_last_error: Option<String>,
     pub tts_provider_cloud: bool,
+    /// Geordnete Liste der produktiv instanziierten TTS-Kinds (PR 13).
+    pub tts_provider_chain: Vec<String>,
     // --- Local-HTTP-Provider (PR 8, additiv) -----------------------
     /// Ob `local_http` Teil der aktuellen Text-Provider-Kette ist.
     /// Bei `false` sind die übrigen `local_http_*`-Felder bedeutungslos
@@ -404,6 +411,20 @@ pub struct SettingsTextProviderChainUpdate {
     pub chain: Vec<String>,
 }
 
+/// Eingabe-Payload für `settings_set_stt_provider_chain` (PR 13).
+/// Spiegel zu [`SettingsTextProviderChainUpdate`]; der Core validiert
+/// gegen [`crate::providers::stt::KNOWN_STT_KINDS`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct SettingsSttProviderChainUpdate {
+    pub chain: Vec<String>,
+}
+
+/// Eingabe-Payload für `settings_set_tts_provider_chain` (PR 13).
+#[derive(Debug, Clone, Deserialize)]
+pub struct SettingsTtsProviderChainUpdate {
+    pub chain: Vec<String>,
+}
+
 /// Eingabe-Payload für `settings_set_stt_config` (PR 7). `enabled` ist
 /// Pflicht; `command` ist optional — `None` lässt den bisherigen Wert
 /// stehen, `Some("")` / nur Whitespace löscht ihn, `Some("whisper …")`
@@ -430,17 +451,28 @@ pub struct SettingsTtsUpdate {
 
 impl App {
     pub fn new(config: Config) -> Self {
-        // STT-/TTS-Provider-Resolver (PR 6). Command-Kind bleibt Default,
-        // die Chain wird aus der Config gelesen (env-überschreibbar).
-        let stt_chain: Vec<SttProviderChainItem> = config
-            .audio
-            .stt_provider_chain
+        // STT-/TTS-Provider-Resolver (PR 6 / PR 13). Command-Kind
+        // bleibt Default, die Chain kommt primär aus der Config
+        // (env-überschreibbar). **PR 13:** Zusätzlich liest der Core
+        // einen persistierten `stt_chain.json` / `tts_chain.json`-
+        // Override aus dem Settings-Store und legt ihn über die
+        // Startup-Chain. Eine leere / fehlende Override-Datei fällt
+        // geräuschlos auf die Startup-Chain zurück.
+        let stt_chain_override = settings_store::load_stt_chain_override();
+        let tts_chain_override = settings_store::load_tts_chain_override();
+        let stt_chain_names: Vec<String> = match stt_chain_override.chain {
+            Some(c) if !c.is_empty() => c,
+            _ => config.audio.stt_provider_chain.clone(),
+        };
+        let tts_chain_names: Vec<String> = match tts_chain_override.chain {
+            Some(c) if !c.is_empty() => c,
+            _ => config.audio.tts_provider_chain.clone(),
+        };
+        let stt_chain: Vec<SttProviderChainItem> = stt_chain_names
             .iter()
             .map(|k| SttProviderChainItem { kind: k.clone() })
             .collect();
-        let tts_chain: Vec<TtsProviderChainItem> = config
-            .audio
-            .tts_provider_chain
+        let tts_chain: Vec<TtsProviderChainItem> = tts_chain_names
             .iter()
             .map(|k| TtsProviderChainItem { kind: k.clone() })
             .collect();
@@ -449,8 +481,16 @@ impl App {
         // schon beim Start den persistierten Nutzer-Zustand reflektiert.
         let stt_override = settings_store::load_stt_override();
         let tts_override = settings_store::load_tts_override();
-        let live_audio_stage = settings_store::apply_stt_override(config.audio.clone(), &stt_override);
-        let live_audio_initial = settings_store::apply_tts_override(live_audio_stage, &tts_override);
+        let mut live_audio_stage =
+            settings_store::apply_stt_override(config.audio.clone(), &stt_override);
+        // PR 13 — die Chain-Felder in live_audio spiegeln die aktuelle
+        // produktive Kette. Damit Lese-Pfade (StatusPayload,
+        // `update_stt_config`-Rebuild) vom live-Stand auslesen können,
+        // nicht vom immutablen Startup-Snapshot.
+        live_audio_stage.stt_provider_chain = stt_chain_names.clone();
+        let mut live_audio_initial =
+            settings_store::apply_tts_override(live_audio_stage, &tts_override);
+        live_audio_initial.tts_provider_chain = tts_chain_names.clone();
         let stt = Arc::new(SttProviderResolver::from_chain(&stt_chain, &live_audio_initial));
         let tts = Arc::new(TtsProviderResolver::from_chain(&tts_chain, &live_audio_initial));
 
@@ -1204,11 +1244,21 @@ impl App {
             stt_provider_availability: stt_provider.availability,
             stt_provider_last_error: stt_provider.last_error,
             stt_provider_cloud: stt_provider.cloud,
+            stt_provider_chain: stt_resolver
+                .chain_kinds()
+                .into_iter()
+                .map(|s| s.to_string())
+                .collect(),
             tts_provider_configured: tts_provider.configured,
             tts_provider_active: tts_provider.active,
             tts_provider_availability: tts_provider.availability,
             tts_provider_last_error: tts_provider.last_error,
             tts_provider_cloud: tts_provider.cloud,
+            tts_provider_chain: tts_resolver
+                .chain_kinds()
+                .into_iter()
+                .map(|s| s.to_string())
+                .collect(),
             local_http_in_chain,
             local_http_enabled: local_http_cfg.enabled,
             local_http_configured,
@@ -1488,11 +1538,11 @@ impl App {
             );
         }
 
-        // Resolver rebuilden. Chain bleibt wie zum Startup erzeugt
-        // (PR 7 ändert nicht die Kette, nur den Primär-Provider).
-        let stt_chain: Vec<SttProviderChainItem> = self
-            .config
-            .audio
+        // Resolver rebuilden. **PR 13:** Chain wird aus dem live-
+        // Stand gelesen, damit ein in der Settings-Shell gesetzter
+        // Chain-Override beim nächsten `update_stt_config` nicht
+        // wieder durch den immutablen Startup-Snapshot ersetzt wird.
+        let stt_chain: Vec<SttProviderChainItem> = merged
             .stt_provider_chain
             .iter()
             .map(|k| SttProviderChainItem { kind: k.clone() })
@@ -1541,9 +1591,9 @@ impl App {
             );
         }
 
-        let tts_chain: Vec<TtsProviderChainItem> = self
-            .config
-            .audio
+        // **PR 13:** analog zu `update_stt_config` — Chain aus dem
+        // live-Stand lesen, nicht aus der immutablen Startup-Config.
+        let tts_chain: Vec<TtsProviderChainItem> = merged
             .tts_provider_chain
             .iter()
             .map(|k| TtsProviderChainItem { kind: k.clone() })
@@ -1783,6 +1833,134 @@ impl App {
         // Reset geht durch den regulären Update-Pfad, damit Validator
         // und Resolver-Rebuild einheitlich behandelt werden.
         self.update_text_provider_chain(SettingsTextProviderChainUpdate {
+            chain: default_chain,
+        })
+    }
+
+    /// Aktualisiert die STT-Provider-Kette (PR 13). Ablauf identisch
+    /// zu `update_text_provider_chain`: Validator, Persist, Resolver-
+    /// Rebuild. Der Rebuild liest Enabled/Command aus dem live-Stand —
+    /// die Kette wird in `live_audio.stt_provider_chain` aktualisiert.
+    pub fn update_stt_provider_chain(
+        &self,
+        update: SettingsSttProviderChainUpdate,
+    ) -> Result<(), String> {
+        use crate::providers::stt::{validate_stt_chain, SttChainValidationError};
+        let normalized = match validate_stt_chain(&update.chain) {
+            Ok(v) => v,
+            Err(SttChainValidationError::Empty) => {
+                return Err(
+                    "stt provider chain is empty (use reset to restore default)".to_string(),
+                );
+            }
+            Err(err) => return Err(format!("{err}")),
+        };
+
+        if let Err(err) = settings_store::save_stt_chain_override(&normalized) {
+            warn!(error = %err, "failed to persist stt provider chain override");
+        } else {
+            info!(chain = ?normalized, "stt provider chain override persisted");
+        }
+
+        // live_audio + Resolver atomisch umstellen.
+        let mut merged: AudioConfig = self
+            .live_audio
+            .lock()
+            .expect("live audio mutex poisoned")
+            .clone();
+        merged.stt_provider_chain = normalized.clone();
+        let chain_items: Vec<SttProviderChainItem> = normalized
+            .iter()
+            .map(|k| SttProviderChainItem { kind: k.clone() })
+            .collect();
+        let new_resolver = Arc::new(SttProviderResolver::from_chain(&chain_items, &merged));
+        {
+            let mut guard = self.stt.write().expect("stt resolver lock poisoned");
+            *guard = new_resolver;
+        }
+        {
+            let mut guard = self.live_audio.lock().expect("live audio mutex poisoned");
+            *guard = merged;
+        }
+        Ok(())
+    }
+
+    /// Reset der STT-Provider-Kette auf den Compile-Zeit-Default
+    /// `["command"]` (PR 13). Löscht den persistierten Override im
+    /// Settings-Store und rebuildet den Resolver.
+    pub fn reset_stt_provider_chain(&self) -> Result<(), String> {
+        use crate::providers::stt::DEFAULT_STT_PROVIDER_CHAIN;
+        if let Err(err) = settings_store::clear_stt_chain_override() {
+            warn!(error = %err, "failed to clear stt provider chain override");
+        } else {
+            info!("stt provider chain override cleared");
+        }
+        let default_chain: Vec<String> = DEFAULT_STT_PROVIDER_CHAIN
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        self.update_stt_provider_chain(SettingsSttProviderChainUpdate {
+            chain: default_chain,
+        })
+    }
+
+    /// Aktualisiert die TTS-Provider-Kette (PR 13). Spiegel zu
+    /// [`App::update_stt_provider_chain`].
+    pub fn update_tts_provider_chain(
+        &self,
+        update: SettingsTtsProviderChainUpdate,
+    ) -> Result<(), String> {
+        use crate::providers::tts::{validate_tts_chain, TtsChainValidationError};
+        let normalized = match validate_tts_chain(&update.chain) {
+            Ok(v) => v,
+            Err(TtsChainValidationError::Empty) => {
+                return Err(
+                    "tts provider chain is empty (use reset to restore default)".to_string(),
+                );
+            }
+            Err(err) => return Err(format!("{err}")),
+        };
+
+        if let Err(err) = settings_store::save_tts_chain_override(&normalized) {
+            warn!(error = %err, "failed to persist tts provider chain override");
+        } else {
+            info!(chain = ?normalized, "tts provider chain override persisted");
+        }
+
+        let mut merged: AudioConfig = self
+            .live_audio
+            .lock()
+            .expect("live audio mutex poisoned")
+            .clone();
+        merged.tts_provider_chain = normalized.clone();
+        let chain_items: Vec<TtsProviderChainItem> = normalized
+            .iter()
+            .map(|k| TtsProviderChainItem { kind: k.clone() })
+            .collect();
+        let new_resolver = Arc::new(TtsProviderResolver::from_chain(&chain_items, &merged));
+        {
+            let mut guard = self.tts.write().expect("tts resolver lock poisoned");
+            *guard = new_resolver;
+        }
+        {
+            let mut guard = self.live_audio.lock().expect("live audio mutex poisoned");
+            *guard = merged;
+        }
+        Ok(())
+    }
+
+    pub fn reset_tts_provider_chain(&self) -> Result<(), String> {
+        use crate::providers::tts::DEFAULT_TTS_PROVIDER_CHAIN;
+        if let Err(err) = settings_store::clear_tts_chain_override() {
+            warn!(error = %err, "failed to clear tts provider chain override");
+        } else {
+            info!("tts provider chain override cleared");
+        }
+        let default_chain: Vec<String> = DEFAULT_TTS_PROVIDER_CHAIN
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        self.update_tts_provider_chain(SettingsTtsProviderChainUpdate {
             chain: default_chain,
         })
     }

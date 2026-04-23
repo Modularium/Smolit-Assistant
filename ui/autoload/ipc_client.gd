@@ -210,6 +210,39 @@ func settings_reset_text_provider_chain() -> void:
 	_send({"type": "settings_reset_text_provider_chain"})
 
 
+## PR 13 — STT-Provider-Chain-Editor. `chain` ist eine geordnete
+## Liste bekannter Audio-Kind-Namen (heute nur `command`). Der Core
+## validiert gegen `KNOWN_STT_KINDS`.
+func settings_set_stt_provider_chain(chain: Array) -> void:
+	var normalized: Array[String] = []
+	for entry in chain:
+		normalized.append(String(entry))
+	_send({
+		"type": "settings_set_stt_provider_chain",
+		"chain": normalized,
+	})
+
+
+## PR 13 — Reset der STT-Kette auf Default `["command"]`.
+func settings_reset_stt_provider_chain() -> void:
+	_send({"type": "settings_reset_stt_provider_chain"})
+
+
+## PR 13 — TTS-Provider-Chain-Editor. Spiegel zum STT-Pfad.
+func settings_set_tts_provider_chain(chain: Array) -> void:
+	var normalized: Array[String] = []
+	for entry in chain:
+		normalized.append(String(entry))
+	_send({
+		"type": "settings_set_tts_provider_chain",
+		"chain": normalized,
+	})
+
+
+func settings_reset_tts_provider_chain() -> void:
+	_send({"type": "settings_reset_tts_provider_chain"})
+
+
 ## PR 10 — operationale Cloud-HTTP-Config (Endpoint / Model / Timeout /
 ## Enabled). **Enthält keinen API-Key** — der läuft über
 ## `settings_set_cloud_http_secret`.

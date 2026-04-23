@@ -38,9 +38,72 @@ pub const PROVIDER_NAME_STT_COMMAND: &str = "command";
 
 /// Kuratierte Whitelist bekannter STT-Kinds. Heute: nur `command`.
 /// Neue Kinds werden hier eingetragen, wenn ihre Runtime wirklich
-/// gelandet ist — kein freier Registrierungs-Pfad.
-#[allow(dead_code)]
+/// gelandet ist — kein freier Registrierungs-Pfad. Seit PR 13 wird
+/// die Liste vom Chain-Editor-Validator (`validate_stt_chain`) und
+/// von der Settings-Shell konsumiert; `#[allow(dead_code)]` ist
+/// deshalb entfallen.
 pub const KNOWN_STT_KINDS: &[&str] = &[PROVIDER_NAME_STT_COMMAND];
+
+/// Default-STT-Kette. Wird vom Chain-Editor-Reset-Pfad und als
+/// Startup-Fallback verwendet. Spiegel zu `DEFAULT_STT_PROVIDER_CHAIN`
+/// in `crate::config`; dort für die Startup-Env-Parser-Linie.
+pub const DEFAULT_STT_PROVIDER_CHAIN: &[&str] = &[PROVIDER_NAME_STT_COMMAND];
+
+/// Fehlerklassen für die STT-Chain-Validierung (PR 13). Spiegel zu
+/// [`crate::providers::text::TextChainValidationError`]. Bewusst klein
+/// und stabil — jede Variante wird direkt in eine kuratierte,
+/// deutsche Fehlermeldung im IPC-Schreibpfad gespiegelt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SttChainValidationError {
+    /// Chain ist leer. Kein stiller Default-Fallback — die UI
+    /// erreicht den Default über den dedizierten Reset-Pfad.
+    Empty,
+    /// Ein Kind-Name ist nicht in `KNOWN_STT_KINDS` enthalten.
+    UnknownKind(String),
+    /// Ein Kind erscheint mehrfach in der Kette.
+    Duplicate(String),
+}
+
+impl std::fmt::Display for SttChainValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Empty => write!(
+                f,
+                "stt provider chain is empty (use reset to restore default)",
+            ),
+            Self::UnknownKind(k) => write!(
+                f,
+                "unknown stt provider kind `{k}` (known: {})",
+                KNOWN_STT_KINDS.join(", "),
+            ),
+            Self::Duplicate(k) => write!(f, "duplicate stt provider kind `{k}` in chain"),
+        }
+    }
+}
+
+impl std::error::Error for SttChainValidationError {}
+
+/// Validiert und normalisiert eine Chain-Eingabe für den STT-
+/// Provider (PR 13). Regeln identisch zu `validate_text_chain`:
+/// trim + lowercase, leere Tokens als unbekannt ablehnen,
+/// Duplikate explizit zurückweisen, leere Eingabe → `Empty`.
+pub fn validate_stt_chain(raw: &[String]) -> Result<Vec<String>, SttChainValidationError> {
+    if raw.is_empty() {
+        return Err(SttChainValidationError::Empty);
+    }
+    let mut out: Vec<String> = Vec::with_capacity(raw.len());
+    for item in raw {
+        let normalized = item.trim().to_ascii_lowercase();
+        if normalized.is_empty() || !KNOWN_STT_KINDS.iter().any(|k| *k == normalized) {
+            return Err(SttChainValidationError::UnknownKind(normalized));
+        }
+        if out.iter().any(|existing| existing == &normalized) {
+            return Err(SttChainValidationError::Duplicate(normalized));
+        }
+        out.push(normalized);
+    }
+    Ok(out)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SttProviderError {
@@ -542,5 +605,50 @@ mod tests {
         assert_eq!(SttProviderImpl::classify_error(&err), "invalid_response");
         let err = anyhow::anyhow!("STT command `/bin/true` returned no recognized text");
         assert_eq!(SttProviderImpl::classify_error(&err), "empty_response");
+    }
+
+    // --- Chain-Validator (PR 13) ---
+
+    #[test]
+    fn validate_stt_chain_accepts_command_kind() {
+        let normalized = validate_stt_chain(&["command".to_string()]).expect("valid chain");
+        assert_eq!(normalized, vec!["command"]);
+    }
+
+    #[test]
+    fn validate_stt_chain_normalizes_case_and_whitespace() {
+        let normalized =
+            validate_stt_chain(&["  COMMAND ".to_string()]).expect("valid chain");
+        assert_eq!(normalized, vec!["command"]);
+    }
+
+    #[test]
+    fn validate_stt_chain_rejects_empty() {
+        let err = validate_stt_chain(&[]).unwrap_err();
+        assert_eq!(err, SttChainValidationError::Empty);
+    }
+
+    #[test]
+    fn validate_stt_chain_rejects_unknown_kind() {
+        let err = validate_stt_chain(&["command".into(), "cloud_whisper".into()]).unwrap_err();
+        match err {
+            SttChainValidationError::UnknownKind(k) => assert_eq!(k, "cloud_whisper"),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_stt_chain_rejects_duplicates() {
+        let err = validate_stt_chain(&["command".into(), "command".into()]).unwrap_err();
+        match err {
+            SttChainValidationError::Duplicate(k) => assert_eq!(k, "command"),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn known_stt_kinds_stable_set() {
+        assert_eq!(KNOWN_STT_KINDS, &["command"]);
+        assert_eq!(DEFAULT_STT_PROVIDER_CHAIN, &["command"]);
     }
 }

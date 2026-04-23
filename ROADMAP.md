@@ -1425,6 +1425,52 @@ und Nicht-Ziele.
       unverändert grün; Headless-Boot sauber. UI: Probe-Button-
       Tooltip aktualisiert (weist jetzt auf authentifizierten
       HEAD hin, keine neue Button-Oberfläche).
+- [x] PR 13: STT/TTS Chain-Editor in der Settings-Shell. Spiegel
+      zum Text-Chain-Editor aus PR 9, aufgesetzt auf die
+      Audio-Achsen. `providers::stt` und `providers::tts` bekommen
+      jeweils eine kuratierte Whitelist (`KNOWN_{STT,TTS}_KINDS`),
+      eine `DEFAULT_{STT,TTS}_PROVIDER_CHAIN`-Konstante, eine
+      `SttChainValidationError` / `TtsChainValidationError`-Enum
+      und einen `validate_{stt,tts}_chain`-Helper (Empty-Reject,
+      UnknownKind, Duplicate, Trim+Lowercase). `App` bekommt
+      `update_{stt,tts}_provider_chain` + `reset_*`-Methoden;
+      `live_audio.{stt,tts}_provider_chain` ist der neue
+      Source-of-Truth-Stand (die Startup-Config-Chain wirkt nur
+      noch als Startwert). Neues
+      `settings_store::AudioChainOverrideFile { chain: Option<Vec<String>> }`-
+      Format + zwei neue Override-Dateien `stt_chain.json` und
+      `tts_chain.json` (gleiche Verzeichnisauflösung, 0600-
+      Permissions, atomarer Write wie `text_chain.json`). Neue
+      IPC-Messages `settings_set_{stt,tts}_provider_chain` +
+      `settings_reset_{stt,tts}_provider_chain` (alle additiv);
+      Response bei Erfolg `status`-Envelope mit
+      `stt_provider_chain` / `tts_provider_chain`-Readout, bei
+      Validation-Fehlern kuratiertes `error`-Envelope.
+      `StatusPayload` bekommt additiv `stt_provider_chain` /
+      `tts_provider_chain`. UI: gemeinsamer
+      `_build_audio_chain_editor_block(axis)`-Helper, eine Zeile
+      pro bekanntem Kind (Enable-CheckBox + Up/Down), plus
+      Apply/Reset. Kleines ehrliches Info-Label: „heute nur
+      `command` verfügbar, der Mechanismus bleibt für zukünftige
+      Kinds vorbereitet". Readout in STT-/TTS-Section rendert die
+      aktuelle Chain als Pfeil-separierten String. **Bewusst nicht
+      Teil von PR 13:** keine Drag-and-Drop-UX, keine freie
+      Namenseingabe, kein Cloud-STT/Cloud-TTS-Provider-Zoo, kein
+      Secrets-Pfad für Audio (heute nicht nötig), keine Stage-C-/
+      Avatar-Kopplung, keine Approval-/Interaction-/Desktop-
+      Automation-Änderung. Details in
+      [docs/provider_fallback_and_settings_architecture.md §9 + §11](./docs/provider_fallback_and_settings_architecture.md),
+      [docs/api.md §2.10 (inkl. 2.10e)](./docs/api.md),
+      [docs/ui_architecture.md §8d.5f](./docs/ui_architecture.md).
+      Tests: Core 302 PASS (+30 vs. PR 12 — sechs Validator-
+      Unit-Tests pro Achse, sechs `settings_store`-Unit-Tests,
+      vier Protocol-Parser-Tests, sieben IPC-Ende-zu-Ende-Tests
+      über beide Achsen inkl. Reject-Unknown, Reject-Empty,
+      Reject-Duplicate, Reset-To-Default, Case-/Whitespace-
+      Normalisierung). UI `settings-shell-smoke` +6 Blöcke für die
+      Chain-Editoren (Build+Sync, Empty-Guard pro Achse,
+      Single-Kind-Info-Hinweis, Readout-Chain-Zeile). Alle übrigen
+      UI-Smokes grün; Headless-Boot sauber.
 
 ---
 

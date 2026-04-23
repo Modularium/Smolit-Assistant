@@ -6,8 +6,9 @@ use crate::actions::{
 };
 use crate::app::{
     SettingsCloudHttpConfigUpdate, SettingsCloudHttpSecretUpdate, SettingsLlamafileUpdate,
-    SettingsLocalHttpUpdate, SettingsProbeResultPayload, SettingsSttUpdate,
-    SettingsTextProviderChainUpdate, SettingsTtsUpdate, StatusPayload,
+    SettingsLocalHttpUpdate, SettingsProbeResultPayload, SettingsSttProviderChainUpdate,
+    SettingsSttUpdate, SettingsTextProviderChainUpdate, SettingsTtsProviderChainUpdate,
+    SettingsTtsUpdate, StatusPayload,
 };
 use crate::approvals::{ApprovalRequest, ApprovalResolvedPayload, IncomingApprovalDecision};
 use crate::interaction::{AccessibilityDiscovery, AccessibilityProbe, SelectedTarget};
@@ -113,6 +114,20 @@ pub enum IncomingMessage {
     /// Request, kein Bearer-Header auf der Leitung. Antwort:
     /// `settings_probe_result` mit `axis="cloud_http"`.
     SettingsProbeCloudHttp,
+    /// PR 13 — STT-Provider-Chain-Editor. Validierung analog zu
+    /// `settings_set_text_provider_chain` (Whitelist, Duplikate,
+    /// Empty-Reject) gegen
+    /// [`crate::providers::stt::KNOWN_STT_KINDS`]. Bei Erfolg
+    /// frischer `status`-Envelope; bei Validation-Fehler kuratiertes
+    /// `error`-Envelope.
+    SettingsSetSttProviderChain(SettingsSttProviderChainUpdate),
+    /// PR 13 — Reset der STT-Kette auf den Compile-Zeit-Default
+    /// `["command"]`. Löscht den persistierten Override.
+    SettingsResetSttProviderChain,
+    /// PR 13 — TTS-Provider-Chain-Editor. Spiegel zur STT-Message.
+    SettingsSetTtsProviderChain(SettingsTtsProviderChainUpdate),
+    /// PR 13 — Reset der TTS-Kette auf Default `["command"]`.
+    SettingsResetTtsProviderChain,
 }
 
 /// Target shape accepted by the `interaction_focus_window` IPC request.
@@ -532,6 +547,46 @@ mod tests {
         assert!(matches!(
             parse_incoming(r#"{"type":"settings_probe_cloud_http"}"#).unwrap(),
             IncomingMessage::SettingsProbeCloudHttp
+        ));
+    }
+
+    // PR 13 — STT/TTS-Chain-Parser-Tests.
+
+    #[test]
+    fn parses_settings_set_stt_provider_chain_payload() {
+        let raw = r#"{"type":"settings_set_stt_provider_chain","chain":["command"]}"#;
+        match parse_incoming(raw).unwrap() {
+            IncomingMessage::SettingsSetSttProviderChain(u) => {
+                assert_eq!(u.chain, vec!["command"]);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn parses_settings_reset_stt_provider_chain() {
+        assert!(matches!(
+            parse_incoming(r#"{"type":"settings_reset_stt_provider_chain"}"#).unwrap(),
+            IncomingMessage::SettingsResetSttProviderChain
+        ));
+    }
+
+    #[test]
+    fn parses_settings_set_tts_provider_chain_payload() {
+        let raw = r#"{"type":"settings_set_tts_provider_chain","chain":["command"]}"#;
+        match parse_incoming(raw).unwrap() {
+            IncomingMessage::SettingsSetTtsProviderChain(u) => {
+                assert_eq!(u.chain, vec!["command"]);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn parses_settings_reset_tts_provider_chain() {
+        assert!(matches!(
+            parse_incoming(r#"{"type":"settings_reset_tts_provider_chain"}"#).unwrap(),
+            IncomingMessage::SettingsResetTtsProviderChain
         ));
     }
 

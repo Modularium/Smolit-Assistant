@@ -2026,9 +2026,71 @@ weiterhin den bisherigen Plaintext-Pfad aus; er wird nicht
 blockiert. Auch bei insecure-Konfiguration bleibt der
 Secret-Pfad unverändert (Store, Masking, Keine-Rückspiegelung).
 
+### 8d.5f STT-/TTS-Chain-Editor (PR 13, Ist-Zustand)
+
+PR 13 bringt den Chain-Editor-Mechanismus aus PR 9 auf die
+Audio-Achsen. Jede Section (STT und TTS) bekommt **oberhalb**
+des bestehenden Per-Kind-Command-Editors einen kleinen
+„stt/tts provider chain · Edit"-Block. Der Block ist
+axis-parametrisiert über einen gemeinsamen Helper
+`_build_audio_chain_editor_block(axis: String)`; die
+axis-spezifischen State-Variablen (`_stt_chain_*` /
+`_tts_chain_*`) und Whitelists (`_KNOWN_STT_KINDS` /
+`_KNOWN_TTS_KINDS`) spiegeln die Core-Whitelists aus
+[`crate::providers::stt::KNOWN_STT_KINDS`](../core/src/providers/stt.rs)
+und
+[`crate::providers::tts::KNOWN_TTS_KINDS`](../core/src/providers/tts.rs) —
+heute pro Achse nur `command`.
+
+Eine Zeile pro bekannter Kind mit:
+
+- **Enable-CheckBox** (Kind-Name als Label) — toggelt
+  In-Chain-Mitgliedschaft.
+- **↑/↓-Buttons** — verschieben die Zeile; deaktiviert für
+  Kopf-/Fuß-Positionen und für nicht-in-Chain-Zeilen.
+- **Apply** (schickt `settings_set_{stt,tts}_provider_chain`)
+  und **Reset** (schickt `settings_reset_{stt,tts}_provider_chain`).
+- Kleines Info-Label: weist ehrlich darauf hin, dass heute nur
+  `command` verfügbar ist — der Mechanismus bleibt aber für
+  zukünftige Kinds vorbereitet.
+
+Defensive Regeln identisch zur Text-Achse:
+
+- **UI-seitige Empty-Guard.** Apply blockt eine leere Kette mit
+  kuratiertem Text, bevor die IPC-Message den Core erreicht.
+  Der Core-Validator bleibt Second-Line-of-Defense.
+- **Single Source of Truth.** Nach Apply wird die Widget-
+  Reihenfolge erst beim eintreffenden `status`-Envelope aus
+  `stt_provider_chain` / `tts_provider_chain` wieder aufgebaut
+  (`_sync_audio_chain_widgets_from_status(axis)`).
+- **Nur bekannte Kinds.** Keine freie Texteingabe; eine
+  Abweichung zwischen UI- und Core-Whitelist wird im Core als
+  `unknown {stt|tts} provider kind` abgelehnt.
+
+**Readout-Integration:** In der STT- und TTS-Section-Readout
+rendert
+[`settings_sections::_audio_provider_lines`](../ui/scripts/settings/settings_sections.gd)
+das `stt_provider_chain` / `tts_provider_chain`-Feld als
+führende „Chain"-Zeile (Pfeil-separiert); fehlt das Feld in
+einem älteren Core, bleibt eine ehrliche „—"-Zelle stehen.
+
+**EventBus-/IPC-Erweiterungen (additiv, PR 13):**
+
+- Neue Client-Methoden in
+  [`ui/autoload/ipc_client.gd`](../ui/autoload/ipc_client.gd):
+  `settings_set_stt_provider_chain(chain: Array)`,
+  `settings_reset_stt_provider_chain()`,
+  `settings_set_tts_provider_chain(chain: Array)`,
+  `settings_reset_tts_provider_chain()`.
+- `StatusPayload` bekommt additiv `stt_provider_chain` /
+  `tts_provider_chain`.
+
 ### 8d.6 Verifikation
 
-- `scripts/settings_shell_smoke.gd` (seit PR 11 um zwei weitere
+- `scripts/settings_shell_smoke.gd` (seit PR 13 zusätzlich um sechs
+  Audio-Chain-Blöcke erweitert — Build+Sync / Empty-Guard pro
+  STT und TTS, Single-Kind-Info-Hinweis, Readout-Chain-Zeile;
+  seit PR 11 um zwei weitere
   Cloud-HTTP-Blöcke erweitert — Insecure-Hint erscheint bei
   `http://`-Endpoints, Insecure-Hint bleibt bei `https://` leer;
   +3 Assertions seit PR 10, alle grün):

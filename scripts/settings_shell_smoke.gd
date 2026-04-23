@@ -80,6 +80,12 @@ func _init() -> void:
 	_check_cloud_http_editor_save_secret_clears_edit_field()
 	_check_cloud_http_editor_shows_insecure_hint_for_http_endpoint()
 	_check_cloud_http_editor_hides_insecure_hint_for_https_endpoint()
+	_check_audio_chain_editor_builds_and_syncs_from_status("stt")
+	_check_audio_chain_editor_builds_and_syncs_from_status("tts")
+	_check_audio_chain_editor_empty_guard("stt")
+	_check_audio_chain_editor_empty_guard("tts")
+	_check_audio_chain_editor_shows_single_kind_info_hint()
+	_check_audio_provider_lines_render_chain_field()
 
 	print("---")
 	if _fail == 0:
@@ -1156,6 +1162,87 @@ func _check_cloud_http_editor_hides_insecure_hint_for_https_endpoint() -> void:
 	_assert(String(snap.get("insecure_hint", "")) == "",
 		"cloud_http-editor: Insecure-Hint bleibt bei https://-Endpoint leer")
 	_despawn_panel(panel)
+
+
+# --- PR 13: STT/TTS Chain-Editoren --------------------------------------
+
+
+func _check_audio_chain_editor_builds_and_syncs_from_status(axis: String) -> void:
+	# Core liefert die Chain über `stt_provider_chain` / `tts_provider_chain`.
+	# Der Editor muss die genaue Reihenfolge aus dem Status ziehen und
+	# bekannte Kinds, die nicht in der Chain stehen, als disabled
+	# anhängen. Heute gibt es pro Achse nur `command`, also ist die
+	# Row-Zahl = 1.
+	var panel := _spawn_panel()
+	var status := {}
+	status["%s_provider_chain" % axis] = ["command"]
+	panel.apply_status(status)
+	panel.open_panel()
+	var snap: Dictionary = panel.audio_chain_editor_snapshot(axis)
+	_assert(bool(snap.get("built", false)),
+		"%s-chain-editor: Widgets sind gebaut nach open_panel" % axis)
+	var rows: Array = snap.get("rows", [])
+	_assert(rows.size() == 1,
+		"%s-chain-editor: bekannte Kinds werden gerendert (heute nur `command`)" % axis)
+	_assert(
+		String(rows[0].get("kind", "")) == "command"
+			and bool(rows[0].get("in_chain", false)),
+		"%s-chain-editor: Status-Kette wird gespiegelt (command aktiv)" % axis)
+	_despawn_panel(panel)
+
+
+func _check_audio_chain_editor_empty_guard(axis: String) -> void:
+	# Toggle die einzige Row aus. Apply muss die leere Kette ehrlich
+	# blocken, ohne IPC zu involvieren.
+	var panel := _spawn_panel()
+	var status := {}
+	status["%s_provider_chain" % axis] = ["command"]
+	panel.apply_status(status)
+	panel.open_panel()
+	panel.simulate_audio_chain_toggle_for_test(axis, 0, false)
+	panel.simulate_audio_chain_apply_for_test(axis)
+	var snap: Dictionary = panel.audio_chain_editor_snapshot(axis)
+	_assert(
+		String(snap.get("apply_status", "")).find("chain empty") >= 0,
+		"%s-chain-editor: Apply-Label weist Empty-Chain ehrlich ab" % axis)
+	_despawn_panel(panel)
+
+
+func _check_audio_chain_editor_shows_single_kind_info_hint() -> void:
+	# Heute gibt es pro Achse nur `command`. Der Editor muss einen
+	# ehrlichen Hinweis zeigen, damit Nutzer nicht glauben, es wäre
+	# nur ein „UI-Bug".
+	var panel := _spawn_panel()
+	panel.apply_status({"stt_provider_chain": ["command"]})
+	panel.open_panel()
+	var snap: Dictionary = panel.audio_chain_editor_snapshot("stt")
+	var info := String(snap.get("info_hint", ""))
+	_assert(info.find("command") >= 0 or info.find("vorbereitet") >= 0,
+		"stt-chain-editor: Single-Kind-Hinweis ist sichtbar")
+	_despawn_panel(panel)
+
+
+func _check_audio_provider_lines_render_chain_field() -> void:
+	# Der Readout der STT-/TTS-Section muss die Chain-Zeile zeigen,
+	# sobald der Status das Feld trägt.
+	var Sections := load("res://scripts/settings/settings_sections.gd")
+	var lines: Array = Sections.stt_lines({
+		"stt_enabled": true,
+		"stt_available": true,
+		"stt_provider_configured": "command",
+		"stt_provider_active": "command",
+		"stt_provider_availability": "available",
+		"stt_provider_cloud": false,
+		"stt_provider_chain": ["command"],
+	})
+	var found_chain := false
+	for row in lines:
+		if String(row.get("label", "")) == "Chain":
+			found_chain = true
+			_assert(
+				String(row.get("value", "")).find("command") >= 0,
+				"stt_lines: Chain-Wert zeigt 'command'")
+	_assert(found_chain, "stt_lines: `Chain`-Zeile wird gerendert")
 
 
 func _check_panel_snapshot_shape() -> void:

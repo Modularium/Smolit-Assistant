@@ -85,6 +85,14 @@ const LOCAL_HTTP_OVERRIDE_FILENAME: &str = "local_http.json";
 /// eine leere Datei / keine Datei = kein Override, Core fällt auf die
 /// Startup-Chain (Env / Default) zurück.
 const TEXT_CHAIN_OVERRIDE_FILENAME: &str = "text_chain.json";
+/// STT-Provider-Chain-Override-Datei (PR 13). Spiegel zu
+/// `text_chain.json` — persistiert die Reihenfolge der STT-Kinds
+/// nach erfolgreicher Validierung durch
+/// [`crate::providers::stt::validate_stt_chain`].
+const STT_CHAIN_OVERRIDE_FILENAME: &str = "stt_chain.json";
+/// TTS-Provider-Chain-Override-Datei (PR 13). Spiegel zu
+/// `stt_chain.json`.
+const TTS_CHAIN_OVERRIDE_FILENAME: &str = "tts_chain.json";
 /// Env-Var für den Settings-Verzeichnis-Override (Tests, explizite
 /// Konfiguration). Akzeptiert einen absoluten Pfad.
 const ENV_SETTINGS_DIR: &str = "SMOLIT_SETTINGS_DIR";
@@ -528,6 +536,114 @@ pub fn clear_text_chain_override() -> Result<()> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(err) => Err(err).context("failed to delete text chain override file"),
     }
+}
+
+// -----------------------------------------------------------------------
+// PR 13 — STT/TTS-Chain-Overrides.
+//
+// Spiegel zu `text_chain.json` aus PR 9: bewusst schmaler Override
+// für die geordnete Provider-Kette pro Audio-Achse. Validator +
+// Whitelist sitzen in `providers::stt` / `providers::tts`; der Store
+// führt keine eigene Validierung durch, sondern schreibt nur eine
+// bereits geprüfte Liste atomar.
+// -----------------------------------------------------------------------
+
+/// Geteiltes Dateiformat für STT- und TTS-Chain-Overrides. Das
+/// `chain`-Feld ist optional, damit eine fehlende Datei,
+/// beschädigtes JSON oder eine leere Sidecar-Datei denselben
+/// „kein Override"-Effekt haben.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AudioChainOverrideFile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chain: Option<Vec<String>>,
+}
+
+pub fn resolve_stt_chain_override_path() -> Option<PathBuf> {
+    resolve_settings_dir().map(|dir| dir.join(STT_CHAIN_OVERRIDE_FILENAME))
+}
+
+pub fn resolve_tts_chain_override_path() -> Option<PathBuf> {
+    resolve_settings_dir().map(|dir| dir.join(TTS_CHAIN_OVERRIDE_FILENAME))
+}
+
+fn load_audio_chain_override_at(
+    path: Option<PathBuf>,
+    label: &str,
+) -> AudioChainOverrideFile {
+    let Some(path) = path else {
+        return AudioChainOverrideFile::default();
+    };
+    let Ok(raw) = fs::read_to_string(&path) else {
+        return AudioChainOverrideFile::default();
+    };
+    match serde_json::from_str::<AudioChainOverrideFile>(&raw) {
+        Ok(file) => file,
+        Err(err) => {
+            tracing::warn!(
+                error = %err,
+                "settings_store: {label} chain override file is not valid JSON; ignoring",
+            );
+            AudioChainOverrideFile::default()
+        }
+    }
+}
+
+pub fn load_stt_chain_override() -> AudioChainOverrideFile {
+    load_audio_chain_override_at(resolve_stt_chain_override_path(), "stt")
+}
+
+pub fn load_tts_chain_override() -> AudioChainOverrideFile {
+    load_audio_chain_override_at(resolve_tts_chain_override_path(), "tts")
+}
+
+fn save_audio_chain_override_at(
+    path: Option<PathBuf>,
+    label: &str,
+    chain: &[String],
+) -> Result<()> {
+    if chain.is_empty() {
+        bail!("refusing to persist empty {label} provider chain");
+    }
+    let Some(path) = path else {
+        bail!(
+            "no writable settings dir (neither SMOLIT_SETTINGS_DIR nor $XDG_CONFIG_HOME nor $HOME)"
+        )
+    };
+    let body = AudioChainOverrideFile {
+        chain: Some(chain.to_vec()),
+    };
+    write_override_atomic(&path, &body, &format!("{label}_chain"))
+}
+
+/// Persistiert eine bereits validierte STT-Chain. Der Validator in
+/// `providers::stt::validate_stt_chain` muss vorher gelaufen sein;
+/// der Store verhindert nur nochmals das leere-Chain-Fallthrough.
+pub fn save_stt_chain_override(chain: &[String]) -> Result<()> {
+    save_audio_chain_override_at(resolve_stt_chain_override_path(), "stt", chain)
+}
+
+pub fn save_tts_chain_override(chain: &[String]) -> Result<()> {
+    save_audio_chain_override_at(resolve_tts_chain_override_path(), "tts", chain)
+}
+
+fn clear_audio_chain_override_at(path: Option<PathBuf>, label: &str) -> Result<()> {
+    let Some(path) = path else {
+        return Ok(());
+    };
+    match fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err)
+            .with_context(|| format!("failed to delete {label} chain override file")),
+    }
+}
+
+pub fn clear_stt_chain_override() -> Result<()> {
+    clear_audio_chain_override_at(resolve_stt_chain_override_path(), "stt")
+}
+
+pub fn clear_tts_chain_override() -> Result<()> {
+    clear_audio_chain_override_at(resolve_tts_chain_override_path(), "tts")
 }
 
 fn write_override_atomic<T: Serialize>(path: &std::path::Path, body: &T, label: &str) -> Result<()> {
@@ -987,6 +1103,100 @@ mod tests {
         }
         let loaded = load_text_chain_override();
         assert!(loaded.chain.is_none());
+        unsafe {
+            std::env::remove_var(ENV_SETTINGS_DIR);
+        }
+    }
+
+    // PR 13 — STT/TTS Chain-Override-Tests.
+
+    #[test]
+    fn stt_chain_save_then_load_roundtrip() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = fresh_env_dir("stt-chain-save-load");
+        unsafe {
+            std::env::set_var(ENV_SETTINGS_DIR, dir.as_os_str());
+        }
+        save_stt_chain_override(&["command".into()]).unwrap();
+        let loaded = load_stt_chain_override();
+        assert_eq!(loaded.chain.unwrap(), vec!["command"]);
+        unsafe {
+            std::env::remove_var(ENV_SETTINGS_DIR);
+        }
+    }
+
+    #[test]
+    fn stt_chain_save_rejects_empty_chain() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = fresh_env_dir("stt-chain-empty");
+        unsafe {
+            std::env::set_var(ENV_SETTINGS_DIR, dir.as_os_str());
+        }
+        assert!(save_stt_chain_override(&[]).is_err());
+        unsafe {
+            std::env::remove_var(ENV_SETTINGS_DIR);
+        }
+    }
+
+    #[test]
+    fn stt_chain_clear_is_idempotent_and_removes_file() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = fresh_env_dir("stt-chain-clear");
+        unsafe {
+            std::env::set_var(ENV_SETTINGS_DIR, dir.as_os_str());
+        }
+        clear_stt_chain_override().unwrap();
+        save_stt_chain_override(&["command".into()]).unwrap();
+        let path = resolve_stt_chain_override_path().unwrap();
+        assert!(path.exists());
+        clear_stt_chain_override().unwrap();
+        assert!(!path.exists());
+        unsafe {
+            std::env::remove_var(ENV_SETTINGS_DIR);
+        }
+    }
+
+    #[test]
+    fn tts_chain_save_then_load_roundtrip() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = fresh_env_dir("tts-chain-save-load");
+        unsafe {
+            std::env::set_var(ENV_SETTINGS_DIR, dir.as_os_str());
+        }
+        save_tts_chain_override(&["command".into()]).unwrap();
+        let loaded = load_tts_chain_override();
+        assert_eq!(loaded.chain.unwrap(), vec!["command"]);
+        unsafe {
+            std::env::remove_var(ENV_SETTINGS_DIR);
+        }
+    }
+
+    #[test]
+    fn tts_chain_save_rejects_empty_chain() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = fresh_env_dir("tts-chain-empty");
+        unsafe {
+            std::env::set_var(ENV_SETTINGS_DIR, dir.as_os_str());
+        }
+        assert!(save_tts_chain_override(&[]).is_err());
+        unsafe {
+            std::env::remove_var(ENV_SETTINGS_DIR);
+        }
+    }
+
+    #[test]
+    fn tts_chain_clear_is_idempotent_and_removes_file() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = fresh_env_dir("tts-chain-clear");
+        unsafe {
+            std::env::set_var(ENV_SETTINGS_DIR, dir.as_os_str());
+        }
+        clear_tts_chain_override().unwrap();
+        save_tts_chain_override(&["command".into()]).unwrap();
+        let path = resolve_tts_chain_override_path().unwrap();
+        assert!(path.exists());
+        clear_tts_chain_override().unwrap();
+        assert!(!path.exists());
         unsafe {
             std::env::remove_var(ENV_SETTINGS_DIR);
         }

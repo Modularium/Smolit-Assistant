@@ -129,6 +129,16 @@ PR 7 erweitert):
   gegen den geparsten Endpoint; **kein** Completion-Request,
   **kein** Bearer-Header auf der Leitung. Antwort:
   `settings_probe_result` mit `axis: "cloud_http"`.
+- `settings_set_stt_provider_chain` (PR 13) — editiert die
+  geordnete STT-Provider-Fallback-Kette. Pflichtfeld `chain:
+  string[]`. Whitelist: `command`. Der Core validiert
+  (Whitelist, Duplikate, Empty-Reject, Trim+Lowercase). Antwort:
+  `status` oder `error`.
+- `settings_reset_stt_provider_chain` (PR 13) — setzt die Kette
+  auf Default `["command"]` und löscht den persistierten
+  Override.
+- `settings_set_tts_provider_chain` / `settings_reset_tts_provider_chain`
+  (PR 13) — spiegel für die TTS-Achse.
 
 Beispiele:
 
@@ -396,6 +406,11 @@ strukturell dem Text-Readout entsprechen:
   Nutzerinhalte, keine Secrets.
 - `stt_provider_cloud` / `tts_provider_cloud`: Boolesch. Heute
   immer `false` (keine Cloud-Kinds implementiert).
+- `stt_provider_chain` / `tts_provider_chain` (PR 13): Geordnete
+  Liste der produktiv instanziierten Audio-Kinds. Spiegel zum
+  `text_provider_chain`-Feld. Seit PR 13 über
+  `settings_set_{stt,tts}_provider_chain` editierbar; ein
+  Reset-Pfad stellt den Default `["command"]` wieder her.
 
 Die beiden Audio-Achsen haben heute nur **ein** produktives Kind
 (`command`), das den bisherigen `SMOLIT_STT_CMD` / `SMOLIT_TTS_CMD`-
@@ -1159,7 +1174,7 @@ Die UI muss Auswahl-Zustand in mindestens diesen Fällen aktiv verwerfen:
   hier, Execution läuft weiterhin über das bestehende Interaction-
   Backend inkl. Approval.
 
-### 2.10 Settings-Schreib-/Probe-Pfad (Ist-Zustand, PR 5 + PR 7 + PR 8 + PR 9 + PR 10 + PR 11 + PR 12)
+### 2.10 Settings-Schreib-/Probe-Pfad (Ist-Zustand, PR 5 + PR 7 + PR 8 + PR 9 + PR 10 + PR 11 + PR 12 + PR 13)
 
 Kleine, kuratierte Schreib-/Diagnose-Oberfläche für die Settings-
 Shell. Additiv zum bestehenden Protokoll, keine neue
@@ -1168,8 +1183,9 @@ Nachrichtenfamilie. Der heutige Scope umfasst `llamafile_local`-Felder
 Text-Provider `local_http` (PR 8), die Text-Provider-Fallback-
 Kette (PR 9), den ersten Cloud-/Remote-Text-Provider `cloud_http`
 mit dediziertem Secret-Pfad (PR 10), sicheres HTTPS/TLS für
-`cloud_http` (PR 11) und seit PR 12 einen authentifizierten
-Application-Layer-Probe-Roundtrip (HEAD mit Bearer-Header).
+`cloud_http` (PR 11), einen authentifizierten Application-Layer-
+Probe-Roundtrip (PR 12) und seit PR 13 zusätzlich editierbare
+STT-/TTS-Provider-Fallback-Ketten.
 
 **Eingang:** `settings_set_llamafile_config`.
 
@@ -1500,6 +1516,45 @@ und löscht das persistierte `text_chain.json`. Geht durch denselben
 Update-Pfad wie `settings_set_text_provider_chain`, damit der
 Validator-Run und der Resolver-Rebuild einheitlich behandelt
 werden. Antwort: `status`.
+
+#### 2.10e STT-/TTS-Chain-Editor (PR 13)
+
+Spiegel zum Text-Chain-Editor aus §2.10c, angewendet auf die
+Audio-Achsen. Scope bewusst klein: heute gibt es pro Achse nur
+das Kind `command`; die Persistenz-/Validator-/IPC-Geometrie ist
+aber vollständig vorbereitet, damit weitere Kinds ohne UI-
+Refactor dazukommen können.
+
+```json
+{"type":"settings_set_stt_provider_chain","chain":["command"]}
+{"type":"settings_reset_stt_provider_chain"}
+{"type":"settings_set_tts_provider_chain","chain":["command"]}
+{"type":"settings_reset_tts_provider_chain"}
+```
+
+Validierungsregeln (siehe
+[`crate::providers::stt::validate_stt_chain`](../core/src/providers/stt.rs)
+und
+[`crate::providers::tts::validate_tts_chain`](../core/src/providers/tts.rs))
+sind identisch zur Text-Achse:
+
+1. Leere Kette → Fehler `stt/tts provider chain is empty (use reset
+   to restore default)`.
+2. Unbekannter Kind → Fehler mit dem abgelehnten Rohwert + der
+   aktuellen Whitelist (heute `command`).
+3. Duplikat → Fehler mit dem ablehnten Namen.
+4. Trim + Lowercase als erste Normalisierung.
+
+Erfolg → Persistenz in `stt_chain.json` / `tts_chain.json` (gleiche
+Verzeichnisauflösung und 0600-Permissions wie die anderen
+Override-Files); Resolver atomar rebuildet; frischer
+`status`-Envelope mit `stt_provider_chain` / `tts_provider_chain`
+als aktualisierter Reihenfolge.
+
+**Keine Audio-Secrets über diese Nachrichten.** Die Audio-
+Provider haben heute keinen Secret-Pfad — kommt einer,
+entsteht analog zum Cloud-HTTP-Secret-Pfad eine eigene
+`settings_set_*_secret`-Message.
 
 **Sicherheitsgrenzen dieser Fläche.**
 
