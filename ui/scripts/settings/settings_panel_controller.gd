@@ -70,9 +70,41 @@ var _llamafile_probe_button: Button = null
 var _llamafile_apply_status_label: Label = null
 var _llamafile_probe_status_label: Label = null
 
+## PR 7 — schmaler STT-Editor. Symmetrisch zum Llamafile-Block aber
+## bewusst kleiner: enabled + command + Apply + Probe. Timeouts und
+## Provider-Chain bleiben env-gesteuert und tauchen hier nicht auf.
+var _stt_enabled_check: CheckBox = null
+var _stt_command_edit: LineEdit = null
+var _stt_apply_button: Button = null
+var _stt_probe_button: Button = null
+var _stt_apply_status_label: Label = null
+var _stt_probe_status_label: Label = null
+
+## PR 7 — TTS-Editor. Gleiches Layout wie STT plus `auto_speak`.
+var _tts_enabled_check: CheckBox = null
+var _tts_command_edit: LineEdit = null
+var _tts_auto_speak_check: CheckBox = null
+var _tts_apply_button: Button = null
+var _tts_probe_button: Button = null
+var _tts_apply_status_label: Label = null
+var _tts_probe_status_label: Label = null
+
+## PR 8 — `local_http`-Editor direkt unter dem Text-Provider-Readout.
+## Bewusst klein: Enabled + Endpoint + Probe + Apply. Prompt-/Response-
+## Feldnamen und Timeouts bleiben env-/Startup-gesteuert.
+var _local_http_enabled_check: CheckBox = null
+var _local_http_endpoint_edit: LineEdit = null
+var _local_http_apply_button: Button = null
+var _local_http_probe_button: Button = null
+var _local_http_apply_status_label: Label = null
+var _local_http_probe_status_label: Label = null
+
 ## Verhindert, dass Sync-Writes der Editor-Widgets beim Rendering eine
 ## Cascade aus Change-Handlern auslösen.
 var _syncing_llamafile_widgets: bool = false
+var _syncing_stt_widgets: bool = false
+var _syncing_tts_widgets: bool = false
+var _syncing_local_http_widgets: bool = false
 
 const _LLAMAFILE_MODE_OPTIONS: Array = [
 	{"id": 0, "value": "on_demand", "label": "On demand"},
@@ -89,6 +121,11 @@ const _PROBE_CLASS_COLORS: Dictionary = {
 	"path_missing": Color(0.9, 0.45, 0.45, 1.0),
 	"path_not_file": Color(0.9, 0.45, 0.45, 1.0),
 	"path_not_executable": Color(0.9, 0.45, 0.45, 1.0),
+	# PR 8 — local_http-Klassen.
+	"endpoint_scheme_unsupported": Color(0.85, 0.75, 0.4, 1.0),
+	"endpoint_unparseable": Color(0.85, 0.75, 0.4, 1.0),
+	"http_connect_failed": Color(0.9, 0.45, 0.45, 1.0),
+	"timeout": Color(0.9, 0.45, 0.45, 1.0),
 }
 
 
@@ -294,8 +331,9 @@ func _render_sections() -> void:
 	for child in _content_vbox.get_children():
 		child.queue_free()
 	# Kein lebender Editor mehr — bei jedem Re-Render werden die
-	# Widgets neu aufgebaut. `_llamafile_*`-Referenzen werden beim
-	# Bau in `_build_llamafile_editor_block()` gesetzt.
+	# Widgets neu aufgebaut. `_llamafile_*`/`_stt_*`/`_tts_*`-Referenzen
+	# werden beim Bau in den jeweiligen `_build_*_editor_block()`-
+	# Helpern wieder gesetzt.
 	_llamafile_enabled_check = null
 	_llamafile_mode_picker = null
 	_llamafile_idle_spinbox = null
@@ -304,16 +342,42 @@ func _render_sections() -> void:
 	_llamafile_probe_button = null
 	_llamafile_apply_status_label = null
 	_llamafile_probe_status_label = null
+	_stt_enabled_check = null
+	_stt_command_edit = null
+	_stt_apply_button = null
+	_stt_probe_button = null
+	_stt_apply_status_label = null
+	_stt_probe_status_label = null
+	_tts_enabled_check = null
+	_tts_command_edit = null
+	_tts_auto_speak_check = null
+	_tts_apply_button = null
+	_tts_probe_button = null
+	_tts_apply_status_label = null
+	_tts_probe_status_label = null
+	_local_http_enabled_check = null
+	_local_http_endpoint_edit = null
+	_local_http_apply_button = null
+	_local_http_probe_button = null
+	_local_http_apply_status_label = null
+	_local_http_probe_status_label = null
 
 	for section in _SectionsRef.all_sections():
 		_content_vbox.add_child(_build_section(section))
-		# Editor-Block direkt unter dem Text-Provider-Readout einhängen.
-		# Read-only Sections bleiben ungestört; die Editor-Oberfläche ist
-		# visuell klar als eigener Block erkennbar (eigener Titel +
-		# Hintergrundton), damit sie nicht mit der Shell-Liste verwechselt
-		# wird.
+		# Editor-Block direkt unter dem jeweiligen Read-only Readout
+		# einhängen. Read-only Sections bleiben ungestört; die Editor-
+		# Oberfläche ist visuell klar als eigener Block erkennbar
+		# (eigener Titel), damit sie nicht mit der Shell-Liste
+		# verwechselt wird. PR 8: der `local_http`-Block landet
+		# **nach** dem Llamafile-Editor, weil beide unter Text Provider
+		# leben.
 		if section == _SectionsRef.SectionId.TEXT_PROVIDER:
 			_content_vbox.add_child(_build_llamafile_editor_block())
+			_content_vbox.add_child(_build_local_http_editor_block())
+		elif section == _SectionsRef.SectionId.STT:
+			_content_vbox.add_child(_build_stt_editor_block())
+		elif section == _SectionsRef.SectionId.TTS:
+			_content_vbox.add_child(_build_tts_editor_block())
 
 
 func _build_section(section: int) -> Control:
@@ -640,16 +704,572 @@ func _on_llamafile_probe_pressed() -> void:
 ## Verarbeitet das `settings_probe_result`-Signal aus dem EventBus.
 ## Rendert den `class`-Tag + die kurze Core-Meldung. Leakt keine
 ## Pfade oder Roh-Strings — wir zeigen genau das, was der Core uns
-## schickt, nicht mehr.
+## schickt, nicht mehr. Ab PR 7 routet `axis` das Ergebnis in den
+## richtigen Editor-Block (`llamafile`/`stt`/`tts`); fehlt das Feld,
+## fällt die Anzeige auf den Llamafile-Block zurück (Backwards-
+## Kompatibilität zu einem Core ohne `axis`).
 func _on_settings_probe_result_received(payload: Dictionary) -> void:
-	if _llamafile_probe_status_label == null:
-		return
-	# `ok` wird bewusst nicht für einen eigenen grünen Haken genutzt —
-	# wir rendern den Klassen-Tag des Cores 1:1, damit die UI keine
-	# eigene Erfolgssemantik setzt.
 	var class_tag := str(payload.get("class", "unknown"))
 	var message := str(payload.get("message", ""))
 	var display := "probe: [%s] %s" % [class_tag, message]
-	_llamafile_probe_status_label.text = display
 	var tint: Color = _PROBE_CLASS_COLORS.get(class_tag, Color(1, 1, 1, 0.55))
-	_llamafile_probe_status_label.modulate = tint
+	var axis := str(payload.get("axis", "llamafile"))
+	var target: Label = null
+	match axis:
+		"stt":
+			target = _stt_probe_status_label
+		"tts":
+			target = _tts_probe_status_label
+		"local_http":
+			target = _local_http_probe_status_label
+		_:
+			target = _llamafile_probe_status_label
+	if target == null:
+		return
+	target.text = display
+	target.modulate = tint
+
+
+# --- STT/TTS Editor (PR 7) ----------------------------------------------
+
+
+## Baut den schmalen STT-Editor-Block. Bewusst klein: Enabled +
+## Command + Apply + Probe. Keine Timeouts, keine Chain-Umordnung —
+## diese Hebel bleiben env-/Startup-gesteuert.
+func _build_stt_editor_block() -> Control:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 4)
+
+	var title := Label.new()
+	title.text = "stt · Edit"
+	title.add_theme_font_size_override("font_size", 11)
+	title.modulate = Color(1, 1, 1, 0.85)
+	box.add_child(title)
+
+	var note := Label.new()
+	note.text = "Editierbare Felder für den STT-Command-Provider. Probe prüft Chain/Enabled/Command ohne Mikrofon-Zugriff; Command-String wird nicht geloggt."
+	note.modulate = Color(1, 1, 1, 0.45)
+	note.add_theme_font_size_override("font_size", 10)
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(note)
+
+	# Enabled
+	var enabled_row := HBoxContainer.new()
+	enabled_row.add_theme_constant_override("separation", 6)
+	box.add_child(enabled_row)
+	var enabled_label := Label.new()
+	enabled_label.text = "Enabled"
+	enabled_label.custom_minimum_size = Vector2(160, 0)
+	enabled_label.modulate = Color(1, 1, 1, 0.6)
+	enabled_label.add_theme_font_size_override("font_size", 10)
+	enabled_row.add_child(enabled_label)
+	_stt_enabled_check = CheckBox.new()
+	_stt_enabled_check.text = "SMOLIT_STT_ENABLED"
+	_stt_enabled_check.toggled.connect(_on_stt_widget_changed_bool)
+	enabled_row.add_child(_stt_enabled_check)
+
+	# Command
+	var cmd_row := HBoxContainer.new()
+	cmd_row.add_theme_constant_override("separation", 6)
+	box.add_child(cmd_row)
+	var cmd_label := Label.new()
+	cmd_label.text = "Command"
+	cmd_label.custom_minimum_size = Vector2(160, 0)
+	cmd_label.modulate = Color(1, 1, 1, 0.6)
+	cmd_label.add_theme_font_size_override("font_size", 10)
+	cmd_row.add_child(cmd_label)
+	_stt_command_edit = LineEdit.new()
+	_stt_command_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_stt_command_edit.placeholder_text = "whisper --model base"
+	_stt_command_edit.tooltip_text = "STT-Kommando (wie SMOLIT_STT_CMD). Wird nicht in Logs ausgegeben."
+	_stt_command_edit.text_changed.connect(_on_stt_widget_changed_text)
+	cmd_row.add_child(_stt_command_edit)
+
+	# Actions
+	var actions_row := HBoxContainer.new()
+	actions_row.add_theme_constant_override("separation", 6)
+	box.add_child(actions_row)
+	_stt_apply_button = Button.new()
+	_stt_apply_button.text = "Apply"
+	_stt_apply_button.tooltip_text = "Sendet die aktuellen STT-Werte als settings_set_stt_config an den Core."
+	_stt_apply_button.pressed.connect(_on_stt_apply_pressed)
+	actions_row.add_child(_stt_apply_button)
+	_stt_probe_button = Button.new()
+	_stt_probe_button.text = "Probe"
+	_stt_probe_button.tooltip_text = "Prüft Chain/Enabled/Command ohne Side-Effects."
+	_stt_probe_button.pressed.connect(_on_stt_probe_pressed)
+	actions_row.add_child(_stt_probe_button)
+	_stt_apply_status_label = Label.new()
+	_stt_apply_status_label.text = ""
+	_stt_apply_status_label.modulate = Color(1, 1, 1, 0.6)
+	_stt_apply_status_label.add_theme_font_size_override("font_size", 10)
+	actions_row.add_child(_stt_apply_status_label)
+
+	_stt_probe_status_label = Label.new()
+	_stt_probe_status_label.text = ""
+	_stt_probe_status_label.modulate = Color(1, 1, 1, 0.6)
+	_stt_probe_status_label.add_theme_font_size_override("font_size", 10)
+	_stt_probe_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(_stt_probe_status_label)
+
+	var sep := HSeparator.new()
+	sep.modulate = Color(1, 1, 1, 0.2)
+	box.add_child(sep)
+
+	_sync_stt_widgets_from_status()
+	return box
+
+
+## Baut den TTS-Editor-Block. Spiegel zum STT-Block, plus auto_speak.
+func _build_tts_editor_block() -> Control:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 4)
+
+	var title := Label.new()
+	title.text = "tts · Edit"
+	title.add_theme_font_size_override("font_size", 11)
+	title.modulate = Color(1, 1, 1, 0.85)
+	box.add_child(title)
+
+	var note := Label.new()
+	note.text = "Editierbare Felder für den TTS-Command-Provider. Auto-speak ergänzt, ob Antworten automatisch gesprochen werden."
+	note.modulate = Color(1, 1, 1, 0.45)
+	note.add_theme_font_size_override("font_size", 10)
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(note)
+
+	var enabled_row := HBoxContainer.new()
+	enabled_row.add_theme_constant_override("separation", 6)
+	box.add_child(enabled_row)
+	var enabled_label := Label.new()
+	enabled_label.text = "Enabled"
+	enabled_label.custom_minimum_size = Vector2(160, 0)
+	enabled_label.modulate = Color(1, 1, 1, 0.6)
+	enabled_label.add_theme_font_size_override("font_size", 10)
+	enabled_row.add_child(enabled_label)
+	_tts_enabled_check = CheckBox.new()
+	_tts_enabled_check.text = "SMOLIT_TTS_ENABLED"
+	_tts_enabled_check.toggled.connect(_on_tts_widget_changed_bool)
+	enabled_row.add_child(_tts_enabled_check)
+
+	var cmd_row := HBoxContainer.new()
+	cmd_row.add_theme_constant_override("separation", 6)
+	box.add_child(cmd_row)
+	var cmd_label := Label.new()
+	cmd_label.text = "Command"
+	cmd_label.custom_minimum_size = Vector2(160, 0)
+	cmd_label.modulate = Color(1, 1, 1, 0.6)
+	cmd_label.add_theme_font_size_override("font_size", 10)
+	cmd_row.add_child(cmd_label)
+	_tts_command_edit = LineEdit.new()
+	_tts_command_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_tts_command_edit.placeholder_text = "espeak -v de"
+	_tts_command_edit.tooltip_text = "TTS-Kommando (wie SMOLIT_TTS_CMD). Wird nicht in Logs ausgegeben."
+	_tts_command_edit.text_changed.connect(_on_tts_widget_changed_text)
+	cmd_row.add_child(_tts_command_edit)
+
+	var auto_row := HBoxContainer.new()
+	auto_row.add_theme_constant_override("separation", 6)
+	box.add_child(auto_row)
+	var auto_label := Label.new()
+	auto_label.text = "Auto-speak"
+	auto_label.custom_minimum_size = Vector2(160, 0)
+	auto_label.modulate = Color(1, 1, 1, 0.6)
+	auto_label.add_theme_font_size_override("font_size", 10)
+	auto_row.add_child(auto_label)
+	_tts_auto_speak_check = CheckBox.new()
+	_tts_auto_speak_check.text = "SMOLIT_AUTO_SPEAK"
+	_tts_auto_speak_check.toggled.connect(_on_tts_widget_changed_bool)
+	auto_row.add_child(_tts_auto_speak_check)
+
+	var actions_row := HBoxContainer.new()
+	actions_row.add_theme_constant_override("separation", 6)
+	box.add_child(actions_row)
+	_tts_apply_button = Button.new()
+	_tts_apply_button.text = "Apply"
+	_tts_apply_button.tooltip_text = "Sendet die aktuellen TTS-Werte als settings_set_tts_config an den Core."
+	_tts_apply_button.pressed.connect(_on_tts_apply_pressed)
+	actions_row.add_child(_tts_apply_button)
+	_tts_probe_button = Button.new()
+	_tts_probe_button.text = "Probe"
+	_tts_probe_button.tooltip_text = "Prüft Chain/Enabled/Command ohne Audio-Output."
+	_tts_probe_button.pressed.connect(_on_tts_probe_pressed)
+	actions_row.add_child(_tts_probe_button)
+	_tts_apply_status_label = Label.new()
+	_tts_apply_status_label.text = ""
+	_tts_apply_status_label.modulate = Color(1, 1, 1, 0.6)
+	_tts_apply_status_label.add_theme_font_size_override("font_size", 10)
+	actions_row.add_child(_tts_apply_status_label)
+
+	_tts_probe_status_label = Label.new()
+	_tts_probe_status_label.text = ""
+	_tts_probe_status_label.modulate = Color(1, 1, 1, 0.6)
+	_tts_probe_status_label.add_theme_font_size_override("font_size", 10)
+	_tts_probe_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(_tts_probe_status_label)
+
+	var sep := HSeparator.new()
+	sep.modulate = Color(1, 1, 1, 0.2)
+	box.add_child(sep)
+
+	_sync_tts_widgets_from_status()
+	return box
+
+
+func _sync_stt_widgets_from_status() -> void:
+	if _stt_enabled_check == null:
+		return
+	_syncing_stt_widgets = true
+	var enabled_variant: Variant = _last_status.get("stt_enabled", false)
+	var enabled := bool(enabled_variant) if typeof(enabled_variant) == TYPE_BOOL else false
+	_stt_enabled_check.button_pressed = enabled
+	# Command wird aus Secret-Disziplin-Gründen nicht im Status
+	# übertragen; wir lassen das Feld daher leer, wenn der Nutzer es
+	# nicht eben selbst gesetzt hat. Das Probe-Ergebnis zeigt, ob der
+	# Core einen Command konfiguriert findet (`configured`-Flag).
+	_syncing_stt_widgets = false
+
+
+func _sync_tts_widgets_from_status() -> void:
+	if _tts_enabled_check == null:
+		return
+	_syncing_tts_widgets = true
+	var enabled_variant: Variant = _last_status.get("tts_enabled", false)
+	var enabled := bool(enabled_variant) if typeof(enabled_variant) == TYPE_BOOL else false
+	_tts_enabled_check.button_pressed = enabled
+	if _tts_auto_speak_check != null:
+		var auto_variant: Variant = _last_status.get("auto_speak", false)
+		var auto := bool(auto_variant) if typeof(auto_variant) == TYPE_BOOL else false
+		_tts_auto_speak_check.button_pressed = auto
+	_syncing_tts_widgets = false
+
+
+func _on_stt_widget_changed_bool(_pressed: bool) -> void:
+	if _syncing_stt_widgets:
+		return
+	if _stt_apply_status_label != null:
+		_stt_apply_status_label.text = ""
+
+
+func _on_stt_widget_changed_text(_text: String) -> void:
+	if _syncing_stt_widgets:
+		return
+	if _stt_apply_status_label != null:
+		_stt_apply_status_label.text = ""
+
+
+func _on_tts_widget_changed_bool(_pressed: bool) -> void:
+	if _syncing_tts_widgets:
+		return
+	if _tts_apply_status_label != null:
+		_tts_apply_status_label.text = ""
+
+
+func _on_tts_widget_changed_text(_text: String) -> void:
+	if _syncing_tts_widgets:
+		return
+	if _tts_apply_status_label != null:
+		_tts_apply_status_label.text = ""
+
+
+func _on_stt_apply_pressed() -> void:
+	if _stt_enabled_check == null:
+		return
+	var client: Node = get_node_or_null("/root/IpcClient")
+	if client == null or not client.has_method("is_connected_to_core") \
+			or not client.is_connected_to_core():
+		if _stt_apply_status_label != null:
+			_stt_apply_status_label.text = "offline"
+			_stt_apply_status_label.modulate = Color(0.9, 0.5, 0.5, 0.9)
+		return
+	var enabled := _stt_enabled_check.button_pressed
+	# Command-Feld: nur senden, wenn der Nutzer etwas eingegeben hat.
+	# Leerer Text → `null` (unverändert lassen), damit ein leeres
+	# Eingabefeld den konfigurierten Command nicht versehentlich löscht.
+	var cmd_value: Variant = null
+	if _stt_command_edit != null:
+		var raw := _stt_command_edit.text
+		if raw.strip_edges() != "":
+			cmd_value = raw
+	if client.has_method("settings_set_stt_config"):
+		client.call("settings_set_stt_config", enabled, cmd_value)
+	if _stt_apply_status_label != null:
+		_stt_apply_status_label.text = "sent"
+		_stt_apply_status_label.modulate = Color(1, 1, 1, 0.55)
+
+
+func _on_tts_apply_pressed() -> void:
+	if _tts_enabled_check == null:
+		return
+	var client: Node = get_node_or_null("/root/IpcClient")
+	if client == null or not client.has_method("is_connected_to_core") \
+			or not client.is_connected_to_core():
+		if _tts_apply_status_label != null:
+			_tts_apply_status_label.text = "offline"
+			_tts_apply_status_label.modulate = Color(0.9, 0.5, 0.5, 0.9)
+		return
+	var enabled := _tts_enabled_check.button_pressed
+	var cmd_value: Variant = null
+	if _tts_command_edit != null:
+		var raw := _tts_command_edit.text
+		if raw.strip_edges() != "":
+			cmd_value = raw
+	var auto_value: Variant = null
+	if _tts_auto_speak_check != null:
+		auto_value = _tts_auto_speak_check.button_pressed
+	if client.has_method("settings_set_tts_config"):
+		client.call("settings_set_tts_config", enabled, cmd_value, auto_value)
+	if _tts_apply_status_label != null:
+		_tts_apply_status_label.text = "sent"
+		_tts_apply_status_label.modulate = Color(1, 1, 1, 0.55)
+
+
+func _on_stt_probe_pressed() -> void:
+	var client: Node = get_node_or_null("/root/IpcClient")
+	if client == null or not client.has_method("is_connected_to_core") \
+			or not client.is_connected_to_core():
+		if _stt_probe_status_label != null:
+			_stt_probe_status_label.text = "probe: offline"
+			_stt_probe_status_label.modulate = Color(0.9, 0.5, 0.5, 0.9)
+		return
+	if client.has_method("settings_probe_stt"):
+		client.call("settings_probe_stt")
+	if _stt_probe_status_label != null:
+		_stt_probe_status_label.text = "probe: pending…"
+		_stt_probe_status_label.modulate = Color(1, 1, 1, 0.55)
+
+
+func _on_tts_probe_pressed() -> void:
+	var client: Node = get_node_or_null("/root/IpcClient")
+	if client == null or not client.has_method("is_connected_to_core") \
+			or not client.is_connected_to_core():
+		if _tts_probe_status_label != null:
+			_tts_probe_status_label.text = "probe: offline"
+			_tts_probe_status_label.modulate = Color(0.9, 0.5, 0.5, 0.9)
+		return
+	if client.has_method("settings_probe_tts"):
+		client.call("settings_probe_tts")
+	if _tts_probe_status_label != null:
+		_tts_probe_status_label.text = "probe: pending…"
+		_tts_probe_status_label.modulate = Color(1, 1, 1, 0.55)
+
+
+## Snapshot des STT-Editors für Smoke-Tests (PR 7). Spiegelt den UI-
+## Widget-Stand, nicht den Core-Stand — wie `llamafile_editor_snapshot`.
+func stt_editor_snapshot() -> Dictionary:
+	var built := _stt_enabled_check != null
+	if not built:
+		return {
+			"built": false,
+			"enabled": false,
+			"command": "",
+			"apply_status": "",
+			"probe_status": "",
+		}
+	return {
+		"built": true,
+		"enabled": _stt_enabled_check.button_pressed,
+		"command": _stt_command_edit.text if _stt_command_edit != null else "",
+		"apply_status": _stt_apply_status_label.text if _stt_apply_status_label != null else "",
+		"probe_status": _stt_probe_status_label.text if _stt_probe_status_label != null else "",
+	}
+
+
+func tts_editor_snapshot() -> Dictionary:
+	var built := _tts_enabled_check != null
+	if not built:
+		return {
+			"built": false,
+			"enabled": false,
+			"command": "",
+			"auto_speak": false,
+			"apply_status": "",
+			"probe_status": "",
+		}
+	return {
+		"built": true,
+		"enabled": _tts_enabled_check.button_pressed,
+		"command": _tts_command_edit.text if _tts_command_edit != null else "",
+		"auto_speak": _tts_auto_speak_check.button_pressed if _tts_auto_speak_check != null else false,
+		"apply_status": _tts_apply_status_label.text if _tts_apply_status_label != null else "",
+		"probe_status": _tts_probe_status_label.text if _tts_probe_status_label != null else "",
+	}
+
+
+# --- local_http Editor (PR 8) -------------------------------------------
+
+
+## Baut den schmalen Editor-Block für den `local_http`-Text-Provider.
+## Landet direkt nach dem Llamafile-Editor unter dem Text-Provider-
+## Readout. Bewusst klein: Enabled + Endpoint + Apply + Probe.
+## Prompt-/Response-Feldnamen und Timeouts bleiben env-gesteuert,
+## damit diese Erst-Oberfläche ehrlich „loopback-first, HTTP-MVP"
+## kommuniziert.
+func _build_local_http_editor_block() -> Control:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 4)
+
+	var title := Label.new()
+	title.text = "local_http · Edit"
+	title.add_theme_font_size_override("font_size", 11)
+	title.modulate = Color(1, 1, 1, 0.85)
+	box.add_child(title)
+
+	var note := Label.new()
+	note.text = "Allgemeiner lokaler HTTP-Text-Provider. Loopback-first, kein TLS, keine Secrets. Endpoint wird nicht in Logs ausgegeben."
+	note.modulate = Color(1, 1, 1, 0.45)
+	note.add_theme_font_size_override("font_size", 10)
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(note)
+
+	var enabled_row := HBoxContainer.new()
+	enabled_row.add_theme_constant_override("separation", 6)
+	box.add_child(enabled_row)
+	var enabled_label := Label.new()
+	enabled_label.text = "Enabled"
+	enabled_label.custom_minimum_size = Vector2(160, 0)
+	enabled_label.modulate = Color(1, 1, 1, 0.6)
+	enabled_label.add_theme_font_size_override("font_size", 10)
+	enabled_row.add_child(enabled_label)
+	_local_http_enabled_check = CheckBox.new()
+	_local_http_enabled_check.text = "SMOLIT_LOCAL_HTTP_ENABLED"
+	_local_http_enabled_check.toggled.connect(_on_local_http_widget_changed_bool)
+	enabled_row.add_child(_local_http_enabled_check)
+
+	var ep_row := HBoxContainer.new()
+	ep_row.add_theme_constant_override("separation", 6)
+	box.add_child(ep_row)
+	var ep_label := Label.new()
+	ep_label.text = "Endpoint"
+	ep_label.custom_minimum_size = Vector2(160, 0)
+	ep_label.modulate = Color(1, 1, 1, 0.6)
+	ep_label.add_theme_font_size_override("font_size", 10)
+	ep_row.add_child(ep_label)
+	_local_http_endpoint_edit = LineEdit.new()
+	_local_http_endpoint_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_local_http_endpoint_edit.placeholder_text = "http://127.0.0.1:8080/completion"
+	_local_http_endpoint_edit.tooltip_text = "HTTP-Endpoint (kein https://). Wird nicht in Logs ausgegeben."
+	_local_http_endpoint_edit.text_changed.connect(_on_local_http_widget_changed_text)
+	ep_row.add_child(_local_http_endpoint_edit)
+
+	var actions_row := HBoxContainer.new()
+	actions_row.add_theme_constant_override("separation", 6)
+	box.add_child(actions_row)
+	_local_http_apply_button = Button.new()
+	_local_http_apply_button.text = "Apply"
+	_local_http_apply_button.tooltip_text = "Sendet die aktuellen local_http-Werte als settings_set_local_http_config an den Core."
+	_local_http_apply_button.pressed.connect(_on_local_http_apply_pressed)
+	actions_row.add_child(_local_http_apply_button)
+	_local_http_probe_button = Button.new()
+	_local_http_probe_button.text = "Probe"
+	_local_http_probe_button.tooltip_text = "TCP-Connect-Check (kein Completion-Roundtrip, kein Prompt)."
+	_local_http_probe_button.pressed.connect(_on_local_http_probe_pressed)
+	actions_row.add_child(_local_http_probe_button)
+	_local_http_apply_status_label = Label.new()
+	_local_http_apply_status_label.text = ""
+	_local_http_apply_status_label.modulate = Color(1, 1, 1, 0.6)
+	_local_http_apply_status_label.add_theme_font_size_override("font_size", 10)
+	actions_row.add_child(_local_http_apply_status_label)
+
+	_local_http_probe_status_label = Label.new()
+	_local_http_probe_status_label.text = ""
+	_local_http_probe_status_label.modulate = Color(1, 1, 1, 0.6)
+	_local_http_probe_status_label.add_theme_font_size_override("font_size", 10)
+	_local_http_probe_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(_local_http_probe_status_label)
+
+	var sep := HSeparator.new()
+	sep.modulate = Color(1, 1, 1, 0.2)
+	box.add_child(sep)
+
+	_sync_local_http_widgets_from_status()
+	return box
+
+
+func _sync_local_http_widgets_from_status() -> void:
+	if _local_http_enabled_check == null:
+		return
+	_syncing_local_http_widgets = true
+	var enabled_variant: Variant = _last_status.get("local_http_enabled", false)
+	var enabled := bool(enabled_variant) if typeof(enabled_variant) == TYPE_BOOL else false
+	_local_http_enabled_check.button_pressed = enabled
+	# Endpoint bleibt aus Secret-Disziplin-Gründen **nicht** im Status.
+	# Der Nutzer sieht über `configured`-Flag, ob der Core einen
+	# Endpoint konfiguriert findet.
+	_syncing_local_http_widgets = false
+
+
+func _on_local_http_widget_changed_bool(_pressed: bool) -> void:
+	if _syncing_local_http_widgets:
+		return
+	if _local_http_apply_status_label != null:
+		_local_http_apply_status_label.text = ""
+
+
+func _on_local_http_widget_changed_text(_text: String) -> void:
+	if _syncing_local_http_widgets:
+		return
+	if _local_http_apply_status_label != null:
+		_local_http_apply_status_label.text = ""
+
+
+func _on_local_http_apply_pressed() -> void:
+	if _local_http_enabled_check == null:
+		return
+	var client: Node = get_node_or_null("/root/IpcClient")
+	if client == null or not client.has_method("is_connected_to_core") \
+			or not client.is_connected_to_core():
+		if _local_http_apply_status_label != null:
+			_local_http_apply_status_label.text = "offline"
+			_local_http_apply_status_label.modulate = Color(0.9, 0.5, 0.5, 0.9)
+		return
+	var enabled := _local_http_enabled_check.button_pressed
+	var endpoint_value: Variant = null
+	if _local_http_endpoint_edit != null:
+		var raw := _local_http_endpoint_edit.text
+		if raw.strip_edges() != "":
+			endpoint_value = raw
+	if client.has_method("settings_set_local_http_config"):
+		client.call(
+			"settings_set_local_http_config",
+			enabled,
+			endpoint_value,
+			null,
+		)
+	if _local_http_apply_status_label != null:
+		_local_http_apply_status_label.text = "sent"
+		_local_http_apply_status_label.modulate = Color(1, 1, 1, 0.55)
+
+
+func _on_local_http_probe_pressed() -> void:
+	var client: Node = get_node_or_null("/root/IpcClient")
+	if client == null or not client.has_method("is_connected_to_core") \
+			or not client.is_connected_to_core():
+		if _local_http_probe_status_label != null:
+			_local_http_probe_status_label.text = "probe: offline"
+			_local_http_probe_status_label.modulate = Color(0.9, 0.5, 0.5, 0.9)
+		return
+	if client.has_method("settings_probe_local_http"):
+		client.call("settings_probe_local_http")
+	if _local_http_probe_status_label != null:
+		_local_http_probe_status_label.text = "probe: pending…"
+		_local_http_probe_status_label.modulate = Color(1, 1, 1, 0.55)
+
+
+func local_http_editor_snapshot() -> Dictionary:
+	var built := _local_http_enabled_check != null
+	if not built:
+		return {
+			"built": false,
+			"enabled": false,
+			"endpoint": "",
+			"apply_status": "",
+			"probe_status": "",
+		}
+	return {
+		"built": true,
+		"enabled": _local_http_enabled_check.button_pressed,
+		"endpoint": _local_http_endpoint_edit.text if _local_http_endpoint_edit != null else "",
+		"apply_status": _local_http_apply_status_label.text if _local_http_apply_status_label != null else "",
+		"probe_status": _local_http_probe_status_label.text if _local_http_probe_status_label != null else "",
+	}

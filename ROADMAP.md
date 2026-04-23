@@ -1115,6 +1115,131 @@ und Nicht-Ziele.
       Protocol-Tests, ein Mode-Validator-Test); UI
       `settings-shell-smoke` auf 103 Assertions erweitert (+15).
       Alle zehn anderen UI-Smokes grün; Headless-Boot sauber.
+- [x] PR 6: STT-/TTS-Provider-Abstraktion + Statusangleichung —
+      gelandet, konservativ. Die Audio-Achsen werden an den Text-Pfad
+      angeglichen: zwei neue Core-Module
+      [core/src/providers/stt.rs](./core/src/providers/stt.rs) und
+      [core/src/providers/tts.rs](./core/src/providers/tts.rs) mit
+      Enum-Dispatch, Resolver, Laufzeitstatus und
+      Fehlerklassifikator — gleiche Leitplanken wie Text-Resolver.
+      Heute produktives Kind pro Achse: `command` (bisheriger
+      `SMOLIT_STT_CMD` / `SMOLIT_TTS_CMD`-Pfad, byte-kompatibel —
+      Timeouts, Fehlertexte, Legacy-`available`-Semantik bleiben
+      erhalten). Altes `audio::SttService`/`audio::TtsService`
+      entfernt; `audio/types.rs` bleibt für geteilte Helfer.
+      `AudioConfig` bekommt zwei zusätzliche Listen
+      (`stt_provider_chain`, `tts_provider_chain`) mit
+      Env-Overrides `SMOLIT_STT_PROVIDER_CHAIN` /
+      `SMOLIT_TTS_PROVIDER_CHAIN`; unbekannte Kinds werden sichtbar
+      verworfen, Fallback auf `["command"]`. `App.stt` und `App.tts`
+      sind jetzt `Arc<…Resolver>`; `handle_voice_once` und
+      `handle_speak` routen ausschließlich durch den Resolver.
+      `StatusPayload` additiv um zehn Felder erweitert:
+      `stt_provider_configured` / `_active` / `_availability` /
+      `_last_error` / `_cloud` und der TTS-Spiegel. UI-Settings-
+      Shell rendert die fünf Resolver-Zeilen pro Achse (mit
+      ehrlichem Fallback-Hinweis für alte Cores); der Privacy-
+      Abschnitt verdichtet STT-/TTS-Cloud separat, sobald die
+      neuen Felder da sind. Keine Cloud-Kinds, kein HTTP-Kind,
+      keine Streaming-Pipeline, keine neuen Audio-Events, keine
+      STT-/TTS-Provider-Editor-Fläche in der UI — das bleibt
+      explizit offen für spätere PRs. Details in
+      [docs/provider_fallback_and_settings_architecture.md §4.2 + §4.3 + §9](./docs/provider_fallback_and_settings_architecture.md),
+      [docs/api.md §2.3 + §4](./docs/api.md),
+      [docs/ui_architecture.md §8d](./docs/ui_architecture.md).
+      Tests: Core 170 PASS (+20 vs. PR 5 — zwei neue Resolver-
+      Test-Module mit je ~7 Tests, drei neue Config-Parser-Tests,
+      zwei neue IPC-Integrationstests); UI
+      `settings-shell-smoke` auf 118 Assertions erweitert (+15).
+      Alle zehn anderen UI-Smokes grün; Headless-Boot sauber.
+- [x] PR 7: STT-/TTS-Settings-Editor + Probe-Pfade — analog zu PR 5,
+      bewusst kleiner gehalten. Der
+      [`settings_store`](./core/src/settings_store.rs) bekommt zwei
+      weitere Override-Dateien `stt.json` und `tts.json` (gleiche
+      Verzeichnis-Auflösung, 0600-Permissions, atomarer Schreibpfad),
+      [`App`](./core/src/app.rs) hält einen neuen `live_audio`-
+      Zustand (`Mutex<AudioConfig>`) und rebuildet den STT- bzw.
+      TTS-Resolver atomar bei jedem Schreibpfad. STT-/TTS-Resolver
+      sitzen dafür seit PR 7 hinter `RwLock<Arc<…>>`, Callsites holen
+      den aktuellen Resolver über `App::current_stt()` /
+      `current_tts()`. Neue IPC-Messages
+      `settings_set_stt_config` / `settings_set_tts_config` /
+      `settings_probe_stt` / `settings_probe_tts` (alle additiv).
+      `SettingsProbeResultPayload` trägt jetzt ein `axis`-Feld
+      (`"llamafile"` / `"stt"` / `"tts"`) für das UI-Routing;
+      ältere Cores ohne das Feld werden UI-seitig auf `llamafile`
+      zurückgefallen. Die Settings-Shell bekommt zwei weitere
+      Editor-Blöcke (`stt · Edit` und `tts · Edit`) direkt unter
+      dem jeweiligen Read-only-Abschnitt: Enabled + Command +
+      Apply + Probe; TTS ergänzt um Auto-Speak. Der Probe-Pfad ist
+      Side-Effect-frei: kein Mikrofon-Zugriff, kein Audio-Output,
+      kein Spawn — nur `split_command` + Filesystem-Check des
+      ersten Tokens. Secret-Disziplin wie bei PR 5: der Command-
+      String taucht weder in Logs, `settings_probe_result` noch
+      `error`-Envelopes auf. Keine Timeout-Editoren, keine Chain-
+      Umordnung, keine Cloud-Achse, keine Audio-Level-Anzeige, kein
+      Secrets-Store — bleibt explizit offen. Details in
+      [docs/provider_fallback_and_settings_architecture.md §9 + §11](./docs/provider_fallback_and_settings_architecture.md),
+      [docs/api.md §2.10 (inkl. 2.10a)](./docs/api.md),
+      [docs/ui_architecture.md §8d.5b](./docs/ui_architecture.md).
+      Tests: Core 185 PASS (+15 vs. PR 6 — fünf IPC-Ende-zu-Ende-
+      Tests, vier `settings_store`-Unit-Tests, fünf Protocol-
+      Parser-Tests, zwei Probe-Axis-Tests); UI
+      `settings-shell-smoke` auf 136 Assertions erweitert (+18).
+      Alle übrigen UI-Smokes grün; Headless-Boot sauber.
+- [x] PR 8: erster zusätzlicher externer Text-Provider `local_http`
+      — allgemeiner lokaler HTTP-Text-Provider, gleichrangig zu
+      `abrain` und `llamafile_local`. Ziel: Brücke zwischen rein
+      lokal-eingebetteten Providern und späterer Cloud-Welt; kein
+      Cloud-SDK, keine Secrets-Pflicht, lokal-first, HTTP-MVP.
+      Neuer `TextProviderImpl::LocalHttp`-Variant in
+      [`core/src/providers/text.rs`](./core/src/providers/text.rs);
+      nutzt den bereits bestehenden internen `http_request`-Helfer
+      (HTTP/1.1 über `tokio::net::TcpStream`), **keine neue
+      Dependency, kein TLS, kein Streaming**. `TextProviderConfig`
+      bekommt ein additives `local_http`-Unterobjekt
+      (`LocalHttpConfig`) mit `enabled`, `endpoint`,
+      `request_timeout_seconds`, `prompt_field`, `response_field`;
+      neue Env-Variablen `SMOLIT_LOCAL_HTTP_ENABLED` /
+      `_ENDPOINT` / `_REQUEST_TIMEOUT_SECONDS` / `_PROMPT_FIELD` /
+      `_RESPONSE_FIELD`. Der Provider postet
+      `{"<prompt_field>": "<input>", "stream": false}` und liest
+      `<response_field>` aus der JSON-Antwort; `https://` wird
+      hart abgelehnt (eigene Fehlerklasse
+      `endpoint_scheme_unsupported`). `settings_store` bekommt
+      `local_http.json` als viertes Override-File
+      (Verzeichnis-Auflösung, 0600-Permissions, atomarer
+      Schreibpfad wie bei PR 5/7). `App` hält einen neuen
+      `live_local_http`-Zustand; Schreibpfad rebuildet den
+      `TextProviderResolver` atomar analog zu PR 5. Neue IPC-
+      Messages `settings_set_local_http_config` /
+      `settings_probe_local_http`; der Probe ist ehrlich
+      loopback-begrenzt: **nur** TCP-Connect auf `host:port`,
+      **kein** Completion-Roundtrip, **kein** Prompt-Versand.
+      `StatusPayload` bekommt drei additive Felder
+      (`local_http_in_chain` / `_enabled` / `_configured`); der
+      Endpoint **taucht nicht** im Status auf. Die Settings-Shell
+      bekommt einen eigenen „local_http · Edit"-Block direkt
+      unter dem Llamafile-Editor (Enabled + Endpoint + Apply +
+      Probe), Probe-Ergebnisse werden über den neuen
+      `axis="local_http"`-Diskriminator geroutet. **Bewusst nicht
+      Teil von PR 8:** kein TLS / `https://`, keine Streaming-
+      Pipeline, keine Auth-/API-Key-Eingabe, keine
+      OpenAI-/`messages`-Welt, keine Chain-Reihenfolge-Umordnung
+      in der UI, keine Cloud-Provider-Implementierung, keine
+      Timeout-Editoren in der Shell. Details in
+      [docs/provider_fallback_and_settings_architecture.md §4.1c + §9 + §11](./docs/provider_fallback_and_settings_architecture.md),
+      [docs/api.md §2.10 (inkl. 2.10b) + §3](./docs/api.md),
+      [docs/ui_architecture.md §8d.5c](./docs/ui_architecture.md).
+      Tests: Core 210 PASS (+25 vs. PR 7 — neun Text-Provider-
+      Unit-Tests für den `local_http`-Request-/Response-Pfad und
+      den Endpoint-Parser, drei `settings_store`-Unit-Tests,
+      drei Protocol-Parser-Tests, fünf IPC-Ende-zu-Ende-Tests
+      inkl. Secret-Disziplin); UI `settings-shell-smoke` auf 154
+      Assertions erweitert (+18 — Editor-Bau + Sync, axis-
+      Routing, Scheme-unsupported ohne Leak,
+      `text_provider_lines`-Visibility-Pfad). Alle übrigen UI-
+      Smokes grün; Headless-Boot sauber.
 
 ---
 

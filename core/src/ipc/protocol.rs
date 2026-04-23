@@ -4,7 +4,10 @@ use crate::actions::{
     ActionCancelledPayload, ActionCompletedPayload, ActionFailedPayload, ActionPlannedPayload,
     ActionProgressPayload, ActionStartedPayload, ActionStepPayload, ActionVerificationPayload,
 };
-use crate::app::{SettingsLlamafileUpdate, SettingsProbeResultPayload, StatusPayload};
+use crate::app::{
+    SettingsLlamafileUpdate, SettingsLocalHttpUpdate, SettingsProbeResultPayload,
+    SettingsSttUpdate, SettingsTtsUpdate, StatusPayload,
+};
 use crate::approvals::{ApprovalRequest, ApprovalResolvedPayload, IncomingApprovalDecision};
 use crate::interaction::{AccessibilityDiscovery, AccessibilityProbe, SelectedTarget};
 
@@ -62,6 +65,30 @@ pub enum IncomingMessage {
     /// Enabled-Flag, Path-Existenz und Execute-Bit (kein Spawn, kein
     /// HTTP). Antwort: `settings_probe_result`.
     SettingsProbeLlamafile,
+    /// PR 7 — editierbare STT-Settings (`enabled` + optionaler
+    /// `command`). Antwort: `status` bei Erfolg, `error` bei
+    /// Validierungsfehler.
+    SettingsSetSttConfig(SettingsSttUpdate),
+    /// PR 7 — editierbare TTS-Settings (`enabled`, optionaler `command`,
+    /// optionales `auto_speak`).
+    SettingsSetTtsConfig(SettingsTtsUpdate),
+    /// PR 7 — Diagnoseprobe für die STT-Achse. Kein Mikrofon-Zugriff,
+    /// nur Filesystem-Check des konfigurierten Commands. Antwort:
+    /// `settings_probe_result` mit `axis="stt"`.
+    SettingsProbeStt,
+    /// PR 7 — Diagnoseprobe für die TTS-Achse. Kein Audio-Output,
+    /// nur Filesystem-Check. Antwort: `settings_probe_result` mit
+    /// `axis="tts"`.
+    SettingsProbeTts,
+    /// PR 8 — editierbare `local_http`-Settings. Pflichtfeld
+    /// `enabled`. Optional: `endpoint` (leer löscht),
+    /// `request_timeout_seconds` (`0` wird abgelehnt).
+    SettingsSetLocalHttpConfig(SettingsLocalHttpUpdate),
+    /// PR 8 — Diagnoseprobe für den `local_http`-Provider. TCP-
+    /// Connect auf den geparsten Endpoint, kein Completion-Request,
+    /// keine Prompt-Daten. Antwort: `settings_probe_result` mit
+    /// `axis="local_http"`.
+    SettingsProbeLocalHttp,
 }
 
 /// Target shape accepted by the `interaction_focus_window` IPC request.
@@ -259,6 +286,7 @@ mod tests {
     fn encodes_settings_probe_result() {
         let encoded = encode_outgoing(&OutgoingMessage::SettingsProbeResult {
             payload: SettingsProbeResultPayload {
+                axis: "llamafile".into(),
                 ok: false,
                 class: "path_missing".into(),
                 message: "configured binary path does not exist".into(),
@@ -270,12 +298,124 @@ mod tests {
         });
         // Der Envelope trägt `type` und den Payload; der Tag-Wert
         // `path_missing` muss stabil bleiben — die UI verlässt sich
-        // auf diese Tag-Strings.
+        // auf diese Tag-Strings. PR 7: zusätzlich `axis` für das
+        // STT-/TTS-/Llamafile-Routing.
         assert!(encoded.contains(r#""type":"settings_probe_result""#));
+        assert!(encoded.contains(r#""axis":"llamafile""#));
         assert!(encoded.contains(r#""class":"path_missing""#));
         assert!(encoded.contains(r#""in_chain":true"#));
         assert!(encoded.contains(r#""configured":true"#));
         assert!(encoded.contains(r#""lifecycle":"configured""#));
+    }
+
+    // PR 7 — Parser-Abdeckung für die neuen STT-/TTS-Settings-Messages.
+
+    #[test]
+    fn parses_settings_set_stt_config_full_payload() {
+        let raw =
+            r#"{"type":"settings_set_stt_config","enabled":true,"command":"whisper --model base"}"#;
+        let msg = parse_incoming(raw).unwrap();
+        match msg {
+            IncomingMessage::SettingsSetSttConfig(update) => {
+                assert!(update.enabled);
+                assert_eq!(update.command.as_deref(), Some("whisper --model base"));
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn parses_settings_set_stt_config_minimal_payload() {
+        let msg = parse_incoming(r#"{"type":"settings_set_stt_config","enabled":false}"#).unwrap();
+        match msg {
+            IncomingMessage::SettingsSetSttConfig(update) => {
+                assert!(!update.enabled);
+                assert!(update.command.is_none());
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn parses_settings_set_tts_config_with_auto_speak() {
+        let raw = r#"{"type":"settings_set_tts_config","enabled":true,"command":"espeak","auto_speak":true}"#;
+        let msg = parse_incoming(raw).unwrap();
+        match msg {
+            IncomingMessage::SettingsSetTtsConfig(update) => {
+                assert!(update.enabled);
+                assert_eq!(update.command.as_deref(), Some("espeak"));
+                assert_eq!(update.auto_speak, Some(true));
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn parses_settings_set_tts_config_without_auto_speak() {
+        let msg =
+            parse_incoming(r#"{"type":"settings_set_tts_config","enabled":false}"#).unwrap();
+        match msg {
+            IncomingMessage::SettingsSetTtsConfig(update) => {
+                assert!(!update.enabled);
+                assert!(update.command.is_none());
+                assert!(update.auto_speak.is_none());
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn parses_settings_probe_stt_and_tts() {
+        assert!(matches!(
+            parse_incoming(r#"{"type":"settings_probe_stt"}"#).unwrap(),
+            IncomingMessage::SettingsProbeStt
+        ));
+        assert!(matches!(
+            parse_incoming(r#"{"type":"settings_probe_tts"}"#).unwrap(),
+            IncomingMessage::SettingsProbeTts
+        ));
+    }
+
+    // PR 8 — Parser-Abdeckung für die neuen Local-HTTP-Messages.
+
+    #[test]
+    fn parses_settings_set_local_http_config_full_payload() {
+        let raw = r#"{"type":"settings_set_local_http_config","enabled":true,"endpoint":"http://127.0.0.1:9000/completion","request_timeout_seconds":45}"#;
+        let msg = parse_incoming(raw).unwrap();
+        match msg {
+            IncomingMessage::SettingsSetLocalHttpConfig(update) => {
+                assert!(update.enabled);
+                assert_eq!(
+                    update.endpoint.as_deref(),
+                    Some("http://127.0.0.1:9000/completion"),
+                );
+                assert_eq!(update.request_timeout_seconds, Some(45));
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn parses_settings_set_local_http_config_minimal_payload() {
+        let msg =
+            parse_incoming(r#"{"type":"settings_set_local_http_config","enabled":false}"#)
+                .unwrap();
+        match msg {
+            IncomingMessage::SettingsSetLocalHttpConfig(update) => {
+                assert!(!update.enabled);
+                assert!(update.endpoint.is_none());
+                assert!(update.request_timeout_seconds.is_none());
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn parses_settings_probe_local_http() {
+        assert!(matches!(
+            parse_incoming(r#"{"type":"settings_probe_local_http"}"#).unwrap(),
+            IncomingMessage::SettingsProbeLocalHttp
+        ));
     }
 
     #[test]

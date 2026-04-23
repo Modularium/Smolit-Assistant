@@ -155,7 +155,8 @@ ist einzeln entscheid- und ablehnbar.
 - **Lokaler HTTP-Provider.** Ein auf `127.0.0.1` lauschender Dienst
   (z. B. `llama.cpp`-Server, lokaler vLLM, Ollama). Der Core spricht
   JSON/HTTP; der Dienst läuft vollständig auf dem Host.
-  Netzwerkzugriffe nur auf Loopback.
+  Netzwerkzugriffe nur auf Loopback. **Seit PR 8** gibt es dafür den
+  allgemeinen Provider-Kind `local_http` — siehe §4.1c.
 - **`llamafile_local` (lokaler Runtime-Provider, Ist-Zustand).**
   Konkreter kuratierter Unterfall des lokalen HTTP-Providers: ein auf
   dem Host laufendes **llamafile** (Single-Binary-LLM), das lazy beim
@@ -301,23 +302,99 @@ abbilden, ohne neue Nachrichtenfamilie einzuführen.
 - Kein Auto-Restart bei Crash; ein gestorbener Prozess wird bei
   nächsten `run()`-Aufruf neu gespawnt.
 
+### 4.1c `local_http` — allgemeiner lokaler HTTP-Text-Provider (PR 8)
+
+`local_http` ist der erste **allgemeine** externe Text-Provider
+außerhalb von `abrain` und `llamafile_local`. Ziel: ein schmaler,
+produktiver HTTP-Adapter gegen einen lokal laufenden, llama.cpp-
+kompatiblen Completion-Server (vLLM, Ollama-kompatible
+`/completion`-Route, eigene Dienste). Bewusst **kein**
+pseudo-generischer LLM-Universaladapter — wer mehr will, bekommt
+einen eigenen Provider-Kind.
+
+**Konfiguration** (`config.rs::LocalHttpConfig`, Env-basiert):
+
+- `SMOLIT_LOCAL_HTTP_ENABLED` (bool, Default `false`) — harter
+  Master-Schalter.
+- `SMOLIT_LOCAL_HTTP_ENDPOINT` (optionaler String, Default leer) —
+  Ziel-URL, z. B. `http://127.0.0.1:8080/completion`. Muss mit
+  `http://` beginnen; `https://` wird vom Provider explizit
+  abgelehnt, weil PR 8 keine TLS-/Cert-/Trust-Infrastruktur
+  mitbringt. Host-Teil darf beliebig sein; in der Praxis ist der
+  Provider loopback-first gedacht (siehe §7).
+- `SMOLIT_LOCAL_HTTP_REQUEST_TIMEOUT_SECONDS` (Default `60`) —
+  Zeitbudget pro Completion-Request. `0` wird vom Schreibpfad
+  abgelehnt.
+- `SMOLIT_LOCAL_HTTP_PROMPT_FIELD` (Default `"prompt"`) — JSON-
+  Feldname im Request-Body.
+- `SMOLIT_LOCAL_HTTP_RESPONSE_FIELD` (Default `"content"`) — JSON-
+  Feldname im Response-Body.
+
+**Runtime-Pfad**:
+
+- Genau ein `POST <path>`-Aufruf pro Request. Body:
+  `{"<prompt_field>": "<input>", "stream": false}`. Response-Body
+  wird als JSON geparst; `<response_field>` muss ein Text-Feld sein.
+- Nutzt denselben internen HTTP/1.1-Helfer (`http_request`) wie der
+  llamafile-Runtime-Pfad — keine neue Dependency, keine neue Secret-
+  Oberfläche.
+- Kein Streaming, kein Tool-/Schema-Mode, kein `messages`-Array, kein
+  `system`-Prompt. Wer das braucht, schreibt einen eigenen Provider.
+- Kein Auth-Header, keine API-Keys. Sensitive-Credentials-Pfad
+  bleibt für einen späteren PR reserviert (siehe §7/§11).
+
+**Fehlerklassen** (additiv in `text_provider_last_error`):
+`disabled`, `not_configured`, `endpoint_scheme_unsupported`
+(`https://` oder anderes Schema), `endpoint_unparseable`,
+`http_connect_failed`, `http_error` (Non-200), `timeout`,
+`empty_response`, `invalid_response`.
+
+**Probe** (`settings_probe_local_http`): TCP-Connect auf den
+geparsten `host:port` innerhalb eines kleinen Timeout-Fensters
+(max. 30 s). **Kein** Completion-Request — die Probe spricht über
+Erreichbarkeit, nicht über Qualität. Das Ergebnis trägt kuratierte
+Klassen (`ok` / `not_in_chain` / `disabled` / `not_configured` /
+`endpoint_scheme_unsupported` / `endpoint_unparseable` /
+`http_connect_failed` / `timeout`).
+
+**Leitplanken** (siehe Nicht-Ziele in §10):
+
+- Kein TLS in dieser Stufe.
+- Keine Streaming-Pipeline.
+- Keine SDK-Sammlung; der Adapter bleibt ein schmaler HTTP-MVP.
+- Kein Endpoint-Echo im StatusPayload, Probe-Response oder
+  `error`-Envelope — analog zur Pfad-Disziplin des
+  `llamafile_local`-Providers.
+- `local_http` ist **kein** Unterfall von `llamafile_local` oder
+  `abrain`; er steht als eigener, gleichrangiger Provider-Kind in
+  der Chain.
+
 ### 4.2 STT
 
-- **Lokaler Command-Provider (Ist-Zustand).** `SMOLIT_STT_CMD` —
-  beliebiges Kommando (z. B. `whisper.cpp`, `vosk`, eigenes Skript).
+- **Lokaler Command-Provider (Ist-Zustand, PR 6).** `SMOLIT_STT_CMD`
+  — beliebiges Kommando (z. B. `whisper.cpp`, `vosk`, eigenes
+  Skript). Seit PR 6 hinter einer kleinen Provider-Abstraktion
+  ([`providers::stt`](../core/src/providers/stt.rs)) mit Resolver,
+  Laufzeitstatus und Fehlerklassifikator — das bisherige Verhalten
+  bleibt byte-kompatibel.
 - **Lokaler HTTP-Provider.** Loopback-Dienst mit Audio-Endpoint.
-  Gleiche Regeln wie beim Text-Provider.
+  Gleiche Regeln wie beim Text-Provider. **Noch nicht implementiert.**
 - **Cloud-Provider.** Externe Erkennung; dieselbe Kennzeichnungs-
-  pflicht wie beim Text-Provider.
+  pflicht wie beim Text-Provider. **Noch nicht implementiert.**
 
 ### 4.3 TTS
 
-- **Lokaler Command-Provider (Ist-Zustand).** `SMOLIT_TTS_CMD` —
-  z. B. `piper`, `kokoro`, eigenes Skript.
-- **Lokaler HTTP-Provider.** Analog.
+- **Lokaler Command-Provider (Ist-Zustand, PR 6).** `SMOLIT_TTS_CMD`
+  — z. B. `piper`, `kokoro`, eigenes Skript. Seit PR 6 hinter einer
+  kleinen Provider-Abstraktion
+  ([`providers::tts`](../core/src/providers/tts.rs)) mit Resolver,
+  Laufzeitstatus und Fehlerklassifikator (inkl. spezifischer Klasse
+  `stdin_write_failed`).
+- **Lokaler HTTP-Provider.** Analog. **Noch nicht implementiert.**
 - **Cloud-Provider.** Analog; zusätzlich beachten, dass TTS-Texte
   potenziell sensible Nutzerinhalte enthalten und die Cloud-
-  Kennzeichnung entsprechend sichtbar sein muss.
+  Kennzeichnung entsprechend sichtbar sein muss. **Noch nicht
+  implementiert.**
 
 Die drei Achsen werden **nie** verschränkt: ein Cloud-Text-Provider
 zieht keinen Cloud-STT/TTS-Provider nach sich.
@@ -524,14 +601,20 @@ kompletten Readout in einer Nachricht.
 - `llamafile_idle_timeout_seconds` — Watchdog-Fenster in Sekunden.
   Nur gesetzt, wenn `llamafile_in_chain=true`.
 
-**STT-Achse (weiterhin nur Basis-Readout).** `stt_enabled` /
-`stt_available`. Eine Provider-Abstraktion für STT existiert noch
-nicht; das Schema bleibt bewusst klein. Sobald sie gelandet ist,
-entstehen `stt_provider_*`-Felder spiegelbildlich zu den Text-
-Feldern — additiv.
+**STT-Achse (produktiv seit PR 6).** `stt_enabled` / `stt_available`
+bleiben als Legacy-Feature-Flags erhalten. Ergänzt um fünf additive
+Felder strukturell analog zur Text-Achse:
+`stt_provider_configured` / `stt_provider_active` /
+`stt_provider_availability` / `stt_provider_last_error` /
+`stt_provider_cloud`. Das einzige produktive Kind heute ist
+`command` (der bisherige `SMOLIT_STT_CMD`-Pfad); Chain
+env-überschreibbar via `SMOLIT_STT_PROVIDER_CHAIN`.
 
-**TTS-Achse (weiterhin nur Basis-Readout).** `tts_enabled` /
-`tts_available` / `auto_speak`. Gleiche Leitplanken wie STT.
+**TTS-Achse (produktiv seit PR 6).** `tts_enabled` / `tts_available`
+/ `auto_speak` bleiben als Legacy-Feld-Tripel erhalten. Ergänzt um
+fünf additive Felder analog STT (`tts_provider_configured` usw.).
+Einziges Kind heute `command`; Chain env-überschreibbar via
+`SMOLIT_TTS_PROVIDER_CHAIN`.
 
 **Privacy-Rollup (UI-Projektion, kein Core-Feld).** Die Shell
 kombiniert `text_provider_cloud`, `llamafile_in_chain` und
@@ -540,11 +623,10 @@ Achse (siehe [`docs/ui_architecture.md`](./ui_architecture.md) §8d).
 Kein Core-Feld und keine neue Datenquelle — nur eine defensiv
 zusammengesetzte Zeile.
 
-**Bewusst nicht in PR 4 gelandet.**
+**Bewusst nicht in PR 4 gelandet** (für PR 6 aufgelöst):
 
-- Keine STT-/TTS-Provider-Abstraktion und damit keine
-  `stt_provider_*` / `tts_provider_*`-Felder (würden ohne
-  Provider-Schicht nur Fiktion sein).
+- ~~Keine STT-/TTS-Provider-Abstraktion und damit keine
+  `stt_provider_*` / `tts_provider_*`-Felder~~ — gelandet in PR 6.
 - Kein Cloud-Provider für Text (und damit kein neuer
   `text_provider_cloud=true`-Pfad).
 - Kein `degraded`-Zustand in `text_provider_availability` — ohne
@@ -709,6 +791,106 @@ gegen einen lokalen Fake-HTTP-Server plus ein Shell-Skript als
   Cloud-Credentials-Editor, STT-/TTS-Provider-Auswahl, Secret-
   Store für API-Keys, Chain-Reihenfolge-Editor, Port-/Timeouts-
   Editor, Start/Stop-Buttons für den llamafile-Prozess.
+- **PR 6 — STT-/TTS-Provider-Abstraktion (Ist, konservativ).** Die
+  Audio-Achsen werden architektonisch an den Text-Pfad angeglichen:
+  zwei neue Core-Module
+  [`providers::stt`](../core/src/providers/stt.rs) und
+  [`providers::tts`](../core/src/providers/tts.rs) mit Enum-Dispatch,
+  Resolver, Laufzeitstatus und Fehlerklassifikator — gleiche
+  Leitplanken wie Text-Resolver. Einziges heute produktives Kind pro
+  Achse: `command`, das den bisherigen `SMOLIT_STT_CMD` /
+  `SMOLIT_TTS_CMD`-Pfad 1:1 übernimmt (Timeouts, Fehlertexte,
+  Legacy-`available`-Semantik bleiben byte-kompatibel). Config
+  bekommt zwei zusätzliche Listen `audio.stt_provider_chain` und
+  `audio.tts_provider_chain`, env-überschreibbar via
+  `SMOLIT_STT_PROVIDER_CHAIN` / `SMOLIT_TTS_PROVIDER_CHAIN`;
+  unbekannte Kinds werden sichtbar verworfen, die Kette fällt dann
+  auf `["command"]` zurück. `App::handle_voice_once` und
+  `App::handle_speak` routen ausschließlich durch die Resolver —
+  das alte `audio::SttService` / `audio::TtsService` wurde
+  eingemottet, `audio/types.rs` bleibt für geteilte Helfer
+  (`split_command`, `AudioFeatureState`). StatusPayload additiv um
+  zehn Felder erweitert
+  (`stt_provider_configured` / `_active` / `_availability` /
+  `_last_error` / `_cloud` und TTS-Spiegel; siehe §8.1 und
+  [`docs/api.md` §2.3](./api.md)). UI-Settings-Shell: `stt_lines`
+  und `tts_lines` erweitern sich um fünf Resolver-Zeilen pro Achse,
+  mit ehrlichem Fallback-Hinweis für alte Cores; der Privacy-
+  Abschnitt verdichtet STT-/TTS-Cloud separat statt der
+  Sammelzeile. **Bewusst nicht Teil von PR 6:** kein Cloud-SDK,
+  keine Cloud-Kinds, kein HTTP-Kind, keine Streaming-Pipeline, kein
+  STT-/TTS-Provider-Editor in der UI, keine neuen Audio-Events
+  (`speaking_started` u. ä. bleiben offen). Tests: zwei neue
+  Resolver-Test-Module mit je ~7 Unit-/Integration-Tests, drei neue
+  Config-Parser-Tests, zwei neue IPC-Server-Tests, zwei neue UI-
+  Smoke-Blöcke. Gesamttests: Core 170 PASS (+20 vs. PR 5);
+  UI-`settings-shell-smoke` auf 118 Assertions erweitert (+15).
+- **PR 7 — STT-/TTS-Settings-Editor + Probe-Pfade (Ist).**
+  Editierbare Audio-Settings analog zu PR 5, bewusst kleiner:
+  pro Achse `enabled` + `command`, für TTS zusätzlich `auto_speak`.
+  Timeouts und Provider-Chains bleiben env-/Startup-gesteuert (ein
+  leerer Legacy-Override soll eine zukünftige Cloud-Kette nicht
+  abschalten können). Neue IPC-Messages `settings_set_stt_config` /
+  `settings_set_tts_config` / `settings_probe_stt` /
+  `settings_probe_tts` (alle additiv). Der
+  [`settings_store`](../core/src/settings_store.rs) kennt zwei
+  weitere Dateien `stt.json` / `tts.json` (gleiche Verzeichnis-
+  Auflösung, 0600-Permissions, temp+rename). Der `probe_*`-Pfad ist
+  Side-Effect-frei: kein Mikrofon-Zugriff, kein Audio-Output, kein
+  Spawn — nur `split_command` + Filesystem-Check des ersten Tokens.
+  `SettingsProbeResultPayload` trägt neuerdings `axis`
+  (`"llamafile"` / `"stt"` / `"tts"`) für das UI-Routing; ältere
+  Cores ohne das Feld fallen UI-seitig auf `llamafile` zurück. Die
+  Settings-Shell bekommt zwei weitere Editor-Blöcke direkt unter
+  dem jeweiligen Read-only-Abschnitt (Enabled-Checkbox + Command-
+  LineEdit + Probe + Apply; Auto-Speak-Checkbox nur TTS). Der
+  STT-/TTS-Resolver sitzt seit PR 7 hinter einem `RwLock<Arc<…>>`
+  (gleicher Swap-Mechanismus wie beim Text-Resolver in PR 5), damit
+  der Schreibpfad atomar einen neuen Resolver aufhängt; externe
+  Callsites holen den aktuellen Resolver über
+  `App::current_stt()` / `current_tts()`. **Bewusst nicht Teil von
+  PR 7:** kein STT-/TTS-Timeout-Editor, keine Chain-Reihenfolge-
+  Umordnung, keine Cloud-Achse, keine Audio-Level-Anzeige, kein
+  Secrets-Store. Tests: fünf neue IPC-Ende-zu-Ende-Tests, vier
+  neue `settings_store`-Unit-Tests, fünf neue Protocol-Parser-
+  Tests, sechs neue UI-Smoke-Blöcke. Gesamttests: Core 185 PASS
+  (+15 vs. PR 6); UI-`settings-shell-smoke` auf 136 Assertions
+  erweitert (+18).
+- **PR 8 — erster zusätzlicher externer Text-Provider `local_http`
+  (Ist).** Neuer, gleichrangiger Provider-Kind auf der Text-Achse,
+  weder Unterfall von `abrain` noch von `llamafile_local`. Siehe
+  §4.1c für das vollständige Modell. Kleiner HTTP-MVP gegen einen
+  konfigurierbaren Endpoint (Default llama.cpp-kompatibel,
+  `prompt` + `content`-Felder), nutzt den bereits bestehenden
+  `http_request`-Helfer — keine neue Dependency, kein TLS, kein
+  Streaming, kein Auth-Header. `TextProviderConfig` bekommt ein
+  additives `local_http`-Unterobjekt
+  ([`LocalHttpConfig`](../core/src/config.rs)); neue Env-Variablen
+  `SMOLIT_LOCAL_HTTP_ENABLED` / `_ENDPOINT` /
+  `_REQUEST_TIMEOUT_SECONDS` / `_PROMPT_FIELD` / `_RESPONSE_FIELD`.
+  Der [`settings_store`](../core/src/settings_store.rs) kennt
+  zusätzlich `local_http.json` (gleiche Verzeichnis-Auflösung,
+  0600, temp+rename). `App` hält einen neuen `live_local_http`-
+  Stand, rebuildet den `TextProviderResolver` atomar beim
+  Schreibpfad. Neue IPC-Messages
+  `settings_set_local_http_config` / `settings_probe_local_http`;
+  `StatusPayload` bekommt drei additive Felder
+  (`local_http_in_chain` / `_enabled` / `_configured`). Der
+  Probe-Pfad macht **nur** einen TCP-Connect auf `host:port`, kein
+  Completion-Roundtrip, kein Prompt-Versand. UI: eigener
+  „local_http · Edit"-Block direkt unter dem Llamafile-Editor,
+  Axis-geroutetes Probe-Ergebnis (`axis="local_http"`).
+  **Bewusst nicht Teil von PR 8:** kein TLS / `https://`, keine
+  Streaming-Pipeline, keine Auth-/API-Key-Eingabe, keine
+  generische OpenAI-/`messages`-Welt, keine Chain-Reihenfolge-
+  Umordnung in der UI, keine Cloud-Provider-Implementierung. Tests:
+  neun neue Core-Unit-Tests im Text-Provider-Modul
+  (Endpoint-Parser + Request/Response-Path gegen den bestehenden
+  Fake-Server + Resolver-Fallback), drei neue
+  `settings_store`-Unit-Tests, drei neue Protocol-Parser-Tests,
+  fünf neue IPC-Ende-zu-Ende-Tests, vier neue UI-Smoke-Blöcke.
+  Gesamttests: Core 210 PASS (+25 vs. PR 7);
+  UI-`settings-shell-smoke` auf 154 Assertions erweitert (+18).
 
 Zwischenprinzipien:
 
@@ -756,13 +938,14 @@ aufgehoben werden.
 
 ---
 
-## 11. Secrets- und Sensitive-Config-Kategorien (Ist, PR 5)
+## 11. Secrets- und Sensitive-Config-Kategorien (Ist, PR 5 + PR 7 + PR 8)
 
 Ab PR 5 existiert in
 [`core/src/settings_store.rs`](../core/src/settings_store.rs) ein
 kleiner persistenter Store für die editierbaren Teile der
-Llamafile-Config. Dieser Abschnitt legt die Trennlinien fest, die
-jede künftige Schreibfläche einhalten muss.
+Llamafile-Config; PR 7 ergänzt dort die STT-/TTS-Overrides; PR 8
+bringt den `local_http`-Override dazu. Dieser Abschnitt legt die
+Trennlinien fest, die jede künftige Schreibfläche einhalten muss.
 
 **Kategorien.**
 
@@ -794,13 +977,21 @@ aber wie eine sensitive-lite-Ressource behandelt:
 
 **Schreib-/Persistenz-Pfade.**
 
-- **Editierbare Operational-Werte (heute: nur Llamafile-Felder).**
-  Dateiname `llamafile_local.json` im Settings-Verzeichnis.
-  Auflösungsreihenfolge: `SMOLIT_SETTINGS_DIR` →
-  `$XDG_CONFIG_HOME/smolit-assistant/` →
+- **Editierbare Operational-Werte.** Vier kleine Override-Dateien
+  im Settings-Verzeichnis:
+  `llamafile_local.json` (PR 5), `stt.json` (PR 7), `tts.json`
+  (PR 7), `local_http.json` (PR 8). Auflösungsreihenfolge:
+  `SMOLIT_SETTINGS_DIR` → `$XDG_CONFIG_HOME/smolit-assistant/` →
   `$HOME/.config/smolit-assistant/`. Atomarer Write
-  (temp + rename). Unix-Permissions 0600, damit der Pfad derselben
-  Posture folgt wie ein zukünftiger Secret-Store.
+  (temp + rename). Unix-Permissions 0600, damit die Oberfläche
+  derselben Posture folgt wie ein zukünftiger Secret-Store.
+  STT-/TTS-Override persistieren ausschließlich die UI-editierbaren
+  Felder (`enabled`, `command`, TTS zusätzlich `auto_speak`);
+  `local_http`-Override persistiert nur `enabled`, `endpoint` und
+  `request_timeout_seconds` — Prompt-/Response-Feldnamen bleiben
+  env-/Startup-gesteuert. Timeouts der `llamafile_local`-Runtime
+  und sämtliche Provider-Chains bleiben env-gesteuert, damit ein
+  altes Override-File eine zukünftige Cloud-Kette nicht überstimmt.
 - **Sensitive-Werte.** Noch kein Store. Wenn einer entsteht,
   separates File (z. B. `secrets.json`), **nie** gemeinsam mit
   operational-Werten serialisiert, und nie aus dem Core in Richtung
@@ -810,8 +1001,13 @@ aber wie eine sensitive-lite-Ressource behandelt:
 
 - `settings_set_*`-Nachrichten transportieren nur Operational-
   Werte. Sensitive-Werte wandern künftig über einen dedizierten
-  `secrets_set_*`-Pfad (Ausgestaltung offen, nicht Teil von PR 5).
+  `secrets_set_*`-Pfad (Ausgestaltung offen, nicht Teil von
+  PR 5/7/8).
 - Antworten auf Schreibaktionen spiegeln ausschließlich den
   StatusPayload — kein Raw-Echo der Eingabe.
-- Probe-Aktionen (`settings_probe_llamafile`) sind Side-Effect-frei
-  und liefern kuratierte Tags.
+- Probe-Aktionen (`settings_probe_{llamafile,stt,tts,local_http}`) sind
+  Side-Effect-frei im Sinne der Nutzer-Intention und liefern
+  kuratierte Tags. STT/TTS-Probes greifen ausdrücklich nicht auf
+  Mikrofon oder Audio-Output zu; der `local_http`-Probe macht
+  einen TCP-Connect auf `host:port`, aber **keinen**
+  Completion-Request und sendet keine Prompt-Daten.

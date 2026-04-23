@@ -167,6 +167,18 @@ async fn dispatch(app: &Arc<App>, raw: &str) -> Vec<OutgoingMessage> {
             handle_settings_set_llamafile_config(app, update)
         }
         IncomingMessage::SettingsProbeLlamafile => handle_settings_probe_llamafile(app),
+        IncomingMessage::SettingsSetSttConfig(update) => {
+            handle_settings_set_stt_config(app, update)
+        }
+        IncomingMessage::SettingsSetTtsConfig(update) => {
+            handle_settings_set_tts_config(app, update)
+        }
+        IncomingMessage::SettingsProbeStt => handle_settings_probe_stt(app),
+        IncomingMessage::SettingsProbeTts => handle_settings_probe_tts(app),
+        IncomingMessage::SettingsSetLocalHttpConfig(update) => {
+            handle_settings_set_local_http_config(app, update)
+        }
+        IncomingMessage::SettingsProbeLocalHttp => handle_settings_probe_local_http(app).await,
     }
 }
 
@@ -196,6 +208,70 @@ fn handle_settings_set_llamafile_config(
 fn handle_settings_probe_llamafile(app: &Arc<App>) -> Vec<OutgoingMessage> {
     vec![OutgoingMessage::SettingsProbeResult {
         payload: app.probe_llamafile(),
+    }]
+}
+
+/// PR 7 — STT-Schreibpfad. Byte-kompatible Dispatch-Geometrie zum
+/// Llamafile-Pfad: Erfolg → `status`-Envelope, Fehler → `error`.
+fn handle_settings_set_stt_config(
+    app: &Arc<App>,
+    update: crate::app::SettingsSttUpdate,
+) -> Vec<OutgoingMessage> {
+    match app.update_stt_config(update) {
+        Ok(()) => vec![OutgoingMessage::Status {
+            payload: app.build_status_payload(),
+        }],
+        Err(message) => vec![OutgoingMessage::Error { message }],
+    }
+}
+
+/// PR 7 — TTS-Schreibpfad. Symmetrisch zu
+/// [`handle_settings_set_stt_config`] plus `auto_speak`.
+fn handle_settings_set_tts_config(
+    app: &Arc<App>,
+    update: crate::app::SettingsTtsUpdate,
+) -> Vec<OutgoingMessage> {
+    match app.update_tts_config(update) {
+        Ok(()) => vec![OutgoingMessage::Status {
+            payload: app.build_status_payload(),
+        }],
+        Err(message) => vec![OutgoingMessage::Error { message }],
+    }
+}
+
+fn handle_settings_probe_stt(app: &Arc<App>) -> Vec<OutgoingMessage> {
+    vec![OutgoingMessage::SettingsProbeResult {
+        payload: app.probe_stt(),
+    }]
+}
+
+fn handle_settings_probe_tts(app: &Arc<App>) -> Vec<OutgoingMessage> {
+    vec![OutgoingMessage::SettingsProbeResult {
+        payload: app.probe_tts(),
+    }]
+}
+
+/// PR 8 — Local-HTTP-Schreibpfad. Geometrie identisch zu den anderen
+/// `settings_set_*`-Pfaden: Erfolg → `status`, Validierungsfehler →
+/// `error` (Secret-frei).
+fn handle_settings_set_local_http_config(
+    app: &Arc<App>,
+    update: crate::app::SettingsLocalHttpUpdate,
+) -> Vec<OutgoingMessage> {
+    match app.update_local_http_config(update) {
+        Ok(()) => vec![OutgoingMessage::Status {
+            payload: app.build_status_payload(),
+        }],
+        Err(message) => vec![OutgoingMessage::Error { message }],
+    }
+}
+
+/// PR 8 — Local-HTTP-Probe. Async (nutzt `tokio::net::TcpStream` im
+/// Preflight) — der einzige Probe-Handler mit echter I/O im heutigen
+/// Scope; Secret-Disziplin gilt trotzdem (kein Endpoint im Response).
+async fn handle_settings_probe_local_http(app: &Arc<App>) -> Vec<OutgoingMessage> {
+    vec![OutgoingMessage::SettingsProbeResult {
+        payload: app.probe_local_http().await,
     }]
 }
 
@@ -316,7 +392,7 @@ async fn handle_speak_text(app: &Arc<App>, text: String) -> Vec<OutgoingMessage>
         step(&action_id, "TTS playback"),
     ];
 
-    if !app.tts.is_available() {
+    if !app.current_tts().is_available() {
         let msg = "TTS is not available.";
         out.push(OutgoingMessage::Error {
             message: msg.into(),
@@ -350,7 +426,7 @@ async fn handle_voice_once(app: &Arc<App>) -> Vec<OutgoingMessage> {
         started(&action_id),
     ];
 
-    if !app.stt.is_available() {
+    if !app.current_stt().is_available() {
         let msg = "STT is not available.";
         out.push(OutgoingMessage::Error {
             message: msg.into(),
@@ -457,6 +533,8 @@ mod tests {
                 stt_cmd: None,
                 stt_timeout_seconds: 5,
                 auto_speak: false,
+                stt_provider_chain: vec!["command".into()],
+                tts_provider_chain: vec!["command".into()],
             },
             ipc: IpcConfig {
                 enabled: true,
@@ -467,6 +545,7 @@ mod tests {
             text_provider: crate::config::TextProviderConfig {
                 chain: vec!["abrain".into()],
                 llamafile: crate::config::LlamafileConfig::default(),
+                local_http: crate::config::LocalHttpConfig::default(),
             },
         };
         Arc::new(App::new(config))
@@ -711,6 +790,140 @@ mod tests {
         assert!(got.contains(r#""llamafile_lifecycle":null"#));
         assert!(got.contains(r#""llamafile_mode":null"#));
         assert!(got.contains(r#""llamafile_idle_timeout_seconds":null"#));
+        // PR 6 — STT/TTS Provider-Statusfelder. Default-Kette
+        // `command` ist konfiguriert; ohne `SMOLIT_STT_CMD`/
+        // `SMOLIT_TTS_CMD` bleibt der Primärprovider `unavailable`,
+        // `active` ist leer, `last_error=null` (noch kein Run
+        // versucht), `cloud=false`.
+        assert!(got.contains(r#""stt_provider_configured":"command""#));
+        assert!(got.contains(r#""stt_provider_active":"""#));
+        assert!(got.contains(r#""stt_provider_availability":"unavailable""#));
+        assert!(got.contains(r#""stt_provider_last_error":null"#));
+        assert!(got.contains(r#""stt_provider_cloud":false"#));
+        assert!(got.contains(r#""tts_provider_configured":"command""#));
+        assert!(got.contains(r#""tts_provider_active":"""#));
+        assert!(got.contains(r#""tts_provider_availability":"unavailable""#));
+        assert!(got.contains(r#""tts_provider_last_error":null"#));
+        assert!(got.contains(r#""tts_provider_cloud":false"#));
+    }
+
+    /// PR 6 — mit konfigurierten STT-/TTS-Kommandos meldet der
+    /// Resolver nominell `available` schon ohne Run-Versuch. Damit
+    /// wird die Parallelität zum Text-Resolver (chain non-empty +
+    /// primary ready → "available") auch für Audio sichtbar.
+    #[tokio::test]
+    async fn get_status_reflects_configured_audio_provider_chain() {
+        let app = Arc::new(App::new(Config {
+            abrain_cmd: "/bin/false".into(),
+            log_level: "info".into(),
+            audio: AudioConfig {
+                tts_enabled: true,
+                tts_cmd: Some("/bin/cat".into()),
+                tts_timeout_seconds: 5,
+                stt_enabled: true,
+                stt_cmd: Some("/bin/echo hi".into()),
+                stt_timeout_seconds: 5,
+                auto_speak: false,
+                stt_provider_chain: vec!["command".into()],
+                tts_provider_chain: vec!["command".into()],
+            },
+            ipc: IpcConfig {
+                enabled: true,
+                bind: "127.0.0.1:0".into(),
+            },
+            interaction: InteractionConfig {
+                enabled: true,
+                backend: "command".into(),
+                allow_open_application: true,
+                allow_focus_window: true,
+                allow_type_text: false,
+                allow_shortcuts: false,
+                require_confirmation: false,
+                open_app_cmd_template: Some("/bin/true".into()),
+                focus_window_cmd_template: Some("/bin/true".into()),
+            },
+            approval: default_approval_config(),
+            text_provider: crate::config::TextProviderConfig {
+                chain: vec!["abrain".into()],
+                llamafile: crate::config::LlamafileConfig::default(),
+                local_http: crate::config::LocalHttpConfig::default(),
+            },
+        }));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(r#"{"type":"get_status"}"#.into()))
+            .await
+            .unwrap();
+        let got = recv_text(&mut ws).await;
+        assert!(got.contains(r#""stt_provider_availability":"available""#));
+        assert!(got.contains(r#""tts_provider_availability":"available""#));
+        // Feature-State-Felder (Legacy-Kompat) bleiben kohärent.
+        assert!(got.contains(r#""stt_available":true"#));
+        assert!(got.contains(r#""tts_available":true"#));
+    }
+
+    /// PR 6 — unbekannte STT-Kinds in der Chain fallen still auf den
+    /// Default `command` zurück; der Primärprovider-Status bleibt
+    /// nominell korrekt. Der Resolver loggt die Verwerfung, der
+    /// StatusPayload zeigt schlicht die aufgelöste (gültige) Kette.
+    #[tokio::test]
+    async fn get_status_falls_back_when_all_stt_kinds_unknown() {
+        let app = Arc::new(App::new(Config {
+            abrain_cmd: "/bin/false".into(),
+            log_level: "info".into(),
+            audio: AudioConfig {
+                tts_enabled: true,
+                tts_cmd: None,
+                tts_timeout_seconds: 5,
+                stt_enabled: true,
+                stt_cmd: None,
+                stt_timeout_seconds: 5,
+                auto_speak: false,
+                stt_provider_chain: vec!["cloud:unknown".into()],
+                tts_provider_chain: vec!["command".into()],
+            },
+            ipc: IpcConfig {
+                enabled: true,
+                bind: "127.0.0.1:0".into(),
+            },
+            interaction: InteractionConfig {
+                enabled: true,
+                backend: "command".into(),
+                allow_open_application: true,
+                allow_focus_window: true,
+                allow_type_text: false,
+                allow_shortcuts: false,
+                require_confirmation: false,
+                open_app_cmd_template: Some("/bin/true".into()),
+                focus_window_cmd_template: Some("/bin/true".into()),
+            },
+            approval: default_approval_config(),
+            text_provider: crate::config::TextProviderConfig {
+                chain: vec!["abrain".into()],
+                llamafile: crate::config::LlamafileConfig::default(),
+                local_http: crate::config::LocalHttpConfig::default(),
+            },
+        }));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(r#"{"type":"get_status"}"#.into()))
+            .await
+            .unwrap();
+        let got = recv_text(&mut ws).await;
+        // Unbekannte Kinds verworfen → Default-Kette → configured=command.
+        assert!(got.contains(r#""stt_provider_configured":"command""#));
     }
 
     /// PR 4 — Der vertiefte Readout für `llamafile_local` muss ehrlich
@@ -731,6 +944,8 @@ mod tests {
                 stt_cmd: None,
                 stt_timeout_seconds: 5,
                 auto_speak: false,
+                stt_provider_chain: vec!["command".into()],
+                tts_provider_chain: vec!["command".into()],
             },
             ipc: IpcConfig {
                 enabled: true,
@@ -759,6 +974,7 @@ mod tests {
                     startup_timeout_seconds: 10,
                     request_timeout_seconds: 10,
                 },
+                local_http: crate::config::LocalHttpConfig::default(),
             },
         }));
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -819,6 +1035,8 @@ mod tests {
                 stt_cmd: None,
                 stt_timeout_seconds: 5,
                 auto_speak: false,
+                stt_provider_chain: vec!["command".into()],
+                tts_provider_chain: vec!["command".into()],
             },
             ipc: IpcConfig {
                 enabled: true,
@@ -847,6 +1065,7 @@ mod tests {
                     startup_timeout_seconds: 10,
                     request_timeout_seconds: 10,
                 },
+                local_http: crate::config::LocalHttpConfig::default(),
             },
         }))
     }
@@ -1039,6 +1258,390 @@ mod tests {
         assert!(resp.contains(r#""ok":true"#));
         assert!(resp.contains(r#""in_chain":true"#));
         assert!(resp.contains(r#""configured":true"#));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // -------------------------------------------------------------------
+    // PR 7 — STT-/TTS-Settings-Schreibpfad + Probe-Ende-zu-Ende-Tests.
+    // Symmetrisch zum Llamafile-Test-Block (PR 5).
+    // -------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn settings_set_stt_config_applies_and_echoes_status() {
+        let dir = scoped_settings_dir("stt-apply-echo");
+        let app = build_llamafile_chain_app(&dir);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+
+        // Vorher: stt_enabled=true (aus build_llamafile_chain_app), kein cmd.
+        ws.send(Message::Text(r#"{"type":"get_status"}"#.into()))
+            .await
+            .unwrap();
+        let pre = recv_text(&mut ws).await;
+        assert!(pre.contains(r#""stt_enabled":true"#));
+
+        // Schreibpfad: disable STT.
+        ws.send(Message::Text(
+            r#"{"type":"settings_set_stt_config","enabled":false}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.contains(r#""type":"status""#));
+        assert!(resp.contains(r#""stt_enabled":false"#));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn settings_set_tts_config_updates_auto_speak() {
+        let dir = scoped_settings_dir("tts-apply-auto");
+        let app = build_llamafile_chain_app(&dir);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+
+        ws.send(Message::Text(r#"{"type":"get_status"}"#.into()))
+            .await
+            .unwrap();
+        let pre = recv_text(&mut ws).await;
+        assert!(pre.contains(r#""auto_speak":false"#));
+
+        ws.send(Message::Text(
+            r#"{"type":"settings_set_tts_config","enabled":true,"auto_speak":true}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.contains(r#""type":"status""#));
+        assert!(resp.contains(r#""auto_speak":true"#));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn settings_probe_stt_reports_not_configured_without_command() {
+        let dir = scoped_settings_dir("stt-probe-notcfg");
+        let app = build_llamafile_chain_app(&dir);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(r#"{"type":"settings_probe_stt"}"#.into()))
+            .await
+            .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.contains(r#""type":"settings_probe_result""#));
+        assert!(resp.contains(r#""axis":"stt""#));
+        assert!(resp.contains(r#""class":"not_configured""#));
+        assert!(resp.contains(r#""ok":false"#));
+        assert!(resp.contains(r#""in_chain":true"#));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn settings_probe_tts_reports_ok_for_executable_command() {
+        let dir = scoped_settings_dir("tts-probe-ok");
+        let app = build_llamafile_chain_app(&dir);
+        // enabled=true mit /bin/true als ausführbarem Command.
+        app.update_tts_config(crate::app::SettingsTtsUpdate {
+            enabled: true,
+            command: Some("/bin/true".into()),
+            auto_speak: None,
+        })
+        .unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(r#"{"type":"settings_probe_tts"}"#.into()))
+            .await
+            .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.contains(r#""axis":"tts""#));
+        assert!(resp.contains(r#""class":"ok""#));
+        assert!(resp.contains(r#""ok":true"#));
+        assert!(resp.contains(r#""in_chain":true"#));
+        assert!(resp.contains(r#""configured":true"#));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn settings_probe_stt_does_not_leak_command() {
+        let dir = scoped_settings_dir("stt-probe-noleak");
+        let app = build_llamafile_chain_app(&dir);
+        let secret_looking_cmd =
+            "/nonexistent/smolit-stt-probe-please-do-not-leak --flag=sekritvalue";
+        app.update_stt_config(crate::app::SettingsSttUpdate {
+            enabled: true,
+            command: Some(secret_looking_cmd.into()),
+        })
+        .unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(r#"{"type":"settings_probe_stt"}"#.into()))
+            .await
+            .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.contains(r#""class":"path_missing""#));
+        assert!(
+            !resp.contains("sekritvalue") && !resp.contains("smolit-stt-probe"),
+            "probe response must not leak the configured command; got: {resp}",
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // -------------------------------------------------------------------
+    // PR 8 — Local-HTTP-Schreibpfad + Probe. Nutzt
+    // `build_llamafile_chain_app`, das bereits eine Chain mit
+    // `llamafile_local + abrain` baut. Für die folgenden Tests ergänzen
+    // wir den Chain-Eintrag `local_http` per Env-Override *vor* der
+    // App-Konstruktion — das ist der konservativste Weg, ohne den
+    // Test-Helper aufzublähen.
+    // -------------------------------------------------------------------
+
+    fn build_local_http_chain_app(settings_dir: &std::path::Path) -> Arc<App> {
+        // `SMOLIT_SETTINGS_DIR` muss vor `App::new` sitzen, weil
+        // `settings_store::load_*_override` es dort liest. Race-frei,
+        // weil jeder Test einen eindeutigen Marker nutzt und das Race
+        // nur auf dem Filesystem stattfindet.
+        unsafe {
+            std::env::set_var("SMOLIT_SETTINGS_DIR", settings_dir.as_os_str());
+        }
+        // Kette direkt in der Config setzen — kein `Config::load()`,
+        // kein Env-Override für `SMOLIT_TEXT_PROVIDER_CHAIN`, damit wir
+        // nicht mit parallelen Tests um globale Env-Vars streiten.
+        Arc::new(App::new(Config {
+            abrain_cmd: "/bin/false".into(),
+            log_level: "info".into(),
+            audio: AudioConfig {
+                tts_enabled: true,
+                tts_cmd: None,
+                tts_timeout_seconds: 5,
+                stt_enabled: true,
+                stt_cmd: None,
+                stt_timeout_seconds: 5,
+                auto_speak: false,
+                stt_provider_chain: vec!["command".into()],
+                tts_provider_chain: vec!["command".into()],
+            },
+            ipc: IpcConfig {
+                enabled: true,
+                bind: "127.0.0.1:0".into(),
+            },
+            interaction: InteractionConfig {
+                enabled: true,
+                backend: "command".into(),
+                allow_open_application: true,
+                allow_focus_window: true,
+                allow_type_text: false,
+                allow_shortcuts: false,
+                require_confirmation: false,
+                open_app_cmd_template: Some("/bin/true".into()),
+                focus_window_cmd_template: Some("/bin/true".into()),
+            },
+            approval: default_approval_config(),
+            text_provider: crate::config::TextProviderConfig {
+                chain: vec!["local_http".into(), "abrain".into()],
+                llamafile: crate::config::LlamafileConfig::default(),
+                local_http: crate::config::LocalHttpConfig::default(),
+            },
+        }))
+    }
+
+    #[tokio::test]
+    async fn settings_set_local_http_config_applies_and_echoes_status() {
+        let dir = scoped_settings_dir("lh-apply-echo");
+        let app = build_local_http_chain_app(&dir);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+
+        ws.send(Message::Text(r#"{"type":"get_status"}"#.into()))
+            .await
+            .unwrap();
+        let pre = recv_text(&mut ws).await;
+        assert!(pre.contains(r#""local_http_in_chain":true"#));
+        assert!(pre.contains(r#""local_http_enabled":false"#));
+
+        ws.send(Message::Text(
+            r#"{"type":"settings_set_local_http_config","enabled":true,"endpoint":"http://127.0.0.1:9999/completion","request_timeout_seconds":10}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.contains(r#""type":"status""#));
+        assert!(resp.contains(r#""local_http_enabled":true"#));
+        assert!(resp.contains(r#""local_http_configured":true"#));
+        // Secret-Disziplin: Endpoint darf nicht im Status auftauchen.
+        assert!(
+            !resp.contains("http://127.0.0.1:9999/completion"),
+            "status payload must not leak the configured endpoint; got: {resp}",
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn settings_set_local_http_config_rejects_zero_timeout() {
+        let dir = scoped_settings_dir("lh-reject-timeout");
+        let app = build_local_http_chain_app(&dir);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"settings_set_local_http_config","enabled":true,"request_timeout_seconds":0}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.starts_with(r#"{"type":"error""#));
+        assert!(resp.contains("request_timeout_seconds"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn settings_probe_local_http_reports_not_configured_without_endpoint() {
+        let dir = scoped_settings_dir("lh-probe-notcfg");
+        let app = build_local_http_chain_app(&dir);
+        app.update_local_http_config(crate::app::SettingsLocalHttpUpdate {
+            enabled: true,
+            endpoint: None,
+            request_timeout_seconds: None,
+        })
+        .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"settings_probe_local_http"}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.contains(r#""axis":"local_http""#));
+        assert!(resp.contains(r#""class":"not_configured""#));
+        assert!(resp.contains(r#""in_chain":true"#));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn settings_probe_local_http_reports_scheme_unsupported_for_https() {
+        let dir = scoped_settings_dir("lh-probe-https");
+        let app = build_local_http_chain_app(&dir);
+        let secret_looking_endpoint = "https://sekrit-host.test/v1/sekritroute";
+        app.update_local_http_config(crate::app::SettingsLocalHttpUpdate {
+            enabled: true,
+            endpoint: Some(secret_looking_endpoint.into()),
+            request_timeout_seconds: None,
+        })
+        .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"settings_probe_local_http"}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.contains(r#""class":"endpoint_scheme_unsupported""#));
+        assert!(
+            !resp.contains("sekrit-host") && !resp.contains("sekritroute"),
+            "probe must not leak the configured endpoint; got: {resp}",
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn settings_probe_local_http_reports_connect_failed_for_closed_port() {
+        let dir = scoped_settings_dir("lh-probe-connect");
+        let app = build_local_http_chain_app(&dir);
+        // Port 59998 ist hoffentlich zu — niemand lauscht.
+        app.update_local_http_config(crate::app::SettingsLocalHttpUpdate {
+            enabled: true,
+            endpoint: Some("http://127.0.0.1:59998/completion".into()),
+            request_timeout_seconds: Some(2),
+        })
+        .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"settings_probe_local_http"}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let resp = recv_text(&mut ws).await;
+        // Akzeptiere beide Fehlerklassen — auf überlasteten Runnern
+        // kann ein `connect` auch in den Timeout laufen, statt
+        // sofort `ECONNREFUSED` zu bekommen. Wichtig ist, dass
+        // weder `ok:true` noch ein Endpoint-Leak stattfindet.
+        assert!(
+            resp.contains(r#""class":"http_connect_failed""#)
+                || resp.contains(r#""class":"timeout""#),
+            "expected http_connect_failed or timeout; got: {resp}",
+        );
+        assert!(resp.contains(r#""ok":false"#));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

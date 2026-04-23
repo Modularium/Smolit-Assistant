@@ -73,7 +73,8 @@ Für den Approval / Confirmation Flow (Details in Abschnitt 2.7):
 - `approval_response` mit `approval_id: string` und `decision`
   (`"approved" | "denied" | "cancelled"`).
 
-Für die Settings-Shell (Details in Abschnitt 2.10, seit PR 5):
+Für die Settings-Shell (Details in Abschnitt 2.10, seit PR 5; um
+PR 7 erweitert):
 
 - `settings_set_llamafile_config` — editiert die `llamafile_local`-
   Provider-Config. Pflicht-Feld `enabled: bool`. Optional:
@@ -83,7 +84,29 @@ Für die Settings-Shell (Details in Abschnitt 2.10, seit PR 5):
   `status`-Envelope (Erfolg) oder einem `error`-Envelope
   (z. B. unbekannter Mode).
 - `settings_probe_llamafile` — Side-Effect-freie Diagnose-Probe.
-  Antwort: `settings_probe_result`.
+  Antwort: `settings_probe_result` mit `axis: "llamafile"`.
+- `settings_set_stt_config` — editiert die STT-Provider-Config.
+  Pflicht-Feld `enabled: bool`. Optional: `command: string` (leer /
+  whitespace löscht, sonst ersetzt). Timeouts und Provider-Chain
+  bleiben env-/Startup-gesteuert. Core rebuildet den STT-Resolver
+  atomar.
+- `settings_set_tts_config` — Spiegel zu STT plus optional
+  `auto_speak: bool`.
+- `settings_probe_stt` / `settings_probe_tts` — Side-Effect-freie
+  Diagnose-Proben für die Audio-Achsen. Kein Mikrofon-Zugriff, kein
+  Audio-Output, kein Spawn — nur Config- und Filesystem-Check des
+  ersten Command-Tokens. Antwort: `settings_probe_result` mit
+  `axis: "stt"` bzw. `"tts"`.
+- `settings_set_local_http_config` (PR 8) — editiert den neuen
+  `local_http`-Text-Provider. Pflichtfeld `enabled: bool`. Optional:
+  `endpoint: string` (leer löscht, sonst ersetzt — erwartet
+  `http://host[:port][/path]`), `request_timeout_seconds: integer`
+  (`0` wird abgelehnt). Prompt-/Response-Feldnamen bleiben
+  env-gesteuert und werden nicht über diese Nachricht transportiert.
+- `settings_probe_local_http` (PR 8) — Side-Effect-freie
+  Diagnose-Probe: TCP-Connect auf den geparsten Endpoint, **kein**
+  Completion-Request, **kein** Prompt-Daten-Leak. Antwort:
+  `settings_probe_result` mit `axis: "local_http"`.
 
 Beispiele:
 
@@ -100,6 +123,12 @@ Beispiele:
 {"type":"interaction_discover_accessibility","hint":"firefox"}
 {"type":"settings_set_llamafile_config","enabled":true,"mode":"on_demand","idle_timeout_seconds":300,"path":"/opt/llamafile/server"}
 {"type":"settings_probe_llamafile"}
+{"type":"settings_set_stt_config","enabled":true,"command":"whisper --model base"}
+{"type":"settings_set_tts_config","enabled":true,"command":"espeak -v de","auto_speak":true}
+{"type":"settings_probe_stt"}
+{"type":"settings_probe_tts"}
+{"type":"settings_set_local_http_config","enabled":true,"endpoint":"http://127.0.0.1:8080/completion","request_timeout_seconds":60}
+{"type":"settings_probe_local_http"}
 ```
 
 ### 2.2 Ausgehend (Core → UI)
@@ -114,7 +143,7 @@ Beispiele:
 | `error`                          | `message: string`                 | Fehler bei Parsing, Ausführung oder Adapter.                       |
 | `accessibility_probe_result`     | `payload: AccessibilityProbe`     | Ergebnis einer `interaction_probe_accessibility`-Anfrage (2.8).    |
 | `accessibility_discovery_result` | `payload: AccessibilityDiscovery` | Ergebnis einer `interaction_discover_accessibility`-Anfrage (2.8). |
-| `settings_probe_result`          | `payload: SettingsProbeResult`    | Antwort auf `settings_probe_llamafile` (2.10, PR 5).               |
+| `settings_probe_result`          | `payload: SettingsProbeResult`    | Antwort auf `settings_probe_{llamafile,stt,tts}` (2.10).           |
 
 Zusätzlich emittiert der Core **Action Events** (Action Event Model v1).
 Sie sind additiv; ältere UIs, die sie nicht kennen, dürfen sie
@@ -169,7 +198,17 @@ Beispiele:
   "llamafile_configured":          false,
   "llamafile_lifecycle":           null,
   "llamafile_mode":                null,
-  "llamafile_idle_timeout_seconds": null
+  "llamafile_idle_timeout_seconds": null,
+  "stt_provider_configured":       "command",
+  "stt_provider_active":           "",
+  "stt_provider_availability":     "unavailable",
+  "stt_provider_last_error":       null,
+  "stt_provider_cloud":            false,
+  "tts_provider_configured":       "command",
+  "tts_provider_active":           "",
+  "tts_provider_availability":     "unavailable",
+  "tts_provider_last_error":       null,
+  "tts_provider_cloud":            false
 }
 ```
 
@@ -268,11 +307,56 @@ die diese Felder nicht kennen, behandeln sie ignorant — das bestehende
   Zeitspanne ohne neuen Request stoppt der Watchdog den Prozess und
   der Lifecycle wird auf `stopped` gesetzt.
 
+Seit PR 8 kommen drei weitere `local_http_*`-Felder dazu (analog zur
+Llamafile-Projektion, aber bewusst kleiner — kein Lifecycle, kein
+Endpoint-Echo):
+
+- `local_http_in_chain`: Boolesch. `true` genau dann, wenn
+  `"local_http"` in `text_provider_chain` steht.
+- `local_http_enabled`: Spiegelt `SMOLIT_LOCAL_HTTP_ENABLED`.
+- `local_http_configured`: `enabled` **und** nicht-leerer Endpoint.
+  Die ehrliche „in der Config bereit zum Request"-Grenze.
+  **Kein Endpoint-Feld** im StatusPayload — Secret-/Endpoint-
+  Disziplin, wie beim Llamafile-Pfad.
+
 Für STT/TTS bleibt das bekannte `*_enabled` / `*_available` /
-`auto_speak`-Vokabular. Eine Provider-Abstraktion für diese Achsen
-kommt in einem späteren PR; sobald sie existiert, wandern
-strukturell gleichwertige Felder (`stt_provider_*`, `tts_provider_*`)
-additiv in dieses Schema.
+`auto_speak`-Vokabular erhalten — Legacy-Feldpaar, kein Breaking
+Change.
+
+Seit PR 6 kommen pro Achse fünf weitere **additive** Felder dazu, die
+strukturell dem Text-Readout entsprechen:
+
+- `stt_provider_configured` / `tts_provider_configured`: Kanonischer
+  Kind-Name des primär konfigurierten Providers. Default
+  `"command"`. `"none"`, wenn die Kette leer ist.
+- `stt_provider_active` / `tts_provider_active`: Kind des
+  Providers, der den **letzten** erfolgreichen Run beantwortet hat
+  (`voice_once` bzw. `speak_text`/`auto_speak`). Leer vor dem ersten
+  erfolgreichen Aufruf.
+- `stt_provider_availability` / `tts_provider_availability`: Einer
+  aus `"available"` (Primärprovider nominell bereit — enabled +
+  Command gesetzt) / `"unavailable"` (Primärprovider nicht bereit
+  oder letzter Run in allen Providern fehlgeschlagen) /
+  `"fallback_active"` (Nicht-Primärprovider hat zuletzt geantwortet,
+  heute nicht erreichbar, weil nur ein Kind existiert). Vokabular
+  ist additiv ausbaubar.
+- `stt_provider_last_error` / `tts_provider_last_error`: Kurze
+  Fehlerklasse nach einem komplett fehlgeschlagenen Run. STT-Klassen:
+  `"disabled"` / `"not_configured"` / `"timeout"` /
+  `"process_missing"` / `"exit_nonzero"` / `"empty_response"` /
+  `"invalid_response"` / `"unknown"`. TTS-Klassen identisch plus
+  `"stdin_write_failed"` (statt `empty_response`, das es für
+  Sprachausgabe nicht gibt). `null` im Erfolgsfall. Keine
+  Nutzerinhalte, keine Secrets.
+- `stt_provider_cloud` / `tts_provider_cloud`: Boolesch. Heute
+  immer `false` (keine Cloud-Kinds implementiert).
+
+Die beiden Audio-Achsen haben heute nur **ein** produktives Kind
+(`command`), das den bisherigen `SMOLIT_STT_CMD` / `SMOLIT_TTS_CMD`-
+Pfad 1:1 übernimmt. Die Chain ist env-überschreibbar über
+`SMOLIT_STT_PROVIDER_CHAIN` / `SMOLIT_TTS_PROVIDER_CHAIN`; unbekannte
+Kinds werden im Resolver sichtbar verworfen und die Kette fällt
+dann auf den Default `["command"]` zurück.
 
 ### 2.4 Flow-Beispiele
 
@@ -1029,13 +1113,14 @@ Die UI muss Auswahl-Zustand in mindestens diesen Fällen aktiv verwerfen:
   hier, Execution läuft weiterhin über das bestehende Interaction-
   Backend inkl. Approval.
 
-### 2.10 Settings-Schreib-/Probe-Pfad (Ist-Zustand, PR 5)
+### 2.10 Settings-Schreib-/Probe-Pfad (Ist-Zustand, PR 5 + PR 7 + PR 8)
 
 Kleine, kuratierte Schreib-/Diagnose-Oberfläche für die Settings-
 Shell. Additiv zum bestehenden Protokoll, keine neue
-Nachrichtenfamilie. Der heutige Scope umfasst ausschließlich
-`llamafile_local`-Felder; STT/TTS und Cloud-Provider bleiben
-außerhalb dieses PR.
+Nachrichtenfamilie. Der heutige Scope umfasst `llamafile_local`-Felder
+(PR 5), STT-/TTS-Command-Provider (PR 7) und den lokalen HTTP-
+Text-Provider `local_http` (PR 8). Cloud-Provider und Secrets
+bleiben außerhalb dieses PR-Blocks.
 
 **Eingang:** `settings_set_llamafile_config`.
 
@@ -1086,6 +1171,7 @@ Execute-Bit (Unix). Antwort: `settings_probe_result`.
 {
   "type": "settings_probe_result",
   "payload": {
+    "axis": "llamafile",
     "ok": false,
     "class": "path_missing",
     "message": "configured binary path does not exist",
@@ -1097,26 +1183,131 @@ Execute-Bit (Unix). Antwort: `settings_probe_result`.
 }
 ```
 
+- `axis` (string, PR 7) — `"llamafile"` / `"stt"` / `"tts"`. Routet
+  das Ergebnis in der Settings-Shell in den passenden Editor-Block.
+  Ältere Cores ohne dieses Feld fallen UI-seitig auf
+  `"llamafile"` zurück.
 - `ok` (bool) — `true` nur wenn `class="ok"`.
-- `class` (string) — kuratierter Tag:
+- `class` (string) — kuratierter Tag. Für `axis="llamafile"`:
   `"ok"` / `"not_in_chain"` / `"disabled"` / `"not_configured"` /
   `"path_missing"` / `"path_not_file"` / `"path_not_executable"`.
+  Für `axis="stt"` bzw. `"tts"` zusätzlich `"command_unparseable"`
+  (Command-String nach `split` leer).
 - `message` (string) — kurze, Secret-freie Begründung. **Enthält
-  weder Pfad noch Roh-Fehlerstring.**
-- `lifecycle` (string | null) — aktueller Lifecycle, nur wenn
-  `in_chain=true`.
+  weder Pfad/Command noch Roh-Fehlerstring.**
+- `lifecycle` (string | null) — aktueller Lifecycle (nur Llamafile,
+  nur wenn `in_chain=true`). STT/TTS tragen heute kein Lifecycle
+  (spawn-on-demand) und senden `null`.
 - `in_chain` / `enabled` / `configured` — booleans, spiegeln den
   Entscheidungsbaum des Probes und lassen die UI ohne Extra-
   `get_status` zwischen „config falsch" und „Chain falsch"
   unterscheiden.
+
+#### 2.10a STT-/TTS-Schreib-/Probe-Pfad (PR 7)
+
+`settings_set_stt_config` / `settings_set_tts_config` spiegeln den
+Llamafile-Pfad für die Audio-Achsen. Editierbar sind ausschließlich
+die Felder, die auch in der Settings-Shell sichtbar sind; Timeouts
+und Provider-Chains bleiben env-/Startup-gesteuert, damit eine
+zukünftige Cloud-Kette nicht versehentlich über einen alten Override
+abgeschaltet wird.
+
+```json
+{"type":"settings_set_stt_config","enabled":true,"command":"whisper --model base"}
+{"type":"settings_set_tts_config","enabled":true,"command":"espeak -v de","auto_speak":true}
+```
+
+- `enabled` (bool, Pflicht) — spiegelt `SMOLIT_STT_ENABLED` bzw.
+  `SMOLIT_TTS_ENABLED`.
+- `command` (string, optional) — spiegelt `SMOLIT_STT_CMD` /
+  `SMOLIT_TTS_CMD`. Leer/whitespace löscht, sonst ersetzt. Fehlendes
+  Feld lässt den Wert unverändert.
+- `auto_speak` (bool, optional, nur TTS) — spiegelt
+  `SMOLIT_AUTO_SPEAK`. Fehlendes Feld lässt den Wert unverändert.
+
+Erfolg → der Core persistiert den neuen Stand in `stt.json` bzw.
+`tts.json` (gleiche Verzeichnis-Auflösung und 0600-Permissions wie
+der Llamafile-Override), rebuildet den jeweiligen Provider-Resolver
+und antwortet mit einem frischen `status`-Envelope.
+
+**Eingang:** `settings_probe_stt` / `settings_probe_tts`.
+
+```json
+{"type":"settings_probe_stt"}
+{"type":"settings_probe_tts"}
+```
+
+Side-Effect-frei: **kein** Mikrofon-Zugriff, **kein** Audio-Output,
+**kein** Spawn. Der Core prüft Chain-Mitgliedschaft, Enabled-Flag,
+Command-Parsing (`split_command`) und den Filesystem-/Execute-Status
+des ersten Tokens. Antwort: `settings_probe_result` mit `axis` auf
+`"stt"` bzw. `"tts"`, `lifecycle=null`.
+
+#### 2.10b Local-HTTP-Schreib-/Probe-Pfad (PR 8)
+
+`settings_set_local_http_config` editiert den neuen, allgemeinen
+lokalen HTTP-Text-Provider `local_http` (siehe §4 und
+[`docs/provider_fallback_and_settings_architecture.md` §4.1](./provider_fallback_and_settings_architecture.md)).
+Loopback-first, HTTP-MVP. Keine Secrets, kein TLS.
+
+```json
+{"type":"settings_set_local_http_config","enabled":true,"endpoint":"http://127.0.0.1:8080/completion","request_timeout_seconds":60}
+```
+
+- `enabled` (bool, Pflicht) — spiegelt `SMOLIT_LOCAL_HTTP_ENABLED`.
+- `endpoint` (string, optional) — spiegelt
+  `SMOLIT_LOCAL_HTTP_ENDPOINT`. Muss mit `http://` beginnen;
+  `https://` wird vom Core **abgelehnt** (eigene Fehlerklasse
+  `endpoint_scheme_unsupported`), weil PR 8 keine TLS-/Trust-
+  Infrastruktur mitbringt. Leerer/whitespace-String löscht den
+  Endpoint.
+- `request_timeout_seconds` (unsigned integer, optional) — Zeitbudget
+  pro Completion-Request. `0` wird als Fehler abgelehnt. Fehlendes
+  Feld lässt den bisherigen Wert stehen.
+- Nicht editierbar über diesen Pfad: `prompt_field` / `response_field`.
+  Beide bleiben env-/Startup-gesteuert (`SMOLIT_LOCAL_HTTP_PROMPT_FIELD`
+  / `SMOLIT_LOCAL_HTTP_RESPONSE_FIELD`), Default
+  `"prompt"` / `"content"` — llama.cpp-kompatibel.
+
+Erfolg → der Core persistiert den neuen Stand in `local_http.json`
+(gleiche Verzeichnisauflösung wie Llamafile-/STT-/TTS-Overrides,
+Permissions 0600), rebuildet den `TextProviderResolver` atomar und
+echoed ein frisches `status`-Envelope.
+
+**Eingang:** `settings_probe_local_http`.
+
+```json
+{"type":"settings_probe_local_http"}
+```
+
+Side-Effect-frei im Sinne des Nutzer-Prompts: **kein**
+Completion-Request, **kein** Prompt-Versand. Der Core parst den
+Endpoint, macht einen TCP-Connect auf `host:port` (mit kleinem
+Timeout von höchstens 30 s) und liefert eine kuratierte Klasse:
+
+- `"ok"` — TCP-Connect gelang.
+- `"not_in_chain"` / `"disabled"` / `"not_configured"` — wie bei den
+  anderen Achsen.
+- `"endpoint_scheme_unsupported"` — `https://` wurde konfiguriert.
+- `"endpoint_unparseable"` — URL konnte nicht geparst werden.
+- `"http_connect_failed"` — TCP-Connect schlug fehl.
+- `"timeout"` — TCP-Connect lief in den Zeitrahmen.
+
+Antwort: `settings_probe_result` mit `axis="local_http"`,
+`lifecycle=null`. Der konfigurierte Endpoint taucht **nicht** im
+Response-Body auf; `message` bleibt kuratiert.
 
 **Sicherheitsgrenzen dieser Fläche.**
 
 - **Keine Secrets über diese Nachrichten.** API-Keys, Tokens usw.
   werden ausdrücklich nicht über `settings_set_*` transportiert —
   sie sind für einen späteren, dedizierten Secrets-Pfad reserviert.
-- **Kein Pfad-Leak.** Der Binary-Pfad taucht weder in Logs noch im
+- **Kein Pfad-/Command-/Endpoint-Leak.** Binary-Pfad, Command-
+  String und Endpoint-URL tauchen weder in Logs noch im
   `settings_probe_result` noch im `error`-Envelope auf.
+- **Kein Mikrofon-/Audio-Zugriff in der STT-/TTS-Probe.** Die
+  `local_http`-Probe löst ebenfalls **keinen** Completion-Request
+  aus.
 - **Atomarer Schreibpfad.** Der Settings-Store schreibt temp + rename.
 - **Keine neue Eventfamilie.** `settings_probe_result` ist ein
   zusätzlicher `type`-Wert im bestehenden `OutgoingMessage`-Enum,
@@ -1170,8 +1361,25 @@ kann die Reihenfolge über die Konfiguration festgelegt werden:
   `http_connect_failed`, `http_error`, `empty_response`,
   `invalid_response`). Details:
   [`docs/provider_fallback_and_settings_architecture.md` §4.1a](./provider_fallback_and_settings_architecture.md).
-- Weitere Kinds (freier lokaler Command/HTTP, Cloud) folgen in späteren
-  PRs und sind **heute nicht implementiert**.
+- Produktiv implementiert (Ist, PR 8): **`local_http`**. Allgemeiner
+  lokaler HTTP-Text-Provider. Postet an einen konfigurierten
+  Endpoint ein JSON-Objekt `{"<prompt_field>": "<input>", "stream": false}`
+  und liest das `<response_field>` aus der JSON-Antwort. Kein
+  Streaming, keine Tool-/Schema-Modes, kein TLS (`https://` wird
+  abgelehnt), kein Auth-Header. Nutzt denselben
+  `http_request`-Helfer wie der llamafile-Runtime; keine neue
+  Dependency. Konfigurierbar über `SMOLIT_LOCAL_HTTP_ENABLED` /
+  `SMOLIT_LOCAL_HTTP_ENDPOINT` (z. B.
+  `http://127.0.0.1:8080/completion`) /
+  `SMOLIT_LOCAL_HTTP_REQUEST_TIMEOUT_SECONDS` /
+  `SMOLIT_LOCAL_HTTP_PROMPT_FIELD` (Default `prompt`) /
+  `SMOLIT_LOCAL_HTTP_RESPONSE_FIELD` (Default `content`). Fehlerklassen
+  additiv in `text_provider_last_error`: `disabled`, `not_configured`,
+  `endpoint_scheme_unsupported`, `endpoint_unparseable`,
+  `http_connect_failed`, `http_error`, `timeout`, `empty_response`,
+  `invalid_response`.
+- Weitere Kinds (Cloud) folgen in späteren PRs und sind **heute
+  nicht implementiert**.
 
 ---
 
@@ -1192,6 +1400,20 @@ Kommandos auf:
 
 Damit sind Kokoro, Piper, Whisper.cpp, Vosk oder beliebige eigene Skripte
 einbindbar, ohne den Core zu verändern.
+
+Seit PR 6 läuft dieser Command-Pfad hinter einer kleinen Provider-
+Abstraktion
+([`crate::providers::stt`](../core/src/providers/stt.rs) /
+[`crate::providers::tts`](../core/src/providers/tts.rs)), strukturell
+analog zum Text-Resolver. Die Chain ist env-überschreibbar über
+`SMOLIT_STT_PROVIDER_CHAIN` / `SMOLIT_TTS_PROVIDER_CHAIN` und beginnt
+per Default mit dem einzigen heute implementierten Kind `command`.
+`App::handle_voice_once` und `App::handle_speak` gehen ausschließlich
+durch den Resolver — kein direkter Service-Call mehr. Bestehendes
+Verhalten (Timeouts, Fehlermeldungen, `available`-Semantik) bleibt
+byte-kompatibel; die Resolver-Sicht wird zusätzlich über die neuen
+`stt_provider_*` / `tts_provider_*`-Felder im StatusPayload (§2.3)
+projiziert.
 
 ---
 

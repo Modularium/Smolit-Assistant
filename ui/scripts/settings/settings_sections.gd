@@ -222,33 +222,89 @@ static func text_provider_lines(status: Dictionary) -> Array:
 		if configured == "llamafile_local" or active == "llamafile_local":
 			llamafile_note = "llamafile_local läuft als aktiver/konfigurierter Text-Provider."
 		lines.append(_row("Local fallback", llamafile_note, true))
+	# local_http-Sichtbarkeit (PR 8). Gleiche dreistufige Logik wie
+	# für llamafile: fehlt das Feld, bleibt der Abschnitt still; ist
+	# der Provider in der Kette, rendern wir ein paar defensive
+	# Detail-Zeilen; ist er nicht in der Kette, zeigen wir einen
+	# ehrlichen Hinweis (keine Fantasiedaten).
+	if status.has("local_http_in_chain"):
+		var lh_in_chain := _bool_or_default(status, "local_http_in_chain", false)
+		if lh_in_chain:
+			lines.append(_row("local_http", "in Chain"))
+			lines.append(_row("  enabled",
+				_bool_label(status, "local_http_enabled"),
+				not status.has("local_http_enabled")))
+			lines.append(_row("  configured (endpoint set)",
+				_bool_label(status, "local_http_configured"),
+				not status.has("local_http_configured")))
+		else:
+			var lh_note := "nicht in der Chain."
+			if _bool_or_default(status, "local_http_enabled", false):
+				lh_note = "enabled (via SMOLIT_LOCAL_HTTP_ENABLED), aber nicht in der Chain — Kette via SMOLIT_TEXT_PROVIDER_CHAIN ergänzen."
+			lines.append(_row("local_http", lh_note, true))
 	return lines
 
 
-## STT: heute nur die zwei Booleans aus StatusPayload.
+## STT: Legacy-Feature-Flags (enabled/available) **plus** die neuen
+## `stt_provider_*`-Felder aus PR 6. Die Resolver-Sicht rendert sich
+## nur, wenn das Core-Vokabular bekannt ist — alte Cores landen
+## stillschweigend auf dem Legacy-Minimalpfad.
 static func stt_lines(status: Dictionary) -> Array:
-	return [
-		_row("Enabled", _bool_label(status, "stt_enabled"),
-			not status.has("stt_enabled")),
-		_row("Available", _bool_label(status, "stt_available"),
-			not status.has("stt_available")),
-		_row("Provider-Auswahl",
-			"folgt in PR 4 (STT-/TTS-Provider-Settings).", true),
-	]
+	var lines: Array = []
+	lines.append(_row("Enabled", _bool_label(status, "stt_enabled"),
+		not status.has("stt_enabled")))
+	lines.append(_row("Available", _bool_label(status, "stt_available"),
+		not status.has("stt_available")))
+	if status.has("stt_provider_configured"):
+		lines.append_array(_audio_provider_lines(status, "stt_provider"))
+	else:
+		lines.append(_row("Provider",
+			"Core liefert keine stt_provider_*-Felder (alter Build).",
+			true))
+	return lines
 
 
-## TTS: zwei Booleans + `auto_speak`.
+## TTS: Legacy-Feature-Flags (enabled/available/auto_speak) **plus**
+## die neuen `tts_provider_*`-Felder aus PR 6.
 static func tts_lines(status: Dictionary) -> Array:
-	return [
-		_row("Enabled", _bool_label(status, "tts_enabled"),
-			not status.has("tts_enabled")),
-		_row("Available", _bool_label(status, "tts_available"),
-			not status.has("tts_available")),
-		_row("Auto speak", _bool_label(status, "auto_speak"),
-			not status.has("auto_speak")),
-		_row("Provider-Auswahl",
-			"folgt in PR 4 (STT-/TTS-Provider-Settings).", true),
-	]
+	var lines: Array = []
+	lines.append(_row("Enabled", _bool_label(status, "tts_enabled"),
+		not status.has("tts_enabled")))
+	lines.append(_row("Available", _bool_label(status, "tts_available"),
+		not status.has("tts_available")))
+	lines.append(_row("Auto speak", _bool_label(status, "auto_speak"),
+		not status.has("auto_speak")))
+	if status.has("tts_provider_configured"):
+		lines.append_array(_audio_provider_lines(status, "tts_provider"))
+	else:
+		lines.append(_row("Provider",
+			"Core liefert keine tts_provider_*-Felder (alter Build).",
+			true))
+	return lines
+
+
+## Gemeinsamer Renderer für die fünf `*_provider_*`-Felder einer
+## Audio-Achse. `prefix` ist `"stt_provider"` oder `"tts_provider"`.
+## Defensiv: fehlende Felder → Dash.
+static func _audio_provider_lines(status: Dictionary, prefix: String) -> Array:
+	var lines: Array = []
+	lines.append(_row("Configured",
+		_stringify_or_dash(status, prefix + "_configured")))
+	lines.append(_row("Active",
+		_stringify_or_dash(status, prefix + "_active")))
+	lines.append(_row("Availability",
+		_stringify_or_dash(status, prefix + "_availability")))
+	var last_error_key := prefix + "_last_error"
+	var last_error_raw: Variant = status.get(last_error_key, null)
+	if last_error_raw == null:
+		lines.append(_row("Last error", _DASH, true))
+	else:
+		lines.append(_row("Last error", str(last_error_raw)))
+	var cloud_key := prefix + "_cloud"
+	var cloud := _bool_or_default(status, cloud_key, false)
+	lines.append(_row("Cloud", "yes" if cloud else "no",
+		not status.has(cloud_key)))
+	return lines
 
 
 ## Privacy: heute nur der Cloud-Hinweis auf Text-Achse; STT/TTS haben
@@ -276,8 +332,21 @@ static func privacy_lines(status: Dictionary) -> Array:
 		else:
 			lines.append(_row("Text: lokaler Pfad",
 				"nur abrain in Chain — lokaler CLI-Pfad.", true))
-	lines.append(_row("STT/TTS Cloud",
-		_DASH + " (heute nicht modelliert)", true))
+	# STT/TTS-Cloud-Statuszeile. Seit PR 6 liefert der Core
+	# `stt_provider_cloud`/`tts_provider_cloud`; ältere Cores landen
+	# stillschweigend auf dem honest-„noch nicht modelliert"-Text.
+	if status.has("stt_provider_cloud") or status.has("tts_provider_cloud"):
+		var stt_cloud := _bool_or_default(status, "stt_provider_cloud", false)
+		var tts_cloud := _bool_or_default(status, "tts_provider_cloud", false)
+		var stt_label := "yes" if stt_cloud else "no"
+		var tts_label := "yes" if tts_cloud else "no"
+		lines.append(_row("STT Cloud aktiv", stt_label,
+			not status.has("stt_provider_cloud")))
+		lines.append(_row("TTS Cloud aktiv", tts_label,
+			not status.has("tts_provider_cloud")))
+	else:
+		lines.append(_row("STT/TTS Cloud",
+			_DASH + " (heute nicht modelliert)", true))
 	lines.append(_row("Offline-Only",
 		"nicht konfiguriert (kommt in Folge-PR)", true))
 	lines.append(_row("Secrets",

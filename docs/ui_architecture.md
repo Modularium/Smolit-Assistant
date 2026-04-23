@@ -1677,15 +1677,24 @@ Gerenderte Felder (StatusPayload-Quelle siehe `docs/api.md` §2.3):
   `llamafile_in_chain`-Feld fallen stillschweigend auf den
   PR-3-Sammelhinweis zurück.
 - **STT / TTS** — `stt_enabled` / `stt_available` bzw. `tts_enabled` /
-  `tts_available` / `auto_speak`. Pro Abschnitt ein Hinweis, dass die
-  eigentliche Provider-Auswahl erst mit PR 4 kommt.
+  `tts_available` / `auto_speak` als Legacy-Feature-Flags. Seit PR 6
+  zusätzlich die fünf Resolver-Zeilen pro Achse: `Configured`,
+  `Active`, `Availability`, `Last error`, `Cloud`. Gerendert über
+  den gemeinsamen Helfer `_audio_provider_lines(status, prefix)` in
+  [`ui/scripts/settings/settings_sections.gd`](../ui/scripts/settings/settings_sections.gd).
+  Fehlen die neuen `*_provider_*`-Felder (alter Core), bleibt eine
+  ehrliche Fallback-Zeile „Core liefert keine `stt_provider_*`/
+  `tts_provider_*`-Felder" stehen.
 - **Privacy** — Cloud-Flag für Text-Achse. Seit PR 4 zusätzlich
   eine „Text: lokaler Pfad"-Zeile, die
   `text_provider_cloud` + `llamafile_in_chain` + `llamafile_enabled`
   zu einer ehrlichen Lokal-Aussage verdichtet (aktiver Lokalpfad
-  vs. „in Chain, aber disabled" vs. „nur abrain in Chain"). Weitere
-  Zeilen bleiben Platzhalter für STT/TTS-Cloud (noch nicht
-  modelliert), Offline-Only und Secrets (PR 5).
+  vs. „in Chain, aber disabled" vs. „nur abrain in Chain"). Seit
+  PR 6 zwei separate Cloud-Zeilen für STT und TTS, sobald die
+  `stt_provider_cloud` / `tts_provider_cloud`-Felder im Status
+  vorhanden sind; fallbackweise bleibt die Legacy-Sammelzeile
+  „STT/TTS Cloud — noch nicht modelliert" erhalten. Weitere Zeilen
+  bleiben Platzhalter für Offline-Only und Secrets (PR 5).
 - **Connection / Status** — `IPC (connected/disconnected)`,
   `ipc_enabled`, `interaction_enabled`, `interaction_backend`,
   `approval_timeout_seconds`, `accessibility_probe` (+ optional
@@ -1778,10 +1787,113 @@ Sicherheitsgrenzen für diese erste editierbare Fläche:
 - **Kein UI-seitiger Secret-Store.** Der Core bleibt einziger
   Persistenz-Ort.
 
+### 8d.5b STT-/TTS-Settings-Editor (PR 7, Ist-Zustand)
+
+PR 7 zieht die PR-5-Linie auf die Audio-Achsen, bewusst kleiner
+gehalten: **direkt unter dem jeweiligen Read-only Readout** rendert
+der Controller einen eigenen „stt · Edit"- bzw. „tts · Edit"-Block.
+
+- **Enabled (STT/TTS)** — `CheckBox` spiegelt
+  `SMOLIT_STT_ENABLED` bzw. `SMOLIT_TTS_ENABLED`.
+- **Command (STT/TTS)** — `LineEdit` mit Tooltip „Wird nicht in Logs
+  ausgegeben". Leer/whitespace löscht den Command; leeres Feld beim
+  Apply sendet `null`, damit ein versehentlich leer geklicktes Feld
+  den konfigurierten Wert nicht löscht (analog zum Llamafile-Pfad).
+- **Auto-speak (nur TTS)** — `CheckBox` spiegelt `SMOLIT_AUTO_SPEAK`.
+  Ergänzt den bestehenden read-only Readout; der Wert wandert
+  zusammen mit `enabled`/`command` als ein einziger
+  `settings_set_tts_config`-Aufruf an den Core.
+- **Apply / Probe / Status-Labels** — Symmetrisch zum Llamafile-
+  Block. Die Probe-Antwort kommt weiterhin als
+  `settings_probe_result_received`, trägt jetzt aber ein `axis`-Feld
+  (`"stt"` / `"tts"` / `"llamafile"`) und wird im Panel in den
+  passenden Block geroutet; ältere Cores ohne `axis` fallen auf den
+  Llamafile-Block zurück (Backwards-Kompatibilität).
+
+Defensive Regeln:
+
+- Das `command`-Feld wird **nicht** aus dem StatusPayload
+  vorbelegt — die Shell hält keinen zweiten Wahrheits-Anker. Die
+  Probe-Ergebnisse zeigen über `configured=true/false`, ob der Core
+  einen Command konfiguriert findet.
+- STT-/TTS-Probes lösen weder Mikrofon-Aufnahme noch Audio-Output
+  aus. Der Core prüft ausschließlich Chain/Enabled/Command-Parsing +
+  Filesystem-Status des ersten Tokens.
+
+EventBus-/IPC-Erweiterungen (additiv, PR 7):
+
+- Neue Client-Methoden in
+  [`ui/autoload/ipc_client.gd`](../ui/autoload/ipc_client.gd):
+  `settings_set_stt_config(enabled, command=null)`,
+  `settings_set_tts_config(enabled, command=null, auto_speak=null)`,
+  `settings_probe_stt()`, `settings_probe_tts()`.
+- Der bestehende `settings_probe_result_received`-Signal-Payload
+  trägt jetzt zusätzlich `axis`; andere Felder unverändert.
+
+Sicherheitsgrenzen erweitert um:
+
+- **Kein Command-Leak.** Der Command-String taucht weder in Logs
+  noch im `settings_probe_result` noch im `error`-Envelope auf.
+  Gleiche Posture wie der Llamafile-Pfad.
+- **Kein Mikrofon-/Audio-Zugriff in der Probe.**
+
+### 8d.5c local_http-Settings-Editor (PR 8, Ist-Zustand)
+
+PR 8 zieht die Editor-Linie auf die Text-Achse in der Breite: neben
+dem bestehenden `llamafile_local`-Block rendert die Settings-Shell
+direkt darunter einen zweiten „local_http · Edit"-Block. Scope
+bewusst klein, loopback-first.
+
+- **Enabled** — `CheckBox` spiegelt `SMOLIT_LOCAL_HTTP_ENABLED`.
+- **Endpoint** — `LineEdit` mit Tooltip „Wird nicht in Logs
+  ausgegeben". Leer/whitespace löscht den Endpoint; leeres Feld
+  beim Apply sendet `null` (Wert unverändert), analog zum
+  Llamafile-Pfad. `https://` wird vom Core abgelehnt — die UI
+  leitet das 1:1 als Probe-Klasse `endpoint_scheme_unsupported`
+  weiter, ohne eigene Fehlerlogik.
+- **Apply / Probe / Status-Labels** — Symmetrisch zum Llamafile-
+  Block. Der Probe-Button löst einen reinen TCP-Connect-Check
+  aus; es werden **keine** Prompt-Daten gesendet. Das
+  `settings_probe_result` trägt `axis="local_http"` und wird im
+  passenden Block angezeigt.
+
+Defensive Regeln:
+
+- Das `endpoint`-Feld wird **nicht** aus dem StatusPayload
+  vorbelegt — die Shell hält keinen zweiten Wahrheits-Anker für
+  Pfad-artige Werte.
+- Request-Timeout ist in dieser Stufe nicht editierbar — das
+  bleibt env-/Startup-gesteuert, damit der Erst-Editor klein
+  bleibt.
+- Chain-Reihenfolge bleibt env-gesteuert
+  (`SMOLIT_TEXT_PROVIDER_CHAIN`); die UI editiert nur die
+  Per-Kind-Konfiguration.
+
+EventBus-/IPC-Erweiterungen (additiv, PR 8):
+
+- Neue Client-Methoden in
+  [`ui/autoload/ipc_client.gd`](../ui/autoload/ipc_client.gd):
+  `settings_set_local_http_config(enabled, endpoint=null, request_timeout_seconds=null)`,
+  `settings_probe_local_http()`.
+- Der `settings_probe_result_received`-Payload trägt
+  `axis="local_http"` für das Routing; andere Felder unverändert.
+
+Sicherheitsgrenzen erweitert um:
+
+- **Kein Endpoint-Leak.** Die Endpoint-URL taucht weder in Logs
+  noch im `settings_probe_result` noch im `error`-Envelope auf.
+- **Kein Completion-Roundtrip in der Probe.** Die Probe macht
+  ausschließlich einen TCP-Connect — kein Prompt, keine
+  LLM-Inferenz.
+- **Kein TLS.** Die UI akzeptiert HTTP-URLs; der Core lehnt
+  `https://` hart ab, weil PR 8 keine TLS-/Trust-Infrastruktur
+  mitbringt.
+
 ### 8d.6 Verifikation
 
-- `scripts/settings_shell_smoke.gd` (103 Assertions, alle PASS —
-  +15 gegenüber PR 4, +33 gegenüber PR 3): Section-Reihenfolge,
+- `scripts/settings_shell_smoke.gd` (154 Assertions, alle PASS —
+  +18 gegenüber PR 7, +36 gegenüber PR 6, +51 gegenüber PR 5,
+  +66 gegenüber PR 4, +84 gegenüber PR 3): Section-Reihenfolge,
   Slug-Eindeutigkeit, defensive `*_lines`-Renderer für leere /
   partielle / vollständige StatusPayloads inklusive PR-4-Felder
   (`text_provider_chain`, `llamafile_in_chain`, `llamafile_lifecycle`,
@@ -1797,13 +1909,32 @@ Sicherheitsgrenzen für diese erste editierbare Fläche:
   Probe-Ergebnisse werden 1:1 mit Core-Tag gerendert, Pfad-Leak-
   Disziplin im Probe-Label verifiziert. Harness-Case
   `settings-shell-smoke` in `scripts/run_overlay_verification.sh`.
-- Core-Tests (PR 5 gelandet): 150 PASS (+15 gegenüber PR 4) — sechs
-  Unit-Tests im neuen Modul `settings_store`, vier IPC-Server-Tests
-  für Schreib-/Probe-Pfade (Apply-Echo, Unknown-Mode-Reject,
-  Probe-`not_configured`, Probe-`path_missing` ohne Leak,
-  Probe-`ok` für `/bin/true`), vier Protocol-Tests für die
-  zugehörigen `IncomingMessage`/`OutgoingMessage`-Varianten, plus
-  ein Mode-Validator-Test im `config`-Modul.
+- Core-Tests (PR 8 gelandet): 210 PASS (+25 gegenüber PR 7,
+  +40 gegenüber PR 6, +60 gegenüber PR 5). Zusätzlich zur
+  PR-7-Basis: neun Unit-Tests im Text-Provider-Modul für
+  `local_http` (Endpoint-Parser mit `https://`-Rejection, User-
+  Info-Rejection, Port-Default, Non-200-Pfad), drei neue
+  `settings_store`-Unit-Tests für den Override-Roundtrip, drei
+  neue Protocol-Parser-Tests (`settings_set_local_http_config`
+  full/minimal + `settings_probe_local_http`), fünf neue
+  IPC-Ende-zu-Ende-Tests (Apply-Echo ohne Endpoint-Leak,
+  Zero-Timeout-Reject, Probe `not_configured`/
+  `endpoint_scheme_unsupported` ohne Leak,
+  `http_connect_failed`/`timeout` bei geschlossenem Port). Der
+  zugehörige UI-Smoke ergänzt vier Blöcke
+  (Editor-Bau + Sync, axis-Routing zum local_http-Label,
+  Scheme-unsupported ohne Leak, `text_provider_lines`-
+  Sichtbarkeit für `local_http_in_chain`). Weiter ab PR 7: zusätzlich
+  zur PR-6-Basis:
+  vier neue `settings_store`-Unit-Tests für die STT-/TTS-Override-
+  Roundtrips und Apply-Merge-Semantik, fünf neue Protocol-Parser-
+  Tests für `settings_set_{stt,tts}_config` /
+  `settings_probe_{stt,tts}` inklusive `axis`-Feld im Encoded-
+  Probe-Result, fünf neue IPC-Ende-zu-Ende-Tests (`settings_set_*`-
+  Echo, Probe-Ergebnisse mit `axis`-Tag, Secret-Disziplin:
+  Command-String leakt weder in `message` noch in `class`). Die
+  STT-/TTS-Probe-Tests laufen weiterhin gegen `/bin/true` / `/bin/false`
+  als Dummy-Kommandos — keine Audio-Hardware nötig.
 - Bestehende Smokes (`visual-action-mode-smoke`,
   `avatar-render-polish-smoke`, `avatar-appearance-smoke`,
   `avatar-identity-smoke`, `avatar-template-capabilities-smoke`,

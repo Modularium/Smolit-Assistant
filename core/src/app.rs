@@ -18,8 +18,9 @@ use crate::approvals::{
     ApprovalDecision, ApprovalRequest, ApprovalResolvedPayload, PendingApprovalError,
     PendingApprovalRegistry,
 };
-use crate::audio::{SttService, TtsService};
-use crate::config::{validate_llamafile_mode, Config, LlamafileConfig};
+use crate::config::{
+    validate_llamafile_mode, AudioConfig, Config, LlamafileConfig, LocalHttpConfig,
+};
 use crate::interaction::{
     AccessibilityDiscovery, AccessibilityProbe, CommandBackend, CommandBackendConfig,
     InteractionAction, InteractionExecutor, InteractionKind, InteractionPolicy, SelectedTarget,
@@ -28,19 +29,39 @@ use crate::interaction::{
 use crate::ipc::protocol::{
     InteractionFocusTarget, OutgoingMessage, TargetClearedPayload, TargetSelectedPayload,
 };
+use crate::providers::stt::{
+    SttProviderChainItem, SttProviderError, SttProviderResolver,
+};
 use crate::providers::text::{
-    LlamafileConfigView, TextProviderChainItem, TextProviderError, TextProviderResolver,
+    LlamafileConfigView, LocalHttpConfigView, TextProviderChainItem, TextProviderError,
+    TextProviderResolver,
 };
 #[cfg(test)]
 use crate::providers::text::TextProviderRuntimeStatus;
+use crate::providers::tts::{
+    TtsProviderChainItem, TtsProviderError, TtsProviderResolver,
+};
 use crate::settings_store;
 
 const EVENTS_CHANNEL_CAPACITY: usize = 256;
 
 pub struct App {
     pub config: Config,
-    pub tts: TtsService,
-    pub stt: SttService,
+    /// TTS-Provider-Resolver (PR 6). Spiegelt den Text-Pfad:
+    /// `handle_speak` / `maybe_auto_speak` gehen durch die Kette;
+    /// heute ist das einzige Kind `command` — byte-kompatibel zum
+    /// bisherigen `SMOLIT_TTS_CMD`-Verhalten.
+    ///
+    /// Seit PR 7 hinter einem `RwLock`, damit
+    /// `settings_set_tts_config` den Resolver beim Schreibpfad atomar
+    /// durch eine frisch aus [`AudioConfig`] gebaute Kette ersetzen
+    /// kann — gleiche Semantik wie `text_provider`. Externe Callsites
+    /// nutzen [`App::current_tts`] für einen kurzen Clone unter Read-
+    /// Lock.
+    tts: RwLock<Arc<TtsProviderResolver>>,
+    /// STT-Provider-Resolver (PR 6). `handle_voice_once` geht durch
+    /// die Kette. Seit PR 7 analog zu `tts` hinter einem `RwLock`.
+    stt: RwLock<Arc<SttProviderResolver>>,
     interaction: InteractionExecutor<CommandBackend>,
     action_counter: AtomicU64,
     approval_counter: AtomicU64,
@@ -75,6 +96,24 @@ pub struct App {
     /// `settings_set_llamafile_config` werden hier gespiegelt und in
     /// den StatusPayload projiziert.
     live_llamafile: Mutex<LlamafileConfig>,
+    /// Laufender editierbarer Stand der Local-HTTP-Config (PR 8).
+    /// Spiegel zu `live_llamafile`: startet mit der Config +
+    /// Override-Merge und wird bei jedem `settings_set_local_http_config`
+    /// aktualisiert. Resolver-Rebuild-Geometrie identisch zum
+    /// Llamafile-Pfad; der alte Resolver-`Arc` lebt weiter, bis alle
+    /// laufenden `handle_text_query`-Aufrufe fertig sind.
+    live_local_http: Mutex<LocalHttpConfig>,
+    /// Laufender editierbarer Stand der AudioConfig (PR 7). Startet als
+    /// Kopie von `config.audio`, gemischt mit STT-/TTS-Overrides aus dem
+    /// Settings-Store. Nur die UI-editierbaren Felder
+    /// (`stt_enabled`/`stt_cmd`/`tts_enabled`/`tts_cmd`/`auto_speak`)
+    /// werden durch `settings_set_{stt,tts}_config` verändert; Timeouts
+    /// und Provider-Chains bleiben unverändert auf Startup-Werten.
+    /// `build_status_payload`, `handle_speak`, `maybe_auto_speak` und
+    /// `handle_voice_once` lesen nicht aus diesem Feld — die Resolver
+    /// werden bei jedem Audio-Write neu instanziiert, wodurch sich der
+    /// neue Stand byte-kompatibel in `self.stt` / `self.tts` spiegelt.
+    live_audio: Mutex<AudioConfig>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -158,6 +197,43 @@ pub struct StatusPayload {
     /// llamafile-Prozess wieder stoppt. Nur gesetzt, wenn
     /// `llamafile_in_chain` gilt.
     pub llamafile_idle_timeout_seconds: Option<u64>,
+    // --- STT Provider (PR 6, additiv) ------------------------------
+    /// Primärer (konfigurierter) STT-Provider-Kind-Name. `"none"`
+    /// wenn die Kette leer aufgelöst wurde. Default `"command"`.
+    pub stt_provider_configured: String,
+    /// Kind des STT-Providers, der den **letzten** erfolgreichen
+    /// `voice_once`-Request beantwortet hat. Leer bis zum ersten
+    /// erfolgreichen Aufruf.
+    pub stt_provider_active: String,
+    /// `"available"` / `"unavailable"` / `"fallback_active"` — gleiche
+    /// Semantik wie `text_provider_availability`. Nominell `"available"`,
+    /// sobald der Primärprovider bereit ist (enabled + Command gesetzt).
+    pub stt_provider_availability: String,
+    /// Kurze, stabile Fehlerklasse nach komplett fehlgeschlagenem Run
+    /// (`disabled` / `not_configured` / `timeout` / `process_missing` /
+    /// `exit_nonzero` / `empty_response` / `invalid_response` /
+    /// `unknown`). `None` im Erfolgsfall.
+    pub stt_provider_last_error: Option<String>,
+    /// Ob der zuletzt aktive STT-Provider Cloud-Komponenten hat. Heute
+    /// immer `false` (kein Cloud-Kind implementiert).
+    pub stt_provider_cloud: bool,
+    // --- TTS Provider (PR 6, additiv) ------------------------------
+    pub tts_provider_configured: String,
+    pub tts_provider_active: String,
+    pub tts_provider_availability: String,
+    pub tts_provider_last_error: Option<String>,
+    pub tts_provider_cloud: bool,
+    // --- Local-HTTP-Provider (PR 8, additiv) -----------------------
+    /// Ob `local_http` Teil der aktuellen Text-Provider-Kette ist.
+    /// Bei `false` sind die übrigen `local_http_*`-Felder bedeutungslos
+    /// — analog zu `llamafile_in_chain`.
+    pub local_http_in_chain: bool,
+    /// Ausgewerteter Master-Schalter (`SMOLIT_LOCAL_HTTP_ENABLED`).
+    /// Unabhängig davon, ob der Provider in der Kette steht.
+    pub local_http_enabled: bool,
+    /// `enabled` **und** ein nicht-leerer Endpoint. Die ehrliche
+    /// „konfigurierte"-Grenze, analog zu `llamafile_configured`.
+    pub local_http_configured: bool,
 }
 
 /// Eingabe-Payload für `settings_set_llamafile_config` (PR 5).
@@ -178,16 +254,23 @@ pub struct SettingsLlamafileUpdate {
     pub path: Option<String>,
 }
 
-/// Ergebnis einer `settings_probe_llamafile`-Anfrage (PR 5). Bewusst
-/// schmal: keine Pfad-/Fehler-Freitexte, nur ein kleiner, stabiler
-/// Tag plus eine kurze menschenlesbare Meldung, die **nie** den
-/// Binary-Pfad oder andere sensitive Werte enthält.
+/// Ergebnis einer `settings_probe_*`-Anfrage (PR 5 für Llamafile,
+/// PR 7 für STT/TTS). Bewusst schmal: keine Pfad-/Fehler-Freitexte,
+/// nur ein kleiner, stabiler Tag plus eine kurze menschenlesbare
+/// Meldung, die **nie** Binary-Pfade, Command-Argumente, Cloud-Keys
+/// oder Roh-Fehlerstrings enthält.
 #[derive(Debug, Clone, Serialize)]
 pub struct SettingsProbeResultPayload {
-    /// True nur, wenn der Provider in der Kette steht, enabled ist,
-    /// einen Pfad hat, das Binary existiert und ausführbar ist.
+    /// Welche Achse geprüft wurde. `"llamafile"` (PR 5),
+    /// `"stt"` oder `"tts"` (PR 7). Das Feld ist additiv und erlaubt
+    /// der UI, eine Probe gezielt in den richtigen Settings-Abschnitt
+    /// zu routen, ohne Anfrage-zu-Antwort-Korrelation zu tracken.
+    pub axis: String,
+    /// True nur, wenn der Provider in der Kette steht, enabled ist
+    /// und der Preflight-Check (Pfad / Command existiert + ausführbar)
+    /// erfolgreich war.
     pub ok: bool,
-    /// Kurzer, stabiler Klassen-Tag. Werte:
+    /// Kurzer, stabiler Klassen-Tag. Werte für Llamafile:
     ///
     ///   * `"ok"` — Binary vorhanden, ausführbar, Config konsistent.
     ///   * `"not_in_chain"` — `llamafile_local` steht nicht in der
@@ -198,22 +281,97 @@ pub struct SettingsProbeResultPayload {
     ///   * `"path_not_file"` — Pfad zeigt auf ein Verzeichnis o. ä.
     ///   * `"path_not_executable"` — Datei existiert, aber ohne
     ///     Execute-Bit (Unix).
+    ///
+    /// Werte für STT/TTS (PR 7, Sub-Set mit kurzer Erklärung):
+    ///
+    ///   * `"ok"` — Kind in Kette, enabled, Command liegt vor, erster
+    ///     Token existiert und ist ausführbar.
+    ///   * `"not_in_chain"` — `command` steht nicht in der Kette.
+    ///   * `"disabled"` — Master-Flag aus.
+    ///   * `"not_configured"` — enabled, aber Command leer / unset.
+    ///   * `"command_unparseable"` — Command-String nach `split` leer
+    ///     (z. B. nur Quotes).
+    ///   * `"path_missing"` — erster Token existiert nicht als Datei.
+    ///   * `"path_not_file"` — erster Token ist ein Verzeichnis.
+    ///   * `"path_not_executable"` — erster Token ist eine Datei ohne
+    ///     Execute-Bit.
     pub class: String,
     /// Kurze, menschenlesbare Begründung. **Enthält keinen Pfad,
     /// kein Secret und keinen Roh-Fehlerstring.**
     pub message: String,
-    /// Aktueller Lifecycle des Providers, falls er in der Kette steht.
-    /// `null`, wenn nicht in der Kette.
+    /// Aktueller Lifecycle des Providers (nur für Llamafile), falls er
+    /// in der Kette steht. `null` sonst — STT/TTS-Kommandos haben
+    /// heute kein Lifecycle-Modell (spawn-on-demand).
     pub lifecycle: Option<String>,
     pub in_chain: bool,
     pub enabled: bool,
     pub configured: bool,
 }
 
+/// Eingabe-Payload für `settings_set_local_http_config` (PR 8).
+/// `enabled` ist Pflicht; `endpoint` optional — `None` lässt den
+/// bisherigen Wert stehen, `Some("")` / nur Whitespace löscht ihn,
+/// `Some("http://host:port/path")` ersetzt ihn. `request_timeout_seconds`
+/// ist optional; `None` lässt den Wert unverändert, `Some(0)` wird
+/// als Fehler abgelehnt.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SettingsLocalHttpUpdate {
+    pub enabled: bool,
+    #[serde(default)]
+    pub endpoint: Option<String>,
+    #[serde(default)]
+    pub request_timeout_seconds: Option<u64>,
+}
+
+/// Eingabe-Payload für `settings_set_stt_config` (PR 7). `enabled` ist
+/// Pflicht; `command` ist optional — `None` lässt den bisherigen Wert
+/// stehen, `Some("")` / nur Whitespace löscht ihn, `Some("whisper …")`
+/// ersetzt ihn.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SettingsSttUpdate {
+    pub enabled: bool,
+    #[serde(default)]
+    pub command: Option<String>,
+}
+
+/// Eingabe-Payload für `settings_set_tts_config` (PR 7). Spiegel zu
+/// [`SettingsSttUpdate`] plus dem TTS-spezifischen `auto_speak`-Flag.
+/// `auto_speak` ist optional: wer nur enabled/command ändert, muss das
+/// Feld nicht senden — der bisherige Wert bleibt erhalten.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SettingsTtsUpdate {
+    pub enabled: bool,
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub auto_speak: Option<bool>,
+}
+
 impl App {
     pub fn new(config: Config) -> Self {
-        let tts = TtsService::new(&config.audio);
-        let stt = SttService::new(&config.audio);
+        // STT-/TTS-Provider-Resolver (PR 6). Command-Kind bleibt Default,
+        // die Chain wird aus der Config gelesen (env-überschreibbar).
+        let stt_chain: Vec<SttProviderChainItem> = config
+            .audio
+            .stt_provider_chain
+            .iter()
+            .map(|k| SttProviderChainItem { kind: k.clone() })
+            .collect();
+        let tts_chain: Vec<TtsProviderChainItem> = config
+            .audio
+            .tts_provider_chain
+            .iter()
+            .map(|k| TtsProviderChainItem { kind: k.clone() })
+            .collect();
+        // PR 7 — vor dem Resolver-Bau die STT/TTS-Overrides laden und
+        // in die live-AudioConfig mergen, damit der Primär-Provider
+        // schon beim Start den persistierten Nutzer-Zustand reflektiert.
+        let stt_override = settings_store::load_stt_override();
+        let tts_override = settings_store::load_tts_override();
+        let live_audio_stage = settings_store::apply_stt_override(config.audio.clone(), &stt_override);
+        let live_audio_initial = settings_store::apply_tts_override(live_audio_stage, &tts_override);
+        let stt = Arc::new(SttProviderResolver::from_chain(&stt_chain, &live_audio_initial));
+        let tts = Arc::new(TtsProviderResolver::from_chain(&tts_chain, &live_audio_initial));
 
         let backend = CommandBackend::new(CommandBackendConfig {
             open_app_cmd_template: config.interaction.open_app_cmd_template.clone(),
@@ -246,17 +404,26 @@ impl App {
             &override_file,
         );
         let llamafile_view = llamafile_view_from(&live_llamafile);
+        // PR 8: Local-HTTP-Config analog zum Llamafile-Pfad laden und
+        // mit dem persistierten Override verschmelzen.
+        let local_http_override = settings_store::load_local_http_override();
+        let live_local_http = settings_store::apply_local_http_override(
+            config.text_provider.local_http.clone(),
+            &local_http_override,
+        );
+        let local_http_view = local_http_view_from(&live_local_http);
         let text_provider = Arc::new(TextProviderResolver::from_chain(
             &chain,
             &config.abrain_cmd,
             &llamafile_view,
+            &local_http_view,
         ));
         let abrain_cmd = config.abrain_cmd.clone();
 
         Self {
             config,
-            tts,
-            stt,
+            tts: RwLock::new(tts),
+            stt: RwLock::new(stt),
             interaction,
             action_counter: AtomicU64::new(0),
             approval_counter: AtomicU64::new(0),
@@ -268,7 +435,27 @@ impl App {
             text_provider_chain: chain,
             abrain_cmd,
             live_llamafile: Mutex::new(live_llamafile),
+            live_audio: Mutex::new(live_audio_initial),
+            live_local_http: Mutex::new(live_local_http),
         }
+    }
+
+    /// Klon-Snapshot des aktuell aktiven STT-Resolvers. Siehe
+    /// [`App::current_resolver`] für die Semantik — der Read-Lock
+    /// wird nur kurz gehalten, Callsites dürfen den `Arc` unbegrenzt
+    /// behalten.
+    pub fn current_stt(&self) -> Arc<SttProviderResolver> {
+        self.stt
+            .read()
+            .expect("stt resolver lock poisoned")
+            .clone()
+    }
+
+    pub fn current_tts(&self) -> Arc<TtsProviderResolver> {
+        self.tts
+            .read()
+            .expect("tts resolver lock poisoned")
+            .clone()
     }
 
     /// Read-only-Snapshot des Text-Provider-Laufzeit-Status — für
@@ -407,18 +594,34 @@ impl App {
     }
 
     pub async fn handle_voice_once(&self) -> Result<String> {
-        self.stt.listen_once().await
+        let resolver = self.current_stt();
+        resolver
+            .run()
+            .await
+            .map_err(|err: SttProviderError| anyhow::anyhow!(err))
     }
 
     pub async fn handle_speak(&self, text: &str) -> Result<()> {
-        self.tts.speak(text).await
+        let resolver = self.current_tts();
+        resolver
+            .run(text)
+            .await
+            .map_err(|err: TtsProviderError| anyhow::anyhow!(err))
     }
 
     pub async fn maybe_auto_speak(&self, text: &str) {
-        if !self.config.audio.auto_speak || !self.tts.is_available() {
+        // Auto-Speak liest den live-Stand (PR 7); ein Settings-Write
+        // wirkt also ohne Core-Neustart.
+        let auto_speak = self
+            .live_audio
+            .lock()
+            .expect("live audio mutex poisoned")
+            .auto_speak;
+        let resolver = self.current_tts();
+        if !auto_speak || !resolver.is_available() {
             return;
         }
-        if let Err(err) = self.tts.speak(text).await {
+        if let Err(err) = resolver.run(text).await {
             warn!(error = %err, "auto-speak TTS failed");
         }
     }
@@ -727,8 +930,15 @@ impl App {
     }
 
     pub fn build_status_payload(&self) -> StatusPayload {
-        let tts = self.tts.state();
-        let stt = self.stt.state();
+        // Feature-States (enabled/available) kommen jetzt vom
+        // Primärprovider der jeweiligen Achse — byte-kompatibel zum
+        // bisherigen `SttService::state()`/`TtsService::state()`.
+        let stt_resolver = self.current_stt();
+        let tts_resolver = self.current_tts();
+        let tts = tts_resolver.feature_state();
+        let stt = stt_resolver.feature_state();
+        let stt_provider = stt_resolver.status();
+        let tts_provider = tts_resolver.status();
         let probe = AccessibilityProbe::detect();
         let resolver = self.current_resolver();
         let text_provider = resolver.status();
@@ -779,12 +989,32 @@ impl App {
                 (None, None, None)
             };
 
+        // Local-HTTP-Projektion (PR 8). Liest den live-Stand; das
+        // Endpoint-Feld selbst wandert **nicht** in den StatusPayload
+        // (Secret-Disziplin analog zum Llamafile-Pfad).
+        let local_http_in_chain = chain.iter().any(|k| k == "local_http");
+        let local_http_cfg = self
+            .live_local_http
+            .lock()
+            .expect("live local_http mutex poisoned")
+            .clone();
+        let local_http_endpoint_present = local_http_cfg
+            .endpoint
+            .as_deref()
+            .map(|e| !e.trim().is_empty())
+            .unwrap_or(false);
+        let local_http_configured = local_http_cfg.enabled && local_http_endpoint_present;
+
         StatusPayload {
             tts_enabled: tts.enabled,
             tts_available: tts.available,
             stt_enabled: stt.enabled,
             stt_available: stt.available,
-            auto_speak: self.config.audio.auto_speak,
+            auto_speak: self
+                .live_audio
+                .lock()
+                .expect("live audio mutex poisoned")
+                .auto_speak,
             ipc_enabled: self.config.ipc.enabled,
             interaction_enabled: self.config.interaction.enabled,
             interaction_backend: self.config.interaction.backend.clone(),
@@ -803,6 +1033,19 @@ impl App {
             llamafile_lifecycle,
             llamafile_mode,
             llamafile_idle_timeout_seconds,
+            stt_provider_configured: stt_provider.configured,
+            stt_provider_active: stt_provider.active,
+            stt_provider_availability: stt_provider.availability,
+            stt_provider_last_error: stt_provider.last_error,
+            stt_provider_cloud: stt_provider.cloud,
+            tts_provider_configured: tts_provider.configured,
+            tts_provider_active: tts_provider.active,
+            tts_provider_availability: tts_provider.availability,
+            tts_provider_last_error: tts_provider.last_error,
+            tts_provider_cloud: tts_provider.cloud,
+            local_http_in_chain,
+            local_http_enabled: local_http_cfg.enabled,
+            local_http_configured,
         }
     }
 
@@ -901,12 +1144,20 @@ impl App {
         }
 
         // Resolver rebuilden. Die Chain-Items sind immutable seit
-        // Startup; nur die Llamafile-View ändert sich.
+        // Startup; Llamafile- und Local-HTTP-View werden jeweils aus
+        // dem aktuellen live-Stand projiziert.
         let new_view = llamafile_view_from(&merged);
+        let local_http_view = local_http_view_from(
+            &self
+                .live_local_http
+                .lock()
+                .expect("live local_http mutex poisoned"),
+        );
         let new_resolver = Arc::new(TextProviderResolver::from_chain(
             &self.text_provider_chain,
             &self.abrain_cmd,
             &new_view,
+            &local_http_view,
         ));
 
         // Atomar ersetzen. Der alte Arc lebt weiter, solange andere
@@ -967,87 +1218,485 @@ impl App {
             None
         };
 
+        // PR 7: kleine Helfer, damit die sieben Result-Varianten den
+        // neuen `axis`-Tag ohne Copy-Paste-Druck tragen.
+        let build = |ok: bool, class: &str, message: &str| SettingsProbeResultPayload {
+            axis: "llamafile".into(),
+            ok,
+            class: class.into(),
+            message: message.into(),
+            lifecycle: lifecycle.clone(),
+            in_chain,
+            enabled,
+            configured,
+        };
+
         if !in_chain {
-            return SettingsProbeResultPayload {
-                ok: false,
-                class: "not_in_chain".into(),
-                message: "llamafile_local is not in the configured text provider chain".into(),
-                lifecycle,
-                in_chain,
-                enabled,
-                configured,
-            };
+            return build(
+                false,
+                "not_in_chain",
+                "llamafile_local is not in the configured text provider chain",
+            );
         }
         if !enabled {
-            return SettingsProbeResultPayload {
-                ok: false,
-                class: "disabled".into(),
-                message: "llamafile_local is disabled (master flag off)".into(),
-                lifecycle,
-                in_chain,
-                enabled,
-                configured,
-            };
+            return build(false, "disabled", "llamafile_local is disabled (master flag off)");
         }
         let Some(path_value) = cfg.path.as_deref().map(str::trim).filter(|p| !p.is_empty())
         else {
-            return SettingsProbeResultPayload {
-                ok: false,
-                class: "not_configured".into(),
-                message: "llamafile_local is enabled but has no binary path configured".into(),
-                lifecycle,
-                in_chain,
-                enabled,
-                configured,
-            };
+            return build(
+                false,
+                "not_configured",
+                "llamafile_local is enabled but has no binary path configured",
+            );
         };
 
         match std::fs::metadata(path_value) {
-            Err(_) => SettingsProbeResultPayload {
-                ok: false,
-                class: "path_missing".into(),
-                message: "configured binary path does not exist".into(),
-                lifecycle,
-                in_chain,
-                enabled,
-                configured,
-            },
-            Ok(meta) if !meta.is_file() => SettingsProbeResultPayload {
-                ok: false,
-                class: "path_not_file".into(),
-                message: "configured binary path is not a regular file".into(),
-                lifecycle,
-                in_chain,
-                enabled,
-                configured,
-            },
+            Err(_) => build(false, "path_missing", "configured binary path does not exist"),
+            Ok(meta) if !meta.is_file() => build(
+                false,
+                "path_not_file",
+                "configured binary path is not a regular file",
+            ),
             Ok(meta) => {
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
                     if meta.permissions().mode() & 0o111 == 0 {
-                        return SettingsProbeResultPayload {
-                            ok: false,
-                            class: "path_not_executable".into(),
-                            message: "configured binary is present but not executable".into(),
-                            lifecycle,
-                            in_chain,
-                            enabled,
-                            configured,
-                        };
+                        return build(
+                            false,
+                            "path_not_executable",
+                            "configured binary is present but not executable",
+                        );
                     }
                 }
                 let _ = meta; // silence unused on non-unix
-                SettingsProbeResultPayload {
-                    ok: true,
-                    class: "ok".into(),
-                    message: "llamafile_local looks ready (binary present, executable)".into(),
-                    lifecycle,
-                    in_chain,
-                    enabled,
-                    configured,
+                build(true, "ok", "llamafile_local looks ready (binary present, executable)")
+            }
+        }
+    }
+
+    /// Aktualisiert den live-Stand der STT-Config (PR 7). Ablauf ist
+    /// eine geschrumpfte Version von [`App::update_llamafile_config`]:
+    ///
+    ///   1. Merged die Eingabe mit dem bisherigen `live_audio`
+    ///      (STT-Felder). `command=Some("")` löscht; `command=None`
+    ///      bewahrt den bisherigen Wert.
+    ///   2. Persistiert in [`crate::settings_store::save_stt_override`].
+    ///      Fehler werden geloggt, der In-Memory-Stand bleibt maßgeblich.
+    ///   3. Baut einen **neuen** [`SttProviderResolver`] mit der
+    ///      Startup-Kette und der frischen Audio-Config, ersetzt atomar
+    ///      `self.stt`.
+    ///
+    /// Returntyp `Result<(), String>` aus Symmetrie zum Llamafile-Pfad;
+    /// heute gibt es für STT keine erzwingende Validierung, also ist
+    /// der Pfad bis auf Persist-Warnings nicht fehlschlaghart.
+    pub fn update_stt_config(&self, update: SettingsSttUpdate) -> Result<(), String> {
+        let mut merged: AudioConfig = self
+            .live_audio
+            .lock()
+            .expect("live audio mutex poisoned")
+            .clone();
+        merged.stt_enabled = update.enabled;
+        if let Some(raw_cmd) = update.command {
+            let trimmed = raw_cmd.trim();
+            if trimmed.is_empty() {
+                merged.stt_cmd = None;
+            } else {
+                merged.stt_cmd = Some(trimmed.to_string());
+            }
+        }
+
+        if let Err(err) = settings_store::save_stt_override(&merged) {
+            warn!(error = %err, "failed to persist stt override");
+        } else {
+            info!(
+                enabled = merged.stt_enabled,
+                command_set = merged.stt_cmd.is_some(),
+                "stt override persisted",
+            );
+        }
+
+        // Resolver rebuilden. Chain bleibt wie zum Startup erzeugt
+        // (PR 7 ändert nicht die Kette, nur den Primär-Provider).
+        let stt_chain: Vec<SttProviderChainItem> = self
+            .config
+            .audio
+            .stt_provider_chain
+            .iter()
+            .map(|k| SttProviderChainItem { kind: k.clone() })
+            .collect();
+        let new_resolver = Arc::new(SttProviderResolver::from_chain(&stt_chain, &merged));
+        {
+            let mut guard = self.stt.write().expect("stt resolver lock poisoned");
+            *guard = new_resolver;
+        }
+        {
+            let mut guard = self.live_audio.lock().expect("live audio mutex poisoned");
+            *guard = merged;
+        }
+        Ok(())
+    }
+
+    /// Aktualisiert den live-Stand der TTS-Config (PR 7). Spiegel zu
+    /// [`App::update_stt_config`] plus `auto_speak`-Handling.
+    pub fn update_tts_config(&self, update: SettingsTtsUpdate) -> Result<(), String> {
+        let mut merged: AudioConfig = self
+            .live_audio
+            .lock()
+            .expect("live audio mutex poisoned")
+            .clone();
+        merged.tts_enabled = update.enabled;
+        if let Some(raw_cmd) = update.command {
+            let trimmed = raw_cmd.trim();
+            if trimmed.is_empty() {
+                merged.tts_cmd = None;
+            } else {
+                merged.tts_cmd = Some(trimmed.to_string());
+            }
+        }
+        if let Some(auto) = update.auto_speak {
+            merged.auto_speak = auto;
+        }
+
+        if let Err(err) = settings_store::save_tts_override(&merged) {
+            warn!(error = %err, "failed to persist tts override");
+        } else {
+            info!(
+                enabled = merged.tts_enabled,
+                command_set = merged.tts_cmd.is_some(),
+                auto_speak = merged.auto_speak,
+                "tts override persisted",
+            );
+        }
+
+        let tts_chain: Vec<TtsProviderChainItem> = self
+            .config
+            .audio
+            .tts_provider_chain
+            .iter()
+            .map(|k| TtsProviderChainItem { kind: k.clone() })
+            .collect();
+        let new_resolver = Arc::new(TtsProviderResolver::from_chain(&tts_chain, &merged));
+        {
+            let mut guard = self.tts.write().expect("tts resolver lock poisoned");
+            *guard = new_resolver;
+        }
+        {
+            let mut guard = self.live_audio.lock().expect("live audio mutex poisoned");
+            *guard = merged;
+        }
+        Ok(())
+    }
+
+    /// Probe für die STT-Achse (PR 7). Kein Spawn, kein Mikrofon-
+    /// Zugriff, keine Audio-Aufnahme — nur Config-Inspektion und ein
+    /// Filesystem-Metadatencheck auf das erste Token des konfigurierten
+    /// Commands (sofern gesetzt). Secret-Disziplin analog zum Llamafile-
+    /// Probe: Command / Pfad tauchen weder in der Antwort noch in Logs
+    /// auf.
+    pub fn probe_stt(&self) -> SettingsProbeResultPayload {
+        let audio = self
+            .live_audio
+            .lock()
+            .expect("live audio mutex poisoned")
+            .clone();
+        let resolver = self.current_stt();
+        probe_audio_command(
+            "stt",
+            audio.stt_enabled,
+            audio.stt_cmd.as_deref(),
+            &resolver.chain_kinds(),
+        )
+    }
+
+    /// Probe für die TTS-Achse (PR 7). Spiegel zu [`App::probe_stt`].
+    pub fn probe_tts(&self) -> SettingsProbeResultPayload {
+        let audio = self
+            .live_audio
+            .lock()
+            .expect("live audio mutex poisoned")
+            .clone();
+        let resolver = self.current_tts();
+        probe_audio_command(
+            "tts",
+            audio.tts_enabled,
+            audio.tts_cmd.as_deref(),
+            &resolver.chain_kinds(),
+        )
+    }
+
+    /// Aktualisiert den live-Stand der Local-HTTP-Config (PR 8).
+    /// Geometrie identisch zum Llamafile-Schreibpfad:
+    ///
+    ///   1. `endpoint=Some("")` löscht, `None` lässt unverändert.
+    ///   2. `request_timeout_seconds=Some(0)` wird abgelehnt.
+    ///   3. Persist in [`crate::settings_store::save_local_http_override`].
+    ///   4. Neuer Resolver mit aktueller Kette + beiden Views.
+    pub fn update_local_http_config(
+        &self,
+        update: SettingsLocalHttpUpdate,
+    ) -> Result<(), String> {
+        let timeout_override: Option<u64> = match update.request_timeout_seconds {
+            Some(0) => {
+                return Err(
+                    "request_timeout_seconds must be greater than 0".to_string(),
+                );
+            }
+            Some(n) => Some(n),
+            None => None,
+        };
+
+        let mut merged: LocalHttpConfig = self
+            .live_local_http
+            .lock()
+            .expect("live local_http mutex poisoned")
+            .clone();
+        merged.enabled = update.enabled;
+        if let Some(raw_endpoint) = update.endpoint {
+            let trimmed = raw_endpoint.trim();
+            if trimmed.is_empty() {
+                merged.endpoint = None;
+            } else {
+                merged.endpoint = Some(trimmed.to_string());
+            }
+        }
+        if let Some(t) = timeout_override {
+            merged.request_timeout_seconds = t;
+        }
+
+        if let Err(err) = settings_store::save_local_http_override(&merged) {
+            warn!(error = %err, "failed to persist local_http override");
+        } else {
+            info!(
+                enabled = merged.enabled,
+                endpoint_set = merged.endpoint.is_some(),
+                request_timeout_seconds = merged.request_timeout_seconds,
+                "local_http override persisted",
+            );
+        }
+
+        // Neuer Resolver. Llamafile-View aus dem aktuellen live-Stand
+        // lesen — PR 8 ändert daran nichts.
+        let llamafile_view = llamafile_view_from(
+            &self
+                .live_llamafile
+                .lock()
+                .expect("live llamafile mutex poisoned"),
+        );
+        let new_local_http_view = local_http_view_from(&merged);
+        let new_resolver = Arc::new(TextProviderResolver::from_chain(
+            &self.text_provider_chain,
+            &self.abrain_cmd,
+            &llamafile_view,
+            &new_local_http_view,
+        ));
+        {
+            let mut guard = self
+                .text_provider
+                .write()
+                .expect("text provider lock poisoned");
+            *guard = new_resolver;
+        }
+        {
+            let mut guard = self
+                .live_local_http
+                .lock()
+                .expect("live local_http mutex poisoned");
+            *guard = merged;
+        }
+        Ok(())
+    }
+
+    /// Probe für den Local-HTTP-Provider (PR 8). Kein Completion-
+    /// Roundtrip; kein Completion-Body. Prüft defensiv:
+    ///
+    ///   1. Kind in der aktuellen Chain?
+    ///   2. Master-Flag aktiv?
+    ///   3. Endpoint gesetzt?
+    ///   4. Endpoint syntaktisch parseable (`http://host:port/path`)?
+    ///   5. TCP-Connect auf `host:port` innerhalb `request_timeout_seconds`?
+    ///
+    /// Gibt keine Completion-Antwort zurück und sendet keinen Prompt —
+    /// damit die Probe ehrlich über Erreichbarkeit spricht, ohne dem
+    /// Modell unnötig Arbeit zu geben.
+    pub async fn probe_local_http(&self) -> SettingsProbeResultPayload {
+        let cfg = self
+            .live_local_http
+            .lock()
+            .expect("live local_http mutex poisoned")
+            .clone();
+        let resolver = self.current_resolver();
+        let in_chain = resolver.chain_kinds().iter().any(|k| *k == "local_http");
+        let enabled = cfg.enabled;
+        let endpoint_present = cfg
+            .endpoint
+            .as_deref()
+            .map(|e| !e.trim().is_empty())
+            .unwrap_or(false);
+        let configured = enabled && endpoint_present;
+
+        let build = |ok: bool, class: &str, message: &str| SettingsProbeResultPayload {
+            axis: "local_http".into(),
+            ok,
+            class: class.into(),
+            message: message.into(),
+            lifecycle: None,
+            in_chain,
+            enabled,
+            configured,
+        };
+
+        if !in_chain {
+            return build(
+                false,
+                "not_in_chain",
+                "local_http is not in the configured text provider chain",
+            );
+        }
+        if !enabled {
+            return build(
+                false,
+                "disabled",
+                "local_http is disabled (master flag off)",
+            );
+        }
+        let Some(endpoint_value) = cfg
+            .endpoint
+            .as_deref()
+            .map(str::trim)
+            .filter(|e| !e.is_empty())
+        else {
+            return build(
+                false,
+                "not_configured",
+                "local_http is enabled but has no endpoint configured",
+            );
+        };
+
+        let (host, port, _path) = match crate::providers::text::LocalHttpProvider::parse_endpoint(
+            endpoint_value,
+        ) {
+            Ok(parsed) => parsed,
+            Err(err) => {
+                let msg = format!("{err}");
+                let class = if msg.contains("must start with http://") {
+                    "endpoint_scheme_unsupported"
+                } else {
+                    "endpoint_unparseable"
+                };
+                // Messages sind kuratiert — keine Roh-Stringifizierung
+                // der URL, damit der Endpoint nicht im Probe-Response
+                // auftaucht.
+                let human = if class == "endpoint_scheme_unsupported" {
+                    "endpoint must start with http:// (https:// is not supported in this build)"
+                } else {
+                    "endpoint url is not parseable"
+                };
+                return build(false, class, human);
+            }
+        };
+
+        let timeout_secs = cfg.request_timeout_seconds.max(1).min(30);
+        let addr = format!("{host}:{port}");
+        let connect_result = tokio::time::timeout(
+            std::time::Duration::from_secs(timeout_secs),
+            tokio::net::TcpStream::connect(&addr),
+        )
+        .await;
+        match connect_result {
+            Err(_) => build(
+                false,
+                "timeout",
+                "tcp connect to configured endpoint timed out",
+            ),
+            Ok(Err(_)) => build(
+                false,
+                "http_connect_failed",
+                "tcp connect to configured endpoint failed",
+            ),
+            Ok(Ok(_stream)) => build(
+                true,
+                "ok",
+                "local_http endpoint reachable (tcp connect succeeded)",
+            ),
+        }
+    }
+}
+
+/// Gemeinsamer Kern für STT-/TTS-Probes (PR 7). Beide Achsen haben heute
+/// das gleiche Default-Kind (`command`), die gleiche Preflight-Logik
+/// (Chain-Mitgliedschaft, enabled, Command-Split, Filesystem-Check des
+/// ersten Tokens) und die gleiche Secret-Disziplin. Das Ergebnis trägt
+/// `axis` für das UI-Routing.
+fn probe_audio_command(
+    axis: &str,
+    enabled: bool,
+    command: Option<&str>,
+    chain: &[&'static str],
+) -> SettingsProbeResultPayload {
+    let in_chain = chain.iter().any(|k| *k == "command");
+    let command_present = command
+        .map(|c| !c.trim().is_empty())
+        .unwrap_or(false);
+    let configured = enabled && command_present;
+
+    let build = |ok: bool, class: &str, message: &str| SettingsProbeResultPayload {
+        axis: axis.to_string(),
+        ok,
+        class: class.into(),
+        message: message.into(),
+        lifecycle: None,
+        in_chain,
+        enabled,
+        configured,
+    };
+
+    if !in_chain {
+        return build(
+            false,
+            "not_in_chain",
+            "command kind is not in the configured provider chain",
+        );
+    }
+    if !enabled {
+        return build(false, "disabled", "axis is disabled (master flag off)");
+    }
+    let Some(cmd_value) = command.map(str::trim).filter(|c| !c.is_empty()) else {
+        return build(
+            false,
+            "not_configured",
+            "axis is enabled but has no command configured",
+        );
+    };
+    let Some((program, _args)) = crate::audio::types::split_command(cmd_value) else {
+        return build(
+            false,
+            "command_unparseable",
+            "configured command is empty after parsing",
+        );
+    };
+
+    match std::fs::metadata(&program) {
+        Err(_) => build(false, "path_missing", "configured command binary does not exist"),
+        Ok(meta) if !meta.is_file() => build(
+            false,
+            "path_not_file",
+            "configured command path is not a regular file",
+        ),
+        Ok(meta) => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if meta.permissions().mode() & 0o111 == 0 {
+                    return build(
+                        false,
+                        "path_not_executable",
+                        "configured command binary is present but not executable",
+                    );
                 }
             }
+            let _ = meta;
+            build(true, "ok", "command looks ready (binary present, executable)")
         }
     }
 }
@@ -1065,6 +1714,19 @@ fn llamafile_view_from(cfg: &LlamafileConfig) -> LlamafileConfigView {
         port: cfg.port,
         startup_timeout_seconds: cfg.startup_timeout_seconds,
         request_timeout_seconds: cfg.request_timeout_seconds,
+    }
+}
+
+/// Spiegel zu [`llamafile_view_from`] für den `local_http`-Provider
+/// (PR 8). Einzige Stelle, an der `config::LocalHttpConfig` in die
+/// Providers-interne View gemappt wird — analog zu Llamafile.
+fn local_http_view_from(cfg: &LocalHttpConfig) -> LocalHttpConfigView {
+    LocalHttpConfigView {
+        enabled: cfg.enabled,
+        endpoint: cfg.endpoint.clone(),
+        request_timeout_seconds: cfg.request_timeout_seconds,
+        prompt_field: cfg.prompt_field.clone(),
+        response_field: cfg.response_field.clone(),
     }
 }
 

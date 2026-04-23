@@ -116,6 +116,79 @@ func settings_probe_llamafile() -> void:
 	_send({"type": "settings_probe_llamafile"})
 
 
+## PR 7 — Schreibpfad für die editierbaren STT-Settings. Der Core
+## rebuildet den STT-Resolver atomar; ein Erfolg spiegelt sich sofort
+## im nachfolgenden `status`-Envelope. `command=null` lässt den
+## bisherigen Wert stehen, `command=""` löscht ihn.
+func settings_set_stt_config(enabled: bool, command: Variant = null) -> void:
+	var payload: Dictionary = {
+		"type": "settings_set_stt_config",
+		"enabled": enabled,
+	}
+	if typeof(command) == TYPE_STRING:
+		payload["command"] = String(command)
+	_send(payload)
+
+
+## PR 7 — Schreibpfad für die editierbaren TTS-Settings. Spiegel zu
+## `settings_set_stt_config`; zusätzlich `auto_speak` als optionales
+## Flag (null → unverändert).
+func settings_set_tts_config(
+	enabled: bool,
+	command: Variant = null,
+	auto_speak: Variant = null,
+) -> void:
+	var payload: Dictionary = {
+		"type": "settings_set_tts_config",
+		"enabled": enabled,
+	}
+	if typeof(command) == TYPE_STRING:
+		payload["command"] = String(command)
+	if typeof(auto_speak) == TYPE_BOOL:
+		payload["auto_speak"] = bool(auto_speak)
+	_send(payload)
+
+
+## PR 7 — Diagnose-Probe für die STT-Achse. Kein Mikrofon-Zugriff,
+## keine Audio-Aufnahme. Antwort kommt als
+## `settings_probe_result_received` mit `axis="stt"`.
+func settings_probe_stt() -> void:
+	_send({"type": "settings_probe_stt"})
+
+
+## PR 7 — Diagnose-Probe für die TTS-Achse.
+func settings_probe_tts() -> void:
+	_send({"type": "settings_probe_tts"})
+
+
+## PR 8 — Schreibpfad für die editierbaren `local_http`-Settings.
+## `endpoint=null` lässt den bisherigen Wert stehen, `endpoint=""`
+## löscht ihn. `request_timeout_seconds=null` lässt den Wert
+## unverändert; `0` wird vom Core abgelehnt.
+func settings_set_local_http_config(
+	enabled: bool,
+	endpoint: Variant = null,
+	request_timeout_seconds: Variant = null,
+) -> void:
+	var payload: Dictionary = {
+		"type": "settings_set_local_http_config",
+		"enabled": enabled,
+	}
+	if typeof(endpoint) == TYPE_STRING:
+		payload["endpoint"] = String(endpoint)
+	if typeof(request_timeout_seconds) == TYPE_INT:
+		payload["request_timeout_seconds"] = int(request_timeout_seconds)
+	_send(payload)
+
+
+## PR 8 — Diagnose-Probe für den `local_http`-Provider. Der Core
+## macht einen TCP-Connect auf den geparsten Endpoint, **nicht** mehr.
+## Antwort kommt als `settings_probe_result_received` mit
+## `axis="local_http"`.
+func settings_probe_local_http() -> void:
+	_send({"type": "settings_probe_local_http"})
+
+
 func _load_config() -> void:
 	var cfg := ConfigFile.new()
 	var err := cfg.load(_CONFIG_PATH)

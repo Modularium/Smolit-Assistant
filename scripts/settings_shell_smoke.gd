@@ -46,7 +46,9 @@ func _init() -> void:
 	_check_text_provider_lines_llamafile_in_chain_readout()
 	_check_text_provider_lines_llamafile_not_in_chain_notes_disabled()
 	_check_stt_and_tts_lines()
+	_check_stt_tts_provider_rows()
 	_check_privacy_lines()
+	_check_privacy_lines_audio_cloud_rollup()
 	_check_privacy_lines_llamafile_path_note()
 	_check_connection_lines()
 	_check_panel_default_hidden()
@@ -59,6 +61,16 @@ func _init() -> void:
 	_check_llamafile_editor_idle_timeout_reflects_status()
 	_check_llamafile_probe_result_rendering()
 	_check_llamafile_probe_result_path_missing_does_not_leak()
+	_check_stt_editor_builds_and_syncs()
+	_check_tts_editor_builds_and_syncs()
+	_check_stt_probe_routes_to_stt_label()
+	_check_tts_probe_routes_to_tts_label()
+	_check_probe_without_axis_falls_back_to_llamafile()
+	_check_stt_tts_probe_does_not_leak_command()
+	_check_local_http_editor_builds_and_syncs()
+	_check_local_http_probe_routes_to_local_http_label()
+	_check_local_http_probe_scheme_unsupported_does_not_leak()
+	_check_text_provider_lines_local_http_visibility()
 
 	print("---")
 	if _fail == 0:
@@ -371,6 +383,89 @@ func _check_stt_and_tts_lines() -> void:
 		"tts_lines: auto_speak=false → 'no'")
 
 
+func _check_stt_tts_provider_rows() -> void:
+	# PR 6: wenn stt_provider_*-Felder vorhanden sind, rendert die
+	# Shell die fünf Resolver-Zeilen (Configured, Active, Availability,
+	# Last error, Cloud). Fehlt das Vokabular (alter Core), bleibt die
+	# Fallback-Zeile „Core liefert keine stt_provider_*-Felder" stehen.
+	var stt_resolver_rows: Dictionary = _row_map(_SectionsRef.stt_lines({
+		"stt_enabled": true,
+		"stt_available": true,
+		"stt_provider_configured": "command",
+		"stt_provider_active": "command",
+		"stt_provider_availability": "available",
+		"stt_provider_last_error": null,
+		"stt_provider_cloud": false,
+	}))
+	_assert(str(stt_resolver_rows.get("Configured", "")) == "command",
+		"stt_lines: Configured rendert command")
+	_assert(str(stt_resolver_rows.get("Active", "")) == "command",
+		"stt_lines: Active rendert command")
+	_assert(str(stt_resolver_rows.get("Availability", "")) == "available",
+		"stt_lines: Availability rendert available")
+	_assert(str(stt_resolver_rows.get("Last error", "")) == "—",
+		"stt_lines: Last error null → em-dash")
+	_assert(str(stt_resolver_rows.get("Cloud", "")) == "no",
+		"stt_lines: Cloud=false → 'no'")
+
+	var tts_resolver_rows: Dictionary = _row_map(_SectionsRef.tts_lines({
+		"tts_enabled": true,
+		"tts_available": true,
+		"auto_speak": true,
+		"tts_provider_configured": "command",
+		"tts_provider_active": "",
+		"tts_provider_availability": "unavailable",
+		"tts_provider_last_error": "process_missing",
+		"tts_provider_cloud": false,
+	}))
+	_assert(str(tts_resolver_rows.get("Configured", "")) == "command",
+		"tts_lines: Configured rendert command")
+	_assert(str(tts_resolver_rows.get("Availability", "")) == "unavailable",
+		"tts_lines: Availability rendert unavailable")
+	_assert(str(tts_resolver_rows.get("Last error", "")) == "process_missing",
+		"tts_lines: Fehlerklasse process_missing wird 1:1 gerendert")
+
+	# Legacy-Core ohne neue Felder → Fallback-Hinweiszeile.
+	var stt_legacy: Dictionary = _row_map(_SectionsRef.stt_lines({
+		"stt_enabled": true,
+		"stt_available": false,
+	}))
+	var stt_fallback := String(stt_legacy.get("Provider", ""))
+	_assert(stt_fallback.find("stt_provider_*") >= 0,
+		"stt_lines: alter Core → ehrlicher Fallback-Hinweis")
+
+	var tts_legacy: Dictionary = _row_map(_SectionsRef.tts_lines({
+		"tts_enabled": true,
+		"tts_available": false,
+		"auto_speak": true,
+	}))
+	var tts_fallback := String(tts_legacy.get("Provider", ""))
+	_assert(tts_fallback.find("tts_provider_*") >= 0,
+		"tts_lines: alter Core → ehrlicher Fallback-Hinweis")
+
+
+func _check_privacy_lines_audio_cloud_rollup() -> void:
+	# PR 6: sobald stt_provider_cloud oder tts_provider_cloud im Status
+	# landen, rendert die Shell zwei separate Cloud-Zeilen je Achse.
+	var rows: Dictionary = _row_map(_SectionsRef.privacy_lines({
+		"text_provider_cloud": false,
+		"stt_provider_cloud": false,
+		"tts_provider_cloud": false,
+	}))
+	_assert(str(rows.get("STT Cloud aktiv", "")) == "no",
+		"privacy_lines: STT Cloud=false → 'no'")
+	_assert(str(rows.get("TTS Cloud aktiv", "")) == "no",
+		"privacy_lines: TTS Cloud=false → 'no'")
+	# Die Legacy-Sammelzeile verschwindet, wenn die neuen Felder da sind.
+	_assert(not rows.has("STT/TTS Cloud"),
+		"privacy_lines: neuer Core ⇒ keine Legacy-Sammelzeile mehr")
+
+	# Alter Core (keine stt_provider_cloud-Felder) → Legacy-Zeile bleibt.
+	var legacy: Dictionary = _row_map(_SectionsRef.privacy_lines({}))
+	_assert(legacy.has("STT/TTS Cloud"),
+		"privacy_lines: alter Core → Legacy-Cloud-Sammelzeile erhalten")
+
+
 func _check_privacy_lines() -> void:
 	var empty: Dictionary = _row_map(_SectionsRef.privacy_lines({}))
 	_assert(str(empty.get("Text: Cloud aktiv", "")) == "no",
@@ -575,6 +670,249 @@ func _check_llamafile_probe_result_path_missing_does_not_leak() -> void:
 	_assert(probe_text.find(secret_like) < 0,
 		"Probe-Label enthält keinen synthetischen Pfad-String")
 	_despawn_panel(panel)
+
+
+# --- PR 7: STT/TTS-Editor + Probe-Routing -------------------------------
+
+
+func _check_stt_editor_builds_and_syncs() -> void:
+	# Der STT-Editor baut sich beim Öffnen idempotent auf und
+	# übernimmt den `stt_enabled`-Wert aus dem Status.
+	var panel := _spawn_panel()
+	panel.apply_status({"stt_enabled": true})
+	panel.open_panel()
+	var snap: Dictionary = panel.stt_editor_snapshot()
+	_assert(bool(snap.get("built", false)),
+		"stt-editor: Widgets sind gebaut nach open_panel")
+	_assert(bool(snap.get("enabled", false)) == true,
+		"stt-editor: enabled-Checkbox spiegelt status.stt_enabled=true")
+	_assert(String(snap.get("command", "")) == "",
+		"stt-editor: Command-Feld bleibt leer (Secret-Disziplin, nicht aus Status)")
+	_despawn_panel(panel)
+
+
+func _check_tts_editor_builds_and_syncs() -> void:
+	var panel := _spawn_panel()
+	panel.apply_status({"tts_enabled": true, "auto_speak": true})
+	panel.open_panel()
+	var snap: Dictionary = panel.tts_editor_snapshot()
+	_assert(bool(snap.get("built", false)),
+		"tts-editor: Widgets sind gebaut nach open_panel")
+	_assert(bool(snap.get("enabled", false)) == true,
+		"tts-editor: enabled-Checkbox spiegelt status.tts_enabled=true")
+	_assert(bool(snap.get("auto_speak", false)) == true,
+		"tts-editor: auto_speak-Checkbox spiegelt status.auto_speak=true")
+	_despawn_panel(panel)
+
+
+func _check_stt_probe_routes_to_stt_label() -> void:
+	# Ein `settings_probe_result` mit axis="stt" landet ausschließlich
+	# im STT-Label, nicht im Llamafile-Label. So bleibt der Nutzer-
+	# Kontext (welche Achse ich gerade diagnostiziere) eindeutig.
+	var panel := _spawn_panel()
+	panel.open_panel()
+	panel.inject_probe_result_for_test({
+		"axis": "stt",
+		"ok": false,
+		"class": "not_configured",
+		"message": "axis is enabled but has no command configured",
+		"lifecycle": null,
+		"in_chain": true,
+		"enabled": true,
+		"configured": false,
+	})
+	var stt_snap: Dictionary = panel.stt_editor_snapshot()
+	var llf_snap: Dictionary = panel.llamafile_editor_snapshot()
+	var stt_text := String(stt_snap.get("probe_status", ""))
+	var llf_text := String(llf_snap.get("probe_status", ""))
+	_assert(stt_text.find("[not_configured]") >= 0,
+		"stt-editor: Probe-Label zeigt Core-class-Tag für STT")
+	_assert(llf_text.find("[not_configured]") < 0,
+		"llamafile-editor: bleibt unberührt, wenn axis=stt ankommt")
+	_despawn_panel(panel)
+
+
+func _check_tts_probe_routes_to_tts_label() -> void:
+	var panel := _spawn_panel()
+	panel.open_panel()
+	panel.inject_probe_result_for_test({
+		"axis": "tts",
+		"ok": true,
+		"class": "ok",
+		"message": "command looks ready (binary present, executable)",
+		"lifecycle": null,
+		"in_chain": true,
+		"enabled": true,
+		"configured": true,
+	})
+	var tts_snap: Dictionary = panel.tts_editor_snapshot()
+	var stt_snap: Dictionary = panel.stt_editor_snapshot()
+	var tts_text := String(tts_snap.get("probe_status", ""))
+	var stt_text := String(stt_snap.get("probe_status", ""))
+	_assert(tts_text.find("[ok]") >= 0,
+		"tts-editor: Probe-Label zeigt Core-class-Tag für TTS")
+	_assert(stt_text.find("[ok]") < 0,
+		"stt-editor: bleibt unberührt, wenn axis=tts ankommt")
+	_despawn_panel(panel)
+
+
+func _check_probe_without_axis_falls_back_to_llamafile() -> void:
+	# Backwards-Kompatibilität: ältere Cores schicken kein axis-Feld.
+	# Das Ergebnis landet im Llamafile-Label (wie vor PR 7).
+	var panel := _spawn_panel()
+	panel.open_panel()
+	panel.inject_probe_result_for_test({
+		"ok": false,
+		"class": "path_missing",
+		"message": "configured binary path does not exist",
+		"lifecycle": "configured",
+		"in_chain": true,
+		"enabled": true,
+		"configured": true,
+	})
+	var llf_snap: Dictionary = panel.llamafile_editor_snapshot()
+	var probe_text := String(llf_snap.get("probe_status", ""))
+	_assert(probe_text.find("[path_missing]") >= 0,
+		"llamafile-editor: fällt zurück, wenn axis-Feld fehlt")
+	_despawn_panel(panel)
+
+
+func _check_stt_tts_probe_does_not_leak_command() -> void:
+	# PR 7 Secret-Disziplin: die UI darf den konfigurierten Command
+	# nicht „nachrendern", auch wenn er hypothetisch im Payload käme.
+	var panel := _spawn_panel()
+	panel.open_panel()
+	var secret_like := "whisper --model sekritmodel --flag=doNotLeak"
+	panel.inject_probe_result_for_test({
+		"axis": "stt",
+		"ok": false,
+		"class": "path_missing",
+		"message": "configured command binary does not exist",
+		"lifecycle": null,
+		"in_chain": true,
+		"enabled": true,
+		"configured": true,
+	})
+	var snap: Dictionary = panel.stt_editor_snapshot()
+	var probe_text := String(snap.get("probe_status", ""))
+	_assert(probe_text.find(secret_like) < 0,
+		"stt-editor: Probe-Label enthält keinen synthetischen Command-String")
+	_assert(probe_text.find("sekritmodel") < 0,
+		"stt-editor: Probe-Label enthält keine Argumente des Command-Strings")
+	_despawn_panel(panel)
+
+
+# --- PR 8: local_http-Editor + Probe-Routing ---------------------------
+
+
+func _check_local_http_editor_builds_and_syncs() -> void:
+	var panel := _spawn_panel()
+	panel.apply_status({"local_http_in_chain": true, "local_http_enabled": true})
+	panel.open_panel()
+	var snap: Dictionary = panel.local_http_editor_snapshot()
+	_assert(bool(snap.get("built", false)),
+		"local_http-editor: Widgets sind gebaut nach open_panel")
+	_assert(bool(snap.get("enabled", false)) == true,
+		"local_http-editor: enabled-Checkbox spiegelt status.local_http_enabled=true")
+	_assert(String(snap.get("endpoint", "")) == "",
+		"local_http-editor: Endpoint-Feld bleibt leer (Secret-Disziplin, nicht aus Status)")
+	_despawn_panel(panel)
+
+
+func _check_local_http_probe_routes_to_local_http_label() -> void:
+	# Ein `settings_probe_result` mit axis="local_http" landet im
+	# local_http-Label, nicht im Llamafile-/STT-/TTS-Block.
+	var panel := _spawn_panel()
+	panel.open_panel()
+	panel.inject_probe_result_for_test({
+		"axis": "local_http",
+		"ok": false,
+		"class": "http_connect_failed",
+		"message": "tcp connect to configured endpoint failed",
+		"lifecycle": null,
+		"in_chain": true,
+		"enabled": true,
+		"configured": true,
+	})
+	var lh_snap: Dictionary = panel.local_http_editor_snapshot()
+	var llf_snap: Dictionary = panel.llamafile_editor_snapshot()
+	var lh_text := String(lh_snap.get("probe_status", ""))
+	var llf_text := String(llf_snap.get("probe_status", ""))
+	_assert(lh_text.find("[http_connect_failed]") >= 0,
+		"local_http-editor: Probe-Label zeigt Core-class-Tag")
+	_assert(llf_text.find("[http_connect_failed]") < 0,
+		"llamafile-editor: bleibt unberührt, wenn axis=local_http ankommt")
+	_despawn_panel(panel)
+
+
+func _check_local_http_probe_scheme_unsupported_does_not_leak() -> void:
+	# Die UI darf den konfigurierten Endpoint nicht „nachrendern",
+	# auch wenn er hypothetisch im Payload käme. Wir prüfen gegen
+	# einen synthetischen, gut erkennbaren String.
+	var panel := _spawn_panel()
+	panel.open_panel()
+	var secret_like := "https://sekrit-host.test/v1/sekritroute"
+	panel.inject_probe_result_for_test({
+		"axis": "local_http",
+		"ok": false,
+		"class": "endpoint_scheme_unsupported",
+		"message": "endpoint must start with http:// (https:// is not supported in this build)",
+		"lifecycle": null,
+		"in_chain": true,
+		"enabled": true,
+		"configured": true,
+	})
+	var snap: Dictionary = panel.local_http_editor_snapshot()
+	var probe_text := String(snap.get("probe_status", ""))
+	_assert(probe_text.find(secret_like) < 0,
+		"local_http-editor: Probe-Label enthält keinen synthetischen Endpoint-String")
+	_assert(probe_text.find("sekritroute") < 0,
+		"local_http-editor: Probe-Label enthält keinen Endpoint-Pfad")
+	_despawn_panel(panel)
+
+
+func _check_text_provider_lines_local_http_visibility() -> void:
+	# Neuer Core: `local_http_in_chain=true` + `local_http_enabled=true`
+	# erzeugt den detaillierten Readout. Fehlendes Feld triggert den
+	# Rückfallpfad (alte Cores) — dann keine local_http-Zeile.
+	var SectionsRef := load("res://scripts/settings/settings_sections.gd")
+	var status_in_chain := {
+		"text_provider_configured": "local_http",
+		"text_provider_active": "local_http",
+		"local_http_in_chain": true,
+		"local_http_enabled": true,
+		"local_http_configured": true,
+	}
+	var lines_in_chain: Array = SectionsRef.text_provider_lines(status_in_chain)
+	var found_header := false
+	var found_enabled := false
+	for row in lines_in_chain:
+		if typeof(row) != TYPE_DICTIONARY:
+			continue
+		var label := str(row.get("label", ""))
+		if label == "local_http":
+			found_header = true
+		if label == "  enabled":
+			found_enabled = true
+	_assert(found_header,
+		"text_provider_lines: local_http-Header erscheint, wenn in Chain")
+	_assert(found_enabled,
+		"text_provider_lines: local_http Detailzeilen werden gerendert")
+
+	var status_not_in_chain := {
+		"text_provider_configured": "abrain",
+		"local_http_in_chain": false,
+		"local_http_enabled": false,
+	}
+	var lines_not_in_chain: Array = SectionsRef.text_provider_lines(status_not_in_chain)
+	var mentions_not_in_chain := false
+	for row in lines_not_in_chain:
+		if typeof(row) != TYPE_DICTIONARY:
+			continue
+		if str(row.get("label", "")) == "local_http":
+			mentions_not_in_chain = true
+	_assert(mentions_not_in_chain,
+		"text_provider_lines: ehrlicher 'nicht in der Chain'-Hinweis für local_http")
 
 
 func _check_panel_snapshot_shape() -> void:

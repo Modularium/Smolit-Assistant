@@ -93,7 +93,7 @@ impl EventLoop {
     }
 
     async fn handle_voice(&self) {
-        if !self.app.stt.is_available() {
+        if !self.app.current_stt().is_available() {
             println!("STT is not available. Check SMOLIT_STT_ENABLED and SMOLIT_STT_CMD.");
             return;
         }
@@ -113,7 +113,7 @@ impl EventLoop {
     }
 
     async fn handle_speak(&self, text: &str) {
-        if !self.app.tts.is_available() {
+        if !self.app.current_tts().is_available() {
             println!("TTS is not available. Check SMOLIT_TTS_ENABLED and SMOLIT_TTS_CMD.");
             return;
         }

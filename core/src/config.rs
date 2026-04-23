@@ -17,6 +17,13 @@ const DEFAULT_APPROVAL_TIMEOUT_SECONDS: u64 = 20;
 /// Konservativer Default der Text-Provider-Kette. ABrain bleibt
 /// Primary — explizit in der Architektur-Doku §3 / §5 festgelegt.
 const DEFAULT_TEXT_PROVIDER_CHAIN: &[&str] = &["abrain"];
+/// Default-Kette für STT und TTS (PR 6). Beide Achsen starten mit
+/// dem Command-Kind — entspricht dem bisherigen Verhalten von
+/// `SMOLIT_STT_CMD`/`SMOLIT_TTS_CMD`. Keine stille Aufweichung:
+/// unbekannte Env-Kinds werden im Resolver verworfen, die Kette
+/// fällt dann wieder auf diesen Default.
+const DEFAULT_STT_PROVIDER_CHAIN: &[&str] = &["command"];
+const DEFAULT_TTS_PROVIDER_CHAIN: &[&str] = &["command"];
 /// Default-Mode des lokalen llamafile-Providers. Die Runtime-Stufe
 /// (PR 2b) implementiert heute `on_demand` vollständig; `standby` ist
 /// reserviert für einen späteren PR und wird aktuell wie `on_demand`
@@ -40,6 +47,16 @@ const DEFAULT_LLAMAFILE_REQUEST_TIMEOUT_SECONDS: u64 = 60;
 /// werden beim Parsing verworfen und fallen auf den Default zurück;
 /// das hält das Vokabular klein und vermeidet stille Freiform-Werte.
 const ALLOWED_LLAMAFILE_MODES: &[&str] = &["on_demand", "standby"];
+/// Default-Timeout für einzelne `local_http`-Completion-Requests (PR 8).
+const DEFAULT_LOCAL_HTTP_REQUEST_TIMEOUT_SECONDS: u64 = 60;
+/// Default-Feldname im JSON-Request-Body, unter dem der Prompt an den
+/// lokalen HTTP-Server geht. Bewusst gleich zum llama.cpp-Server-
+/// Vokabular, damit ein unkonfigurierter `local_http` gegen einen
+/// llama.cpp-kompatiblen Dienst ohne Zusatz-Mapping funktioniert.
+const DEFAULT_LOCAL_HTTP_PROMPT_FIELD: &str = "prompt";
+/// Default-Feldname im JSON-Response, aus dem der Antworttext gelesen
+/// wird. Ebenfalls llama.cpp-kompatibel.
+const DEFAULT_LOCAL_HTTP_RESPONSE_FIELD: &str = "content";
 
 #[derive(Debug, Parser)]
 #[command(name = "smolit", about = "Smolit Assistant core daemon")]
@@ -60,6 +77,31 @@ pub struct AudioConfig {
     pub stt_cmd: Option<String>,
     pub stt_timeout_seconds: u64,
     pub auto_speak: bool,
+    /// Geordnete STT-Provider-Kette (PR 6). Env-Override
+    /// `SMOLIT_STT_PROVIDER_CHAIN` (komma-separierte Kind-Namen).
+    /// Heute nur `command` implementiert; unbekannte Kinds werden im
+    /// Resolver sichtbar verworfen. Default `["command"]`.
+    #[serde(default = "default_stt_provider_chain")]
+    pub stt_provider_chain: Vec<String>,
+    /// Geordnete TTS-Provider-Kette (PR 6). Env-Override
+    /// `SMOLIT_TTS_PROVIDER_CHAIN`. Gleiche Semantik wie
+    /// `stt_provider_chain`.
+    #[serde(default = "default_tts_provider_chain")]
+    pub tts_provider_chain: Vec<String>,
+}
+
+fn default_stt_provider_chain() -> Vec<String> {
+    DEFAULT_STT_PROVIDER_CHAIN
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect()
+}
+
+fn default_tts_provider_chain() -> Vec<String> {
+    DEFAULT_TTS_PROVIDER_CHAIN
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -119,6 +161,11 @@ pub struct TextProviderConfig {
     /// `llamafile_local` in `chain` enthalten ist. Siehe
     /// [`LlamafileConfig`] für die Semantik.
     pub llamafile: LlamafileConfig,
+    /// Einstellungen für den lokalen HTTP-Provider (PR 8, additiv).
+    /// Werden nur wirksam, wenn `local_http` in `chain` enthalten ist.
+    /// Siehe [`LocalHttpConfig`] für die Semantik.
+    #[serde(default)]
+    pub local_http: LocalHttpConfig,
 }
 
 /// Einstellungen für den lokalen **llamafile**-Provider
@@ -180,6 +227,61 @@ impl Default for LlamafileConfig {
     }
 }
 
+/// Einstellungen für den lokalen HTTP-Provider `local_http` (PR 8).
+///
+/// Bewusst schmal: ein konfigurierbarer Endpoint, ein Request-Timeout
+/// und zwei Feldnamen, damit der Provider mit einem lokalen
+/// llama.cpp-kompatiblen Server **ohne** zusätzliche Konfiguration
+/// redet, aber auch einen abweichenden Dienst ansprechen kann, der
+/// beim Prompt-/Response-Feldnamen nicht 1:1 die llama.cpp-Namen
+/// nutzt.
+///
+/// Nicht-Ziele dieser Struktur:
+///
+/// - **kein Cloud-SDK** — der Provider spricht HTTP/1.1 direkt über
+///   den bestehenden [`crate::providers::text::http_request`]-Helfer,
+///   identisch zum llamafile-Runtime-Pfad.
+/// - **keine API-Keys / keine Secrets** — dieser PR transportiert
+///   keine Credentials.
+/// - **keine generische OpenAI-Welt** — kein `messages`-Array, kein
+///   Tool-/Schema-Mode, kein Streaming. Der Provider postet genau ein
+///   JSON-Objekt mit dem Prompt-Feld und liest genau ein Text-Feld
+///   aus der Antwort.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocalHttpConfig {
+    /// Master-Schalter, analog zu `llamafile_local.enabled`. Ohne
+    /// `SMOLIT_LOCAL_HTTP_ENABLED=1` bleibt der Provider inert, auch
+    /// wenn er in der Chain steht.
+    pub enabled: bool,
+    /// Ziel-URL, z. B. `http://127.0.0.1:8080/completion`. Muss mit
+    /// `http://` beginnen — `https://` wird vom Provider bewusst
+    /// abgelehnt, weil PR 8 **loopback-first** gedacht ist und keine
+    /// TLS-/Cert-/Trust-Infrastruktur mitbringt.
+    pub endpoint: Option<String>,
+    /// Zeitbudget pro Completion-Request. Überschreitung →
+    /// `timeout`-Klasse in `text_provider_last_error`.
+    pub request_timeout_seconds: u64,
+    /// JSON-Feldname für den Prompt im Request-Body. Default
+    /// `"prompt"`. Ein leerer Override fällt still auf den Default
+    /// zurück.
+    pub prompt_field: String,
+    /// JSON-Feldname für den Antworttext im Response-Body. Default
+    /// `"content"`. Auch hier fällt ein leerer Override still zurück.
+    pub response_field: String,
+}
+
+impl Default for LocalHttpConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            endpoint: None,
+            request_timeout_seconds: DEFAULT_LOCAL_HTTP_REQUEST_TIMEOUT_SECONDS,
+            prompt_field: DEFAULT_LOCAL_HTTP_PROMPT_FIELD.to_string(),
+            response_field: DEFAULT_LOCAL_HTTP_RESPONSE_FIELD.to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub abrain_cmd: String,
@@ -221,6 +323,20 @@ impl Config {
             parse_u64(lookup("SMOLIT_STT_TIMEOUT_SECONDS").as_deref(), DEFAULT_STT_TIMEOUT_SECONDS);
 
         let auto_speak = parse_bool(lookup("SMOLIT_AUDIO_AUTO_SPEAK").as_deref(), true);
+
+        // Audio-Provider-Ketten (PR 6). Gleiche Parser-Regeln wie beim
+        // Text-Resolver: komma-separierter Env-String, Lowercase-Normalisierung,
+        // Filter leerer Tokens, Fallback auf den kuratierten Default. Die
+        // eigentliche Whitelist für bekannte Kinds sitzt im Resolver
+        // (`providers::stt`/`providers::tts`) — hier nur der Parse-Schritt.
+        let stt_provider_chain = parse_audio_provider_chain(
+            lookup("SMOLIT_STT_PROVIDER_CHAIN").as_deref(),
+            DEFAULT_STT_PROVIDER_CHAIN,
+        );
+        let tts_provider_chain = parse_audio_provider_chain(
+            lookup("SMOLIT_TTS_PROVIDER_CHAIN").as_deref(),
+            DEFAULT_TTS_PROVIDER_CHAIN,
+        );
 
         let ipc_enabled = parse_bool(lookup("SMOLIT_IPC_ENABLED").as_deref(), true);
         let ipc_bind = non_empty(lookup("SMOLIT_IPC_BIND"))
@@ -297,6 +413,24 @@ impl Config {
             DEFAULT_LLAMAFILE_REQUEST_TIMEOUT_SECONDS,
         );
 
+        // Local-HTTP-Provider-Konfiguration (PR 8). Alle Felder sind
+        // opt-in; ohne Env bleibt der Provider inert. Wie beim
+        // Llamafile-Pfad wird ein leerer oder nur-Whitespace-Endpoint
+        // wie "nicht gesetzt" behandelt.
+        let local_http_enabled = parse_bool(
+            lookup("SMOLIT_LOCAL_HTTP_ENABLED").as_deref(),
+            false,
+        );
+        let local_http_endpoint = non_empty(lookup("SMOLIT_LOCAL_HTTP_ENDPOINT"));
+        let local_http_request_timeout = parse_u64(
+            lookup("SMOLIT_LOCAL_HTTP_REQUEST_TIMEOUT_SECONDS").as_deref(),
+            DEFAULT_LOCAL_HTTP_REQUEST_TIMEOUT_SECONDS,
+        );
+        let local_http_prompt_field = non_empty(lookup("SMOLIT_LOCAL_HTTP_PROMPT_FIELD"))
+            .unwrap_or_else(|| DEFAULT_LOCAL_HTTP_PROMPT_FIELD.to_string());
+        let local_http_response_field = non_empty(lookup("SMOLIT_LOCAL_HTTP_RESPONSE_FIELD"))
+            .unwrap_or_else(|| DEFAULT_LOCAL_HTTP_RESPONSE_FIELD.to_string());
+
         Ok(Self {
             abrain_cmd,
             log_level,
@@ -308,6 +442,8 @@ impl Config {
                 stt_cmd,
                 stt_timeout_seconds,
                 auto_speak,
+                stt_provider_chain,
+                tts_provider_chain,
             },
             ipc: IpcConfig {
                 enabled: ipc_enabled,
@@ -337,6 +473,13 @@ impl Config {
                     port: llamafile_port,
                     startup_timeout_seconds: llamafile_startup_timeout,
                     request_timeout_seconds: llamafile_request_timeout,
+                },
+                local_http: LocalHttpConfig {
+                    enabled: local_http_enabled,
+                    endpoint: local_http_endpoint,
+                    request_timeout_seconds: local_http_request_timeout,
+                    prompt_field: local_http_prompt_field,
+                    response_field: local_http_response_field,
                 },
             },
         })
@@ -384,6 +527,30 @@ fn parse_text_provider_chain(raw: Option<&str>) -> Vec<String> {
             .iter()
             .map(|s| (*s).to_string())
             .collect()
+    } else {
+        items
+    }
+}
+
+/// Parst eine rohe komma-separierte Audio-Provider-Kette
+/// (`SMOLIT_STT_PROVIDER_CHAIN` / `SMOLIT_TTS_PROVIDER_CHAIN`). Regeln
+/// wie beim Text-Resolver: Trim, Lowercase, leere Tokens weg; leere
+/// Liste fällt auf `default_chain` zurück. Unbekannte Kinds werden
+/// **hier bewusst nicht** gefiltert — der Resolver
+/// (`providers::stt::SttProviderResolver::from_chain` bzw.
+/// `providers::tts::TtsProviderResolver::from_chain`) hält die
+/// Whitelist an einer einzigen Stelle.
+fn parse_audio_provider_chain(raw: Option<&str>, default_chain: &[&str]) -> Vec<String> {
+    let Some(value) = raw else {
+        return default_chain.iter().map(|s| (*s).to_string()).collect();
+    };
+    let items: Vec<String> = value
+        .split(',')
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if items.is_empty() {
+        default_chain.iter().map(|s| (*s).to_string()).collect()
     } else {
         items
     }
@@ -537,6 +704,43 @@ mod tests {
         assert_eq!(
             parse_text_provider_chain(Some("abrain, LLAMAFILE_LOCAL")),
             vec!["abrain", "llamafile_local"],
+        );
+    }
+
+    // --- Audio-Provider-Chain-Parser (PR 6) -----------------------------
+
+    #[test]
+    fn parse_audio_chain_defaults_to_command_when_missing() {
+        assert_eq!(
+            parse_audio_provider_chain(None, DEFAULT_STT_PROVIDER_CHAIN),
+            vec!["command"],
+        );
+        assert_eq!(
+            parse_audio_provider_chain(None, DEFAULT_TTS_PROVIDER_CHAIN),
+            vec!["command"],
+        );
+    }
+
+    #[test]
+    fn parse_audio_chain_trims_normalises_and_filters_empty() {
+        assert_eq!(
+            parse_audio_provider_chain(
+                Some("  COMMAND , , http_local "),
+                DEFAULT_STT_PROVIDER_CHAIN,
+            ),
+            vec!["command", "http_local"],
+        );
+    }
+
+    #[test]
+    fn parse_audio_chain_empty_string_falls_back_to_default() {
+        assert_eq!(
+            parse_audio_provider_chain(Some(""), DEFAULT_STT_PROVIDER_CHAIN),
+            vec!["command"],
+        );
+        assert_eq!(
+            parse_audio_provider_chain(Some(", , "), DEFAULT_TTS_PROVIDER_CHAIN),
+            vec!["command"],
         );
     }
 
