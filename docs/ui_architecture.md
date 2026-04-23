@@ -666,6 +666,129 @@ whitespace-only Eingaben, Response-ersetzt-Heard, wiederholte Updates
 ohne Tween- oder Timer-Leichen, Long-Text-Ellipsis). Harness-Case:
 `scripts/run_overlay_verification.sh utterance-bubble-smoke`.
 
+### 8.5 Visual Action Mode (UI-Staging MVP, Phase 3.3, Ist-Zustand)
+
+Kleine, ehrliche MVP-Umsetzung der Produktachse aus
+[`docs/presence_desktop_interaction.md` §7](./presence_desktop_interaction.md).
+**Kein** Feature-Bau Richtung echter Avatar-Bahn über Fremdfenster,
+**kein** Desktop-Targeting, **keine** IPC-/Core-Änderung. Der Modus
+moduliert rein innerhalb der Presence-Hülle, **wie laut** bestehende
+Action Events im UI auftreten. Die vier Produktnamen (`none` /
+`minimal_feedback` / `guided_movement` / `full_theatrical`) bleiben
+erhalten, werden aber in diesem Schritt bewusst als **UI-Intensitäts-
+Achse** interpretiert — nicht als Choreografie oder Bewegungspfad.
+
+**Datei-Layout.**
+
+```text
+ui/scripts/presence/
+├── presence_controller.gd           # (unverändert)
+├── presence_state.gd                # (unverändert)
+├── visual_action_mode.gd            # NEU: Enum + Parser + Staging
+└── visual_action_preferences.gd     # NEU: lokale UI-Persistenz
+```
+
+**Rolle.** Rein deklarativ: pure statische Helfer, keine Scene, kein
+Tween, keine Event-Subscription. Der Main-Controller löst den Mode in
+`_ready()` einmalig über die Kette `Env > Preferences > Default` auf
+und pusht das Staging auf zwei existierende UI-Bausteine:
+
+- **Action-Banner (`$VBox/ActionBanner`).** Das Banner wird in
+  `none` unabhängig vom laufenden Action-State **unsichtbar** gehalten.
+  In den anderen drei Modi moduliert `banner_alpha` nur die Deckkraft
+  — Inhalte (Titel, Step, Target, Status) bleiben unverändert. Die
+  Kette ist monoton: `NONE < MINIMAL < GUIDED < FULL`.
+- **Workflow-Overlay (`$WorkflowOverlay`).** Der Overlay-Controller
+  bekommt ein externes Gate (`set_external_enabled`) und einen
+  externen Alpha-Multiplikator (`set_external_alpha`). Im Mode
+  `none` / `minimal_feedback` bleibt das Overlay **unabhängig von
+  seinem Flow-Status** versteckt — das Flow-Modell selbst läuft
+  weiter, es wird nur nicht gerendert. In `guided_movement` /
+  `full_theatrical` wird das Overlay freigegeben, mit einer
+  zusätzlichen Alpha-Abschwächung im Guided-Modus.
+
+**Staging-Tabelle (Ist-MVP):**
+
+| Mode              | `banner_visible` | `banner_alpha` | `workflow_overlay_allowed` | `workflow_overlay_alpha` |
+|-------------------|------------------|----------------|----------------------------|--------------------------|
+| `none`            | false            | 0.00           | false                      | 0.00                     |
+| `minimal_feedback`| true             | 0.75           | false                      | 0.00                     |
+| `guided_movement` | true             | 0.92           | true                       | 0.80                     |
+| `full_theatrical` | true             | 1.00           | true                       | 1.00                     |
+
+**MVP-Interpretation der Produktachse (bindend für diesen Zyklus).**
+
+- `none` — Action-Inszenierung aus: Banner und Workflow-Overlay bleiben
+  während aktiver Actions versteckt; der Avatar zeigt den Acting-State
+  weiter über den bestehenden Rim-Accent und die State-Tween-Kette.
+- `minimal_feedback` — Banner-orientiert, dezent (Alpha ≈ 0.75);
+  Workflow-Overlay ruhend (versteckt, aber betriebsbereit).
+- `guided_movement` — Banner klar lesbar (Alpha ≈ 0.92), Workflow-
+  Overlay sichtbar mit leichter Alpha-Absenkung. Weiterhin **keine**
+  Ziel-Koordinaten, **keine** Bildschirmwanderung, **keine** echte
+  Bewegungsbahn — der Name bleibt bewusst, weil wir die Produktachse
+  nicht umbenennen wollen, der heutige UI-Stand liefert aber nur eine
+  stärkere In-Place-Inszenierung.
+- `full_theatrical` — stärkste heute ehrlich darstellbare UI-
+  Intensität innerhalb der Presence-Hülle (Banner 1.00, Overlay 1.00).
+  Keine neue Plattformfähigkeit, kein Avatar-Pfad über fremde Fenster.
+
+Die endgültige Vollausprägung aus §7.3 / §7.4 der Presence-Doku
+(Avatar zeigt Zielobjekt, Bewegungspfad, Gestik, Reaktion) bleibt
+ausdrücklich **offen**; dieser MVP implementiert sie nicht vor.
+
+**Eingabepfade (Env > Preferences > Default).**
+
+1. **Env.** `SMOLIT_UI_VISUAL_ACTION_MODE` akzeptiert kanonische
+   Namen (`none` / `minimal_feedback` / `guided_movement` /
+   `full_theatrical`) und kurze Aliasse (`off` / `min` / `guide` /
+   `demo`). Unbekannte Werte fallen im Parser still auf Default.
+2. **UI-Preferences.** `user://smolit_ui.cfg`, Sektion `[presence]`,
+   Key `visual_action_mode`. Es werden nur **kanonische** Namen
+   akzeptiert — Aliasse werden beim Laden verworfen, damit eine alte
+   Alias-Datei nicht unbemerkt als Referenz durchschlägt.
+3. **Default.** `minimal_feedback` — reproduziert den aktuellen
+   Presence-MVP-Ist-Stand, damit Nutzer ohne Konfiguration dieselbe
+   UI sehen wie bisher. Ohne Env und ohne Preferences-Datei bleibt
+   der Start-Log stumm.
+
+Live-Umschaltung läuft über die env-gated Dev-Steuerung
+(`SMOLIT_UI_DEV_CONTROLS=1`, siehe §8c): ein vierstufiger Picker
+ruft `main.set_visual_action_mode(mode)` auf; ein kleiner
+„Save as default"-Button persistiert den Wert via
+`main.save_visual_action_preference()` in dieselbe
+`user://smolit_ui.cfg`. Kein Auto-Save, kein Settings-System.
+
+**Bindende Grenzen.**
+
+- **Kein Core-/IPC-/Protokoll-Eingriff.** Action Events, Event-
+  Schema, EventBus-Signale bleiben unverändert.
+- **Keine neue Wahrheit.** Der Mode schaltet Darstellung, erzeugt
+  keine Events, filtert keine. Der Overlay-Flow läuft auch in
+  `none` / `minimal_feedback` intern weiter — er wird nur nicht
+  gerendert.
+- **Keine neue Presence- oder Avatar-State-Maschine.** Die
+  bestehenden Modi (Docked/Expanded/Action/Disconnected bzw.
+  Idle/Thinking/Talking/Acting/Disconnected/Error) bleiben die
+  maßgeblichen Achsen.
+- **Keine Pixel-Geometrie, keine Zielkoordinaten.** Die vier
+  Staging-Felder sind Booleans und Alpha-Floats — nichts davon
+  referenziert Fensterposition oder Bildschirm-Koordinaten.
+- **Keine Policy-/Approval-/Trust-Kopplung.** Der Mode ist UI-
+  Darstellung; er darf nie Grundlage für „darf Smolit das tun?"
+  werden.
+- **Default-Smolit-Prinzip bleibt.** Unbekannte Werte fallen auf
+  `minimal_feedback` zurück, nicht auf eine stärkere Stufe.
+
+**Verifikation.** `scripts/visual_action_mode_smoke.gd` (41 Assertions,
+alle PASS): Enum-Namen/Labels, Parser (kanonisch + Aliasse),
+`coerce` für unbekannte Ints, `all_modes`-Reihenfolge, die vier
+Staging-Tabellen inkl. monotoner Alpha-Skala, sowie Preferences-
+Roundtrip (Load/Save, Whitelist für unbekannte String-Werte,
+Ablehnung von Nicht-String-Werten, Unknown-Int-Coerce, Erhaltung
+anderer Sektionen in der Config-Datei). Harness-Case:
+`scripts/run_overlay_verification.sh visual-action-mode-smoke`.
+
 ---
 
 ## 8a. Workflow-Overlay-System (MVP-Spike, Ist-Zustand)

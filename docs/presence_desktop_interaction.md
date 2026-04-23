@@ -462,6 +462,46 @@ Wichtig:
 - Sie ist **Darstellung**, keine Voraussetzung für die eigentliche
   Ausführung.
 
+### 7.5 Ist-Zustand: UI-Staging-MVP (Phase 3.3)
+
+Die vier Modi existieren seit Phase 3.3 als reine **UI-Staging-Achse
+innerhalb der Presence-Hülle**. Das heutige System liefert nur den
+MVP-Anteil der Produktachse §7.1–§7.4 — es stellt keine der in §7.3 /
+§7.4 genannten Endausprägungen bereit (Bewegungspfad, Avatar über den
+Bildschirm, Zielobjekt-Kennzeichnung).
+
+Was die vier Modi heute tatsächlich bedeuten:
+
+- `none` — Action-Banner und Workflow-Overlay bleiben während aktiver
+  Actions unsichtbar. Der Avatar zeigt seinen Acting-State weiterhin
+  über den bestehenden Rim-Accent und die State-Tween-Kette.
+- `minimal_feedback` — Banner sichtbar in dezenter Deckkraft
+  (≈ 0.75), Workflow-Overlay ruhend (versteckt, aber betriebsbereit).
+  Das ist der Default.
+- `guided_movement` — Banner klar lesbar (≈ 0.92), Workflow-Overlay
+  sichtbar mit leichter Alpha-Absenkung. **Keine** Zielkoordinaten,
+  **keine** Bildschirmwanderung, **keine** echte Bewegungsbahn — der
+  Name aus §7.3 bleibt, weil die Produktachse nicht umbenannt werden
+  soll, der MVP-Stand ist aber bewusst nur eine stärkere In-Place-
+  Inszenierung.
+- `full_theatrical` — stärkste heute ehrlich darstellbare UI-
+  Intensität (Banner / Overlay auf voller Deckkraft). Keine neue
+  Plattformfähigkeit, kein Avatar-Pfad über fremde Fenster.
+
+Implementierung:
+[`ui_architecture.md` §8.5](./ui_architecture.md) (Staging-Tabelle,
+Eingabepfade `Env > Preferences > Default`, Dev-Controls-Picker,
+bindende Grenzen). Das Visual-Staging bleibt **optional und
+abschaltbar** im Sinn von §7 — wer `none` wählt, bekommt keine
+Action-Inszenierung jenseits des minimal nötigen Status.
+
+Die Endausprägung (Zielobjekt-Hervorhebung, Bewegungspfad, Gestik)
+bleibt bewusst offen. Sie würde eigene Architekturentscheidungen über
+Desktop-Geometrie, Zielkoordinaten und sichtbare Compositor-Bindung
+voraussetzen, die das aktuelle UI-System nicht trägt — und die nicht
+stillschweigend unter dem „Visual Action Mode"-Schalter eingezogen
+werden dürfen.
+
 ---
 
 ## 8. Desktop Automation Model

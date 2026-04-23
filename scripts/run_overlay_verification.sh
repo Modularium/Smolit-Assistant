@@ -86,6 +86,18 @@
 #                   `avatar_identity_visual.gd` (Smolit / Robot-Head /
 #                   Humanoid-Head / Orb; unbekannte ID bleibt geklemmt,
 #                   kein Crash). Exit 0 = alle PASS.
+#   visual-action-mode-smoke
+#                 — Führt scripts/visual_action_mode_smoke.gd aus.
+#                   Prüft den Phase-3.3-Visual-Action-Mode-MVP
+#                   (ui/scripts/presence/visual_action_mode.gd +
+#                   visual_action_preferences.gd): Enum-Namen/Labels,
+#                   Parser (kanonisch + Aliasse), coerce für unbekannte
+#                   Ints, all_modes-Reihenfolge, die vier Staging-
+#                   Tabellen (NONE/MINIMAL/GUIDED/FULL) inkl.
+#                   Monotonie der Alpha-Werte, sowie Preferences-
+#                   Roundtrip (Load/Save, Whitelist für unbekannte
+#                   Werte, Erhaltung fremder Sektionen). Exit 0 =
+#                   alle PASS.
 #   resolver-wayland-mutter
 #                 — Env-Override (Wayland + GNOME) + Report. Zeigt, dass
 #                   der Resolver backend_wayland_mutter wählt und der
@@ -285,6 +297,16 @@ case "${CASE}" in
     # Orb) inkl. Unbekannte-ID-Clamping.
     exec godot --headless --path "${UI_DIR}" \
       --script "${REPO_ROOT}/scripts/avatar_render_polish_smoke.gd"
+    ;;
+  visual-action-mode-smoke)
+    # Spezialfall: Smoke für den Phase-3.3-Visual-Action-Mode-MVP.
+    # Prüft pure Helfer (Enum-Namen/Labels, Parser mit Aliassen,
+    # coerce, all_modes-Reihenfolge), die vier Staging-Tabellen
+    # (NONE/MINIMAL/GUIDED/FULL) inkl. monotoner Alpha-Skala, sowie
+    # Preferences-Roundtrip (Load/Save, Whitelist, Erhaltung fremder
+    # Sektionen in user://smolit_ui.cfg).
+    exec godot --headless --path "${UI_DIR}" \
+      --script "${REPO_ROOT}/scripts/visual_action_mode_smoke.gd"
     ;;
   resolver-wayland-mutter)
     export SMOLIT_WINDOW_REPORT=1

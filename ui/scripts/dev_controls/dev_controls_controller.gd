@@ -37,6 +37,7 @@ extends PanelContainer
 
 const _AppearanceRef := preload("res://scripts/avatar/avatar_appearance.gd")
 const _IdentityRef := preload("res://scripts/avatar/avatar_identity.gd")
+const _VisualActionModeRef := preload("res://scripts/presence/visual_action_mode.gd")
 
 const ENV_ENABLE: String = "SMOLIT_UI_DEV_CONTROLS"
 
@@ -67,14 +68,27 @@ const _PHASE_PREVIEWS: Array = [
 	"hidden", "planned", "active", "completed", "failed", "cancelled",
 ]
 
+## Visual-Action-Mode-Picker (Phase 3.3 MVP). Reihenfolge folgt der
+## Produktachse aus `docs/presence_desktop_interaction.md §7`
+## (aufsteigende UI-Sichtbarkeit). Kein Smolit-First hier — das ist
+## kein Identity-Selektor, sondern eine UI-Intensitäts-Achse.
+const _VISUAL_ACTION_MODE_OPTIONS: Array = [
+	{"id": _VisualActionModeRef.Mode.NONE,             "label": "None"},
+	{"id": _VisualActionModeRef.Mode.MINIMAL_FEEDBACK, "label": "Minimal feedback"},
+	{"id": _VisualActionModeRef.Mode.GUIDED_MOVEMENT,  "label": "Guided movement"},
+	{"id": _VisualActionModeRef.Mode.FULL_THEATRICAL,  "label": "Full theatrical"},
+]
+
 ## NodePaths zu den beiden UI-Zielen in `main.tscn`. Werden im
 ## `_ready` einmalig aufgelöst; fehlen sie (z. B. unter headless),
 ## bleibt das Panel still.
 @export var avatar_path: NodePath = ^"../Avatar"
 @export var workflow_overlay_path: NodePath = ^"../WorkflowOverlay"
+@export var main_controller_path: NodePath = ^".."
 
 var _avatar: Node = null
 var _workflow_overlay: Node = null
+var _main_controller: Node = null
 
 var _identity_picker: OptionButton = null
 var _theme_picker: OptionButton = null
@@ -84,6 +98,9 @@ var _intensity_value: Label = null
 var _save_button: Button = null
 var _save_status: Label = null
 var _phase_buttons: Array = []
+var _visual_action_mode_picker: OptionButton = null
+var _visual_action_mode_save_button: Button = null
+var _visual_action_mode_save_status: Label = null
 
 
 static func is_enabled() -> bool:
@@ -103,11 +120,13 @@ func _ready() -> void:
 
 	_avatar = get_node_or_null(avatar_path)
 	_workflow_overlay = get_node_or_null(workflow_overlay_path)
+	_main_controller = get_node_or_null(main_controller_path)
 
 	_build_ui()
 	_sync_from_live_appearance()
+	_sync_from_live_visual_action_mode()
 
-	print("[dev-controls] enabled — avatar+overlay preview hooks active")
+	print("[dev-controls] enabled — avatar+overlay+visual-action preview hooks active")
 
 
 func _build_ui() -> void:
@@ -129,6 +148,14 @@ func _build_ui() -> void:
 	var sep := HSeparator.new()
 	sep.modulate = Color(1, 1, 1, 0.3)
 	root.add_child(sep)
+
+	# Visual Action Mode section
+	root.add_child(_build_visual_action_mode_section())
+
+	# Separator
+	var sep2 := HSeparator.new()
+	sep2.modulate = Color(1, 1, 1, 0.3)
+	root.add_child(sep2)
 
 	# Overlay preview section
 	root.add_child(_build_overlay_section())
@@ -229,6 +256,57 @@ func _build_avatar_section() -> Control:
 	return box
 
 
+## Visual Action Mode (Phase 3.3 MVP). Eine Zeile mit OptionButton +
+## kleinem "Save as default"-Button, symmetrisch zur Appearance-
+## Sektion. Bewusst ohne Advanced-Slider: die vier Produktstufen sind
+## diskret, nicht kontinuierlich.
+func _build_visual_action_mode_section() -> Control:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 4)
+
+	var title := Label.new()
+	title.text = "Visual action mode"
+	title.add_theme_font_size_override("font_size", 10)
+	title.modulate = Color(1, 1, 1, 0.6)
+	box.add_child(title)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	box.add_child(row)
+	var label := Label.new()
+	label.text = "Mode"
+	label.custom_minimum_size = Vector2(64, 0)
+	row.add_child(label)
+	_visual_action_mode_picker = OptionButton.new()
+	for option in _VISUAL_ACTION_MODE_OPTIONS:
+		_visual_action_mode_picker.add_item(str(option["label"]), int(option["id"]))
+	_visual_action_mode_picker.item_selected.connect(_on_visual_action_mode_selected)
+	row.add_child(_visual_action_mode_picker)
+
+	var save_row := HBoxContainer.new()
+	save_row.add_theme_constant_override("separation", 6)
+	box.add_child(save_row)
+	_visual_action_mode_save_button = Button.new()
+	_visual_action_mode_save_button.text = "Save as default"
+	_visual_action_mode_save_button.tooltip_text = "Persist the current visual action mode locally (user://smolit_ui.cfg, section [presence])."
+	_visual_action_mode_save_button.pressed.connect(_on_visual_action_mode_save_pressed)
+	save_row.add_child(_visual_action_mode_save_button)
+	_visual_action_mode_save_status = Label.new()
+	_visual_action_mode_save_status.text = ""
+	_visual_action_mode_save_status.modulate = Color(1, 1, 1, 0.55)
+	_visual_action_mode_save_status.add_theme_font_size_override("font_size", 9)
+	save_row.add_child(_visual_action_mode_save_status)
+
+	var hint := Label.new()
+	hint.text = "MVP staging only: banner/overlay visibility — no real desktop path."
+	hint.add_theme_font_size_override("font_size", 9)
+	hint.modulate = Color(1, 1, 1, 0.45)
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(hint)
+
+	return box
+
+
 func _build_overlay_section() -> Control:
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 4)
@@ -281,6 +359,13 @@ func _sync_from_live_appearance() -> void:
 	if _intensity_slider != null:
 		_intensity_slider.set_value_no_signal(intensity)
 		_intensity_value.text = "%.2f" % intensity
+
+
+func _sync_from_live_visual_action_mode() -> void:
+	if _main_controller == null or not _main_controller.has_method("visual_action_mode"):
+		return
+	var current: int = int(_main_controller.call("visual_action_mode"))
+	_select_by_id(_visual_action_mode_picker, current)
 
 
 static func _select_by_id(picker: OptionButton, id: int) -> void:
@@ -377,3 +462,40 @@ func _on_phase_preview_pressed(phase_name: String) -> void:
 		return
 	_workflow_overlay.preview_phase(phase_name)
 	print("[dev-controls] overlay preview: %s" % phase_name)
+
+
+func _on_visual_action_mode_selected(_index: int) -> void:
+	_clear_visual_action_mode_save_status()
+	if _main_controller == null or not _main_controller.has_method("set_visual_action_mode"):
+		return
+	if _visual_action_mode_picker == null:
+		return
+	var mode_id: int = _visual_action_mode_picker.get_selected_id()
+	_main_controller.call("set_visual_action_mode", mode_id)
+	print("[dev-controls] visual action mode = %s" % _VisualActionModeRef.name_of(mode_id))
+
+
+func _on_visual_action_mode_save_pressed() -> void:
+	if _main_controller == null or not _main_controller.has_method("save_visual_action_preference"):
+		_show_visual_action_mode_save_status("unavailable", Color(1, 0.6, 0.6, 0.8))
+		return
+	var err: int = int(_main_controller.call("save_visual_action_preference"))
+	if err == OK:
+		_show_visual_action_mode_save_status("saved", Color(0.7, 1, 0.7, 0.8))
+		print("[dev-controls] visual-action-mode preference saved (user://smolit_ui.cfg)")
+	else:
+		_show_visual_action_mode_save_status("error %d" % err, Color(1, 0.6, 0.6, 0.8))
+		push_warning("[dev-controls] save_visual_action_preference failed with error %d" % err)
+
+
+func _clear_visual_action_mode_save_status() -> void:
+	if _visual_action_mode_save_status == null:
+		return
+	_visual_action_mode_save_status.text = ""
+
+
+func _show_visual_action_mode_save_status(text: String, color: Color) -> void:
+	if _visual_action_mode_save_status == null:
+		return
+	_visual_action_mode_save_status.text = text
+	_visual_action_mode_save_status.modulate = color

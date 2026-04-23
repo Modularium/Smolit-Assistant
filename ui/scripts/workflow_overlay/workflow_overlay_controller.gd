@@ -66,6 +66,14 @@ const _ROLE_INDEX_RESULT: int = 2
 
 var _flow: Dictionary = _StateRef.new_flow()
 
+## Externes Sichtbarkeits-Gate / Alpha aus dem Visual Action Mode.
+## Standardwerte reproduzieren das Vor-MVP-Verhalten (Overlay zeigt
+## sich bei laufendem Flow in voller Alpha). Der Main-Controller setzt
+## beide Werte nach `_ready` abhängig vom aktuellen Mode; ohne
+## Main-Interaktion bleibt das Overlay genau so sichtbar wie bisher.
+var _external_enabled: bool = true
+var _external_alpha: float = 1.0
+
 @onready var _row: HBoxContainer = $Row
 @onready var _trigger_view: PanelContainer = $Row/TriggerNode
 @onready var _edge_a: Control = $Row/EdgeA
@@ -351,9 +359,38 @@ func _apply_node_view(view: PanelContainer, index: int, mode: int) -> void:
 ## beobachten. Jeder Terminal-Zustand (`completed`, `failed`,
 ## `unknown`) hält den Flow sichtbar, bis der nächste `action_planned`
 ## ihn überschreibt oder der Nutzer die Verbindung verliert.
+##
+## Zusätzlich respektiert die Sichtbarkeit seit dem Visual-Action-Mode-
+## MVP ein externes Gate (`_external_enabled`) — im Mode `none` /
+## `minimal_feedback` bleibt das Overlay unabhängig vom Flow-Status
+## versteckt. Kein Flow-Reset, kein Event-Schlucken; das Overlay
+## verarbeitet Events weiter, es zeigt sie nur nicht an.
 func _apply_visibility() -> void:
 	var phase := int(_flow.get("phase", _StateRef.Phase.HIDDEN))
-	visible = (phase != _StateRef.Phase.HIDDEN)
+	var flow_visible: bool = phase != _StateRef.Phase.HIDDEN
+	visible = flow_visible and _external_enabled
+
+
+## Externes Sichtbarkeits-Gate für den Visual Action Mode. Wird vom
+## Main-Controller gesetzt, wenn der aktuelle Mode das Overlay sperren
+## soll (`none` / `minimal_feedback`). Das Flow-Modell selbst bleibt
+## unverändert; nur `_apply_visibility` berücksichtigt das Gate.
+func set_external_enabled(enabled: bool) -> void:
+	if enabled == _external_enabled:
+		return
+	_external_enabled = enabled
+	_apply_visibility()
+
+
+## Externer Alpha-Multiplikator für den Overlay-Root. Gibt dem
+## Visual-Action-Mode die Möglichkeit, das Overlay **leiser** zu
+## zeigen (z. B. `guided_movement` = 0.80) statt es voll aufzudrehen.
+## Wert wird auf `[0, 1]` geklemmt. Für `disabled` / `none` wirkt der
+## Alpha nicht (Sichtbarkeit ist dann ohnehin aus).
+func set_external_alpha(alpha: float) -> void:
+	var clamped: float = clampf(alpha, 0.0, 1.0)
+	_external_alpha = clamped
+	modulate.a = clamped
 
 
 # --- Dev-/Preview-Hooks (kein Produktpfad) -------------------------------

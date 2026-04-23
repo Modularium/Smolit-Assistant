@@ -12,6 +12,16 @@ extends Control
 
 const PresenceStateRef := preload("res://scripts/presence/presence_state.gd")
 const _WindowBehaviorRef := preload("res://scripts/window_behavior/window_behavior.gd")
+const VisualActionModeRef := preload("res://scripts/presence/visual_action_mode.gd")
+const _VisualActionPrefsRef := preload("res://scripts/presence/visual_action_preferences.gd")
+
+## Env-Override für den Visual Action Mode. Höchste Priorität in der
+## Kette Env > Preferences > Default. Unbekannte Werte fallen im Parser
+## still auf Default (`minimal_feedback`) zurück — kein Crash, kein
+## Log-Spam. Kanonische Namen: `none` / `minimal_feedback` /
+## `guided_movement` / `full_theatrical`. Aliasse (`off`, `min`,
+## `guide`, `demo`) sind im Env-Parser erlaubt, nicht in der Datei.
+const ENV_VISUAL_ACTION_MODE: String = "SMOLIT_UI_VISUAL_ACTION_MODE"
 
 ## Wird gesetzt, wenn der opt-in Click-through-Folgeschritt wirklich aktiv
 ## geworden ist. Reiner Lifetime-Anker — `main.gd` spricht den Controller
@@ -68,6 +78,18 @@ var _current_selected_target: Dictionary = {}
 @onready var _ping_button: Button = $VBox/DockPanel/DockVBox/InputRow/PingButton
 
 @onready var _avatar: Control = $Avatar
+@onready var _workflow_overlay: Node = $WorkflowOverlay
+
+## Aktiver Visual Action Mode (MVP, rein UI-Staging — kein Produktversprechen
+## einer echten Bewegungsbahn oder Zielkoordinaten). Wird in `_ready` aus
+## Env > Preferences > Default aufgelöst und moduliert ab dann nur, **wie
+## laut** das Action-Banner und das Workflow-Overlay während laufender
+## Action Events auftreten. Keine Scheinbewegung des Avatars über Fremd-
+## fenster; keine Kopplung an Core/IPC.
+var _visual_action_mode: int = VisualActionModeRef.DEFAULT
+var _visual_action_staging: Dictionary = VisualActionModeRef.staging_for(
+	VisualActionModeRef.DEFAULT,
+)
 
 ## Compact Input UX (Presence Interaction Layer).
 ##
@@ -146,6 +168,13 @@ func _ready() -> void:
 	_selected_target_row.visible = false
 	_approval_selected_target.visible = false
 	_compact_panel.visible = false
+
+	# Visual Action Mode (Env > Preferences > Default) einmalig auflösen
+	# und auf Banner / Workflow-Overlay projizieren. Keine Laufzeit-
+	# Subscription — Änderungen passieren später nur über die öffentliche
+	# `set_visual_action_mode()`-API (Dev-Controls, Tests).
+	_resolve_visual_action_mode()
+	_apply_visual_action_staging()
 
 	# Linux Window Behavior — ein einziger Fassaden-Einstieg, der alle
 	# opt-in Pfade (Probe, Overlay, Click-through, X11-AOT, Runtime-
@@ -271,7 +300,18 @@ func _on_action_context_changed(info: Dictionary) -> void:
 		_action_banner.visible = false
 		return
 
+	# Visual Action Mode: im Mode `none` bleibt das Banner unabhängig vom
+	# laufenden Action-State unsichtbar. Für die drei anderen Modi
+	# moduliert das Staging nur die Alpha — die bestehenden Inhalte
+	# (Titel, Step, Target, Status) bleiben unverändert.
+	var banner_allowed: bool = bool(_visual_action_staging.get("banner_visible", true))
+	if not banner_allowed:
+		_action_banner.visible = false
+		return
+
 	_action_banner.visible = true
+	var banner_alpha: float = float(_visual_action_staging.get("banner_alpha", 1.0))
+	_action_banner.modulate.a = clampf(banner_alpha, 0.0, 1.0)
 	_action_title.text = str(info.get("title", "action"))
 	_action_step.text = str(info.get("step", ""))
 	_action_target.text = str(info.get("target_text", ""))
@@ -867,3 +907,96 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		if key.pressed and not key.echo and key.keycode == KEY_ESCAPE:
 			_close_compact_input()
 			accept_event()
+
+
+# --- Visual Action Mode (MVP UI-Staging, siehe §8.5) ---------------------
+
+
+## Liest `SMOLIT_UI_VISUAL_ACTION_MODE` aus der Umgebung und die
+## gespeicherte Präferenz aus `user://smolit_ui.cfg` (Sektion
+## `[presence]`). Strikte Kette: Env > Preferences > Default. Jeder
+## Schritt fällt still auf den nächsten zurück, wenn sein Wert
+## ungültig / fehlend ist. Ergebnis landet in `_visual_action_mode`
+## und `_visual_action_staging`.
+##
+## Der Start-Log ist bewusst knapp und nur dann aktiv, wenn etwas
+## explizit gesetzt wurde — ein purer Default-Start bleibt stumm,
+## damit die Baseline-Harness-Cases byte-kompatibel bleiben.
+func _resolve_visual_action_mode() -> void:
+	var env_raw := OS.get_environment(ENV_VISUAL_ACTION_MODE).strip_edges()
+	var prefs: Dictionary = _VisualActionPrefsRef.load_preferences()
+
+	var mode: int = VisualActionModeRef.DEFAULT
+	var source := "default"
+	if env_raw != "":
+		mode = VisualActionModeRef.mode_from_string(env_raw)
+		source = "env"
+	elif prefs.has(_VisualActionPrefsRef.KEY_VISUAL_ACTION_MODE):
+		mode = VisualActionModeRef.coerce(
+			int(prefs[_VisualActionPrefsRef.KEY_VISUAL_ACTION_MODE]),
+		)
+		source = "prefs"
+
+	_visual_action_mode = mode
+	_visual_action_staging = VisualActionModeRef.staging_for(mode)
+
+	if source != "default":
+		print("[visual-action-mode] mode=%s(%s)" % [
+			VisualActionModeRef.name_of(mode), source,
+		])
+
+
+## Überträgt das aktuelle Staging auf die UI-Bausteine:
+##   * Action-Banner: Sichtbarkeit-Gate + Alpha-Multiplier; das Banner
+##     wird im nächsten `_on_action_context_changed` ohnehin erneut
+##     angefasst, daher hier nur der Alpha-Reset, damit ein eventuell
+##     bereits sichtbares Banner sofort die neue Intensität erbt.
+##   * Workflow-Overlay: externes Gate + Alpha; der Overlay entscheidet
+##     dann selbst, ob sein laufender Flow zusätzlich sichtbar sein
+##     soll (das Gate sperrt nur, es erzwingt nichts).
+func _apply_visual_action_staging() -> void:
+	var banner_alpha: float = float(_visual_action_staging.get("banner_alpha", 1.0))
+	_action_banner.modulate.a = clampf(banner_alpha, 0.0, 1.0)
+
+	if _workflow_overlay != null:
+		var allowed: bool = bool(_visual_action_staging.get("workflow_overlay_allowed", true))
+		var overlay_alpha: float = float(_visual_action_staging.get("workflow_overlay_alpha", 1.0))
+		if _workflow_overlay.has_method("set_external_enabled"):
+			_workflow_overlay.call("set_external_enabled", allowed)
+		if _workflow_overlay.has_method("set_external_alpha"):
+			_workflow_overlay.call("set_external_alpha", clampf(overlay_alpha, 0.0, 1.0))
+
+
+## Öffentliche API für Dev-Controls / Tests. Setzt den Mode zur
+## Laufzeit und pusht das neue Staging auf Banner + Overlay. Unbekannte
+## Mode-Integer werden defensiv auf den Default geklemmt (`coerce`).
+## Persistiert wird hier **nicht** — das ist ein bewusster Extra-Schritt
+## über `save_visual_action_preference()`.
+func set_visual_action_mode(mode: int) -> void:
+	var clamped: int = VisualActionModeRef.coerce(mode)
+	if clamped == _visual_action_mode:
+		return
+	_visual_action_mode = clamped
+	_visual_action_staging = VisualActionModeRef.staging_for(clamped)
+	_apply_visual_action_staging()
+	print("[visual-action-mode] set mode=%s" % VisualActionModeRef.name_of(clamped))
+
+
+## Aktueller Mode als Integer (für Dev-Controls-Sync, Tests).
+func visual_action_mode() -> int:
+	return _visual_action_mode
+
+
+## Aktuelles Staging-Dictionary (flache Kopie). Für Tests / Dev-
+## Inspektion; nicht dafür gedacht, live mutiert zu werden.
+func visual_action_staging() -> Dictionary:
+	return _visual_action_staging.duplicate(true)
+
+
+## Persistiert den aktuellen Mode in `user://smolit_ui.cfg`
+## (Sektion `[presence]`). Dünner Wrapper um den Preferences-Helper,
+## damit die Dev-Controls persistieren können, ohne selbst eine zweite
+## Wahrheit über Pfad oder Sanitisierung zu halten. Gibt den
+## `ConfigFile.save`-Statuscode zurück (OK bei Erfolg).
+func save_visual_action_preference() -> int:
+	return _VisualActionPrefsRef.save_preferences(_visual_action_mode)

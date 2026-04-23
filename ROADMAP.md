@@ -274,8 +274,31 @@ Subeinheit 3.4 unten sowie
 - [ ] Snap-to-Edge, Screen-Positionierung, Multi-Monitor-Heuristik —
       unter Wayland nicht client-seitig; frühestens in Phase C der
       Overlay-Strategie
-- [ ] Visual Action Modes (minimal feedback / guided / theatrical) als
-      Benutzerpräferenz
+- [~] Visual Action Modes (minimal feedback / guided / theatrical) als
+      Benutzerpräferenz — Phase-3.3-MVP gelandet: UI-Staging-Achse
+      mit vier Modi (`none` / `minimal_feedback` / `guided_movement` /
+      `full_theatrical`), die rein innerhalb der Presence-Hülle das
+      Action-Banner und das Workflow-Overlay gaten und in der Deckkraft
+      modulieren. Realisiert in `ui/scripts/presence/visual_action_mode.gd`
+      und `ui/scripts/presence/visual_action_preferences.gd`; Integration
+      im `main.gd` (Resolver `Env > Preferences > Default`, Staging-Push
+      auf Banner + Overlay) und in der env-gated Dev-Steuerung
+      (`SMOLIT_UI_DEV_CONTROLS=1`, Vier-Stufen-Picker + „Save as
+      default"). Env-Flag `SMOLIT_UI_VISUAL_ACTION_MODE` (kanonische
+      Namen plus Aliasse `off` / `min` / `guide` / `demo`). Persistenz
+      in `user://smolit_ui.cfg` Sektion `[presence]`. Verifiziert durch
+      41-Assertions-Smoke `scripts/visual_action_mode_smoke.gd`
+      (Harness-Case `visual-action-mode-smoke`). Default bleibt
+      `minimal_feedback` — reproduziert den bisherigen Ist-Stand.
+      **Restschuld (bewusst):** Die Endausprägung aus
+      [docs/presence_desktop_interaction.md §7.3 / §7.4](./docs/presence_desktop_interaction.md)
+      — Avatar zeigt Zielobjekt, Bewegungspfad, Gestik über Fremd-
+      fenster — ist **nicht** implementiert und bleibt offen. Der
+      heutige Schritt benennt die vier Produktstufen ehrlich, liefert
+      aber nur eine In-Place-Intensitätsachse; keine Pixel-Geometrie,
+      keine Desktop-Automation, keine Core-/IPC-Änderung. Details in
+      [docs/ui_architecture.md §8.5](./docs/ui_architecture.md) und
+      [docs/presence_desktop_interaction.md §7.5](./docs/presence_desktop_interaction.md).
 - [ ] Kill-Switch / Stop-Aktion im Banner (setzt Core-seitige
       Cancel-API voraus)
 
@@ -632,8 +655,10 @@ Modes). Noch **nicht** implementiert.
 - [ ] Presence Modes konfigurierbar (Off / Icon only / Light avatar /
       Full avatar)
 - [ ] Zustände Docked / Expanded / Action Mode im Overlay
-- [ ] Visual Action Modes (none / minimal feedback / guided movement /
-      full theatrical)
+- [~] Visual Action Modes (none / minimal feedback / guided movement /
+      full theatrical) — Phase-3.3-MVP als UI-Staging-Achse gelandet
+      (siehe Phase 3 Subeinheit 3.3 oben). Endausprägung (Bewegungspfad
+      / Zielobjekt / Gestik über Fremdfenster) bleibt offen.
 - [ ] Screen-Movement
 - [ ] Idle-Behavior-Cycles
 - [ ] Attention-System
