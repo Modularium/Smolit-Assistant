@@ -984,11 +984,33 @@ und Nicht-Ziele.
       fünf `text_provider_*`-Felder erweitert
       (`configured` / `active` / `availability` / `last_error` /
       `cloud`). Keine neuen Eventtypen, keine Policy-Änderung, kein
-      Cloud-Pfad. Tests: 103 Core-PASS (8 neue Resolver-Unit-Tests,
-      3 neue Config-Tests, 3 neue IPC-Server-Integrationstests), alle
-      10 UI-Smokes bleiben unverändert grün. Details in
+      Cloud-Pfad. Details in
       [docs/provider_fallback_and_settings_architecture.md §9](./docs/provider_fallback_and_settings_architecture.md)
       und [docs/api.md §2.3 / §3](./docs/api.md).
+- [x] PR 2a: Llamafile-Local-Vorbereitung (Variante A, Architektur-
+      Stub) — gelandet. Neue Enum-Variante
+      `TextProviderImpl::LlamafileLocal`, `LlamafileLocalProvider`
+      mit acht-Zustände-Lifecycle-Modell (heute produziert:
+      `disabled` / `not_configured` / `configured`; scaffolding:
+      `starting` / `ready` / `busy` / `failed` / `stopped`),
+      `LlamafileConfig` in `config.rs` mit vier neuen Env-Vars
+      (`SMOLIT_LLAMAFILE_ENABLED` / `SMOLIT_LLAMAFILE_PATH` /
+      `SMOLIT_LLAMAFILE_MODE` mit Whitelist `on_demand`/`standby` /
+      `SMOLIT_LLAMAFILE_IDLE_TIMEOUT_SECONDS`). Stub liefert beim
+      Aufruf **ausschließlich** deterministische Refusal-Klassen
+      (`disabled` / `not_configured` / `not_implemented`); Resolver
+      instanziiert den Stub auch bei inaktivem Lifecycle, damit
+      Fallback-Fluss `llamafile_local → abrain` mit
+      `availability=fallback_active` überprüfbar ist. **Runtime
+      nicht implementiert** — Prozess-Spawn, HTTP-Dispatch,
+      Idle-Timeout-Scheduling bleiben PR 2b. Kein Modell-Bundling,
+      keine Secrets, keine UI, keine Cloud. Core-Tests: 120 PASS
+      (17 neue Resolver-/Lifecycle-Tests, 4 neue Config-Tests); alle
+      10 UI-Smokes bleiben grün.
+- [ ] PR 2b: Llamafile Runtime — offen. Prozess-Spawn, HTTP-Client,
+      Idle-Timeout-Transitions, `Starting`/`Ready`/`Busy`/`Failed`/
+      `Stopped`-Semantik, ggf. additive StatusPayload-Erweiterung um
+      Lifecycle-Sichtbarkeit. Setzt PR 2a voraus.
 - [ ] PR 3: Settings-Shell im UI (Expanded-Window, read-only
       Bereiche aus Doku §6; keine Schreibaktionen in den Core).
 - [ ] PR 4: STT-/TTS-Provider-Settings + Status-Anzeige (additive

@@ -156,9 +156,69 @@ ist einzeln entscheid- und ablehnbar.
   (z. B. `llama.cpp`-Server, lokaler vLLM, Ollama). Der Core spricht
   JSON/HTTP; der Dienst läuft vollständig auf dem Host.
   Netzwerkzugriffe nur auf Loopback.
+- **`llamafile_local` (architektonisch vorbereitet, Runtime folgt).**
+  Konkreter kuratierter Unterfall des lokalen HTTP-Providers: ein auf
+  dem Host laufendes **llamafile** (Single-Binary-LLM), das lazy
+  gestartet und nach einem konfigurierten Idle-Timeout wieder
+  beendet werden kann. Dieser Kind existiert seit diesem PR als
+  Provider-Variante im Core-Resolver (`TextProviderImpl::LlamafileLocal`)
+  mit vollständigem Config- und Lifecycle-Modell (siehe §4.1a). Die
+  eigentliche Prozess- und HTTP-Orchestrierung ist **noch nicht**
+  implementiert; `run()`-Aufrufe liefern deterministische
+  Refusal-Klassen (`disabled` / `not_configured` / `not_implemented`),
+  die der Resolver in `text_provider_last_error` spiegelt. ABrain
+  bleibt Default und wird nicht berührt.
 - **Cloud-Provider.** Externer Reasoning-Dienst über das öffentliche
   Netz (HTTPS). Muss den Secret-Regeln aus §7 genügen und wird in
   der UI als `cloud` gekennzeichnet.
+
+### 4.1a `llamafile_local` — Config- und Lifecycle-Modell
+
+Architektonisch vorbereitet seit dem Llamafile-Prep-PR. Der Provider
+ist im Core-Resolver als eigener Kind geführt und **kein Sonderfall
+von ABrain** — er hat eigene Config, eigenen Lifecycle und eigenen
+Fehlerpfad.
+
+**Konfiguration** (`config.rs::LlamafileConfig`, Env-basiert):
+
+- `SMOLIT_LLAMAFILE_ENABLED` (bool, Default `false`) — harter Master-
+  Schalter. Ohne diesen Flag bleibt der Provider auf `Disabled`,
+  unabhängig davon, ob `llamafile_local` in der Provider-Chain steht.
+- `SMOLIT_LLAMAFILE_PATH` (optionaler String, Default leer) — Pfad zum
+  llamafile-Binary. Ohne Pfad: `NotConfigured`.
+- `SMOLIT_LLAMAFILE_MODE` (String, Whitelist `on_demand` / `standby`,
+  Default `on_demand`) — spätere Prozess-Strategie. Wird gelesen und
+  in die Fehlermeldung gereicht, aber noch nicht ausgeführt.
+- `SMOLIT_LLAMAFILE_IDLE_TIMEOUT_SECONDS` (u64, Default `300`) —
+  Idle-Timeout für den `on_demand`-Modus. Heute gelesen, noch nicht
+  ausgeführt.
+
+Unbekannte Mode-Werte fallen beim Parsing still auf den Default
+zurück; keine Freiform-Werte werden akzeptiert.
+
+**Lifecycle** (`providers::text::LlamafileLifecycle`): ein kleines
+Enum-Vokabular, das **heute nur die ersten drei Zustände produziert**
+und den Rest als Scaffolding für die Runtime-Stufe reserviert.
+
+| Zustand (heute erreichbar?) | Bedeutung                                                                                                                                                                                          |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `disabled` (ja)             | Feature-Flag aus. Provider inert, `run()` → Refusal mit Klasse `disabled`.                                                                                                                         |
+| `not_configured` (ja)       | Enabled, aber Pfad leer. `run()` → Refusal mit Klasse `not_configured`.                                                                                                                            |
+| `configured` (ja)           | Enabled + Pfad gesetzt. `run()` → Refusal mit Klasse `not_implemented` (Mode und Idle-Timeout werden im Fehlertext mitgeführt).                                                                    |
+| `starting` / `ready` / `busy` / `failed` / `stopped` (nein) | Scaffolding für den Runtime-PR. Die Tag-Strings sind per Test eingefroren (`llamafile_lifecycle_tag_strings_are_stable`), damit spätere Runtime-Übergänge kein Enum-Umbau erfordern. |
+
+**Resolver-Integration.** `llamafile_local` darf heute in Chains wie
+`abrain,llamafile_local` oder `llamafile_local,abrain` stehen. Der
+Resolver instanziiert den Stub **immer**, auch wenn er disabled /
+nicht konfiguriert ist — das macht Fehlerklasse und Fallback-Pfad
+(`availability=fallback_active`) auch in der Vorbereitungsstufe
+überprüfbar. Kein stiller Drop, keine Auto-Discovery, kein implizites
+Enablen.
+
+**Nicht Teil des Prep-PRs:** Prozess-Spawn, HTTP-Client,
+Modell-Download, Binary-Bundling, Secret-Handling, Settings-UI.
+Diese sind für den **Runtime-PR** reserviert, der die Kriterien aus
+§7 und die zugehörigen Tests mitbringt.
 
 ### 4.2 STT
 
@@ -364,7 +424,7 @@ bleibt.
   Abstraktion hinter dem bisherigen ABrain-CLI-Pfad. Realisiert als
   `enum TextProviderImpl` (Enum-Dispatch, kuratiert, kein Plug-in-
   Register) in `core/src/providers/text.rs`. Heute produktiv
-  implementiert: **genau ein** Kind — `abrain` (CLI, Signatur
+  implementiert: **ein** Kind — `abrain` (CLI, Signatur
   unverändert `{cmd} task run "<input>"`, siehe
   [`api.md` §3](./api.md)). Der `TextProviderResolver` liest eine
   geordnete Kette, probiert jeden Provider in Reihenfolge, liefert
@@ -381,11 +441,42 @@ bleibt.
   `StatusPayload.text_provider_last_error` gespiegelt. Kein neuer
   Eventtyp, kein Policy-Eingriff, kein Cloud-Pfad. StatusPayload
   additiv um fünf `text_provider_*`-Felder erweitert (siehe
-  [`api.md` §2.3](./api.md)). Tests: 8 neue Resolver-Unit-Tests in
-  `core/src/providers/text.rs`, 3 neue Config-Tests in `config.rs`,
-  3 neue IPC-Server-Tests (Resolver-Erfolg über IPC, Resolver-
-  Fehler-/Status-Durchschlag, `get_status`-Payload mit den neuen
-  Feldern). Gesamtsumme Core-Tests: 103 PASS.
+  [`api.md` §2.3](./api.md)).
+- **PR 2a — Llamafile-Local-Vorbereitung (Ist, Variante A).**
+  Architektonische Vorbereitung eines zweiten lokalen Text-Providers
+  (`llamafile_local`), **ohne** die Runtime bereits zu liefern. Neue
+  Enum-Variante `TextProviderImpl::LlamafileLocal`, neuer
+  `LlamafileLocalProvider` mit Lifecycle-Modell
+  (`LlamafileLifecycle` mit acht Zuständen — heute produziert:
+  `disabled`, `not_configured`, `configured`; scaffolding:
+  `starting` / `ready` / `busy` / `failed` / `stopped`). Config-Sicht
+  über `LlamafileConfig` (Felder `enabled` / `path` / `mode` /
+  `idle_timeout_seconds`, vier neue Env-Vars) und Provider-interne
+  `LlamafileConfigView`. Der Stub liefert beim Aufruf
+  **deterministische Refusal**-Klassen (`disabled` /
+  `not_configured` / `not_implemented`), die der Fehlerklassifikator
+  im Resolver sauber in `text_provider_last_error` spiegelt —
+  keine Fake-Antworten, kein stilles Verschwinden aus der Kette,
+  kein impliziter Cloud-Fallback. Resolver instanziiert den Stub
+  auch bei `disabled` / `not_configured`, damit Fallback-Fluss
+  `llamafile_local → abrain` (Availability `fallback_active`)
+  überprüfbar ist. `SMOLIT_LLAMAFILE_MODE` nimmt nur die Whitelist
+  `on_demand` / `standby`; unbekannte Werte fallen auf den Default.
+  StatusPayload bleibt in diesem Prep-PR unverändert — Availability
+  und Fehlerklasse des bestehenden Vokabulars reichen ehrlich. Die
+  eigentliche Prozess- und HTTP-Orchestrierung ist **Runtime-PR**
+  (siehe PR 2b).
+- **PR 2b — Llamafile Runtime (noch offen).** Prozess-Spawn,
+  HTTP-Dispatch, Idle-Timeout-Scheduling, `Starting` / `Ready` /
+  `Busy` / `Failed` / `Stopped`-Transitions, Healthcheck, ggf.
+  additive StatusPayload-Erweiterung um Lifecycle-Sichtbarkeit. Setzt
+  PR 2a voraus, bekommt eigene Review-Checkliste (Prozess-Lifecycle,
+  Crash-Semantik, Log-Filterung für Modell-Output).
+
+Tests für PR 2 + 2a: 17 neue Resolver-/Lifecycle-Unit-Tests in
+`core/src/providers/text.rs`, 7 Config-Tests in `config.rs`, 3
+IPC-Server-Tests. Gesamtsumme Core-Tests: 120 PASS.
+
 - **PR 3 — Settings-Shell im UI.** Reine UI-Shell für ein
   Settings-Panel im Expanded-Window: Bereiche aus §6 als leere /
   read-only Kästen, erreichbar über einen neuen Dev-/Opt-in-Eintrag.

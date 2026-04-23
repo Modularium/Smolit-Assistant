@@ -433,6 +433,7 @@ mod tests {
             approval,
             text_provider: crate::config::TextProviderConfig {
                 chain: vec!["abrain".into()],
+                llamafile: crate::config::LlamafileConfig::default(),
             },
         };
         Arc::new(App::new(config))

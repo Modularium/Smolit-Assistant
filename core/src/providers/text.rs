@@ -45,6 +45,11 @@ use tracing::{info, warn};
 /// beim Config-Parsen sofort beim Kompilieren auffällt.
 pub const PROVIDER_NAME_ABRAIN: &str = "abrain";
 
+/// Kanonischer Namensstring für den lokalen llamafile-Provider.
+/// **Architektonisch vorbereitet**, Runtime noch nicht implementiert.
+/// In der Konfiguration als `llamafile_local` einzusetzen.
+pub const PROVIDER_NAME_LLAMAFILE_LOCAL: &str = "llamafile_local";
+
 const ABRAIN_DEFAULT_TIMEOUT_SECS: u64 = 30;
 
 /// Fehlerklassen, die der Resolver intern trackt. Die Strings sind
@@ -89,9 +94,15 @@ pub struct TextProviderChainItem {
 
 /// Enum-Dispatch über alle heute existierenden Text-Provider.
 /// Bewusst klein; neue Varianten kommen per eigenem PR.
+///
+/// * `Abrain` — produktiv implementiert (Ist-Zustand).
+/// * `LlamafileLocal` — **architektonisch vorbereitet**, Runtime-
+///   Integration folgt in einem Folge-PR. Siehe
+///   [`LlamafileLocalProvider`] für die Stub-Semantik.
 #[derive(Debug)]
 pub enum TextProviderImpl {
     Abrain(AbrainCliProvider),
+    LlamafileLocal(LlamafileLocalProvider),
 }
 
 impl TextProviderImpl {
@@ -100,6 +111,7 @@ impl TextProviderImpl {
     pub fn kind_name(&self) -> &'static str {
         match self {
             Self::Abrain(_) => PROVIDER_NAME_ABRAIN,
+            Self::LlamafileLocal(_) => PROVIDER_NAME_LLAMAFILE_LOCAL,
         }
     }
 
@@ -115,9 +127,25 @@ impl TextProviderImpl {
     pub fn classify_error(err: &anyhow::Error) -> &'static str {
         // Wir greifen defensiv auf die Kette von Fehlern zu. `anyhow`
         // stapelt Contexts; die Signalstrings unten kommen aus den
-        // `context()`- und `bail!`-Zeilen von `AbrainCliProvider::run`.
+        // `context()`- und `bail!`-Zeilen von `AbrainCliProvider::run`
+        // bzw. `LlamafileLocalProvider::run`.
         let chain: Vec<String> = err.chain().map(|e| e.to_string()).collect();
         let joined = chain.join(" | ").to_ascii_lowercase();
+
+        // Llamafile-spezifische Tags zuerst prüfen, damit die
+        // allgemeinen Muster („failed to spawn" o. ä.) nicht
+        // fälschlicherweise auf Prep-Refusals greifen.
+        if joined.contains("llamafile_local") {
+            if joined.contains("is disabled") {
+                return "disabled";
+            }
+            if joined.contains("not configured") {
+                return "not_configured";
+            }
+            if joined.contains("runtime is not yet implemented") {
+                return "not_implemented";
+            }
+        }
 
         if joined.contains("timed out") {
             "timeout"
@@ -137,6 +165,7 @@ impl TextProviderImpl {
     pub async fn run(&self, input: &str) -> Result<String> {
         match self {
             Self::Abrain(p) => p.run(input).await,
+            Self::LlamafileLocal(p) => p.run(input).await,
         }
     }
 }
@@ -196,6 +225,194 @@ impl AbrainCliProvider {
             bail!("ABrain command `{command}` returned no output");
         }
         Ok(response)
+    }
+}
+
+// --- Llamafile Local (architektonisch vorbereitet, Runtime folgt) ---
+//
+// Siehe `docs/provider_fallback_and_settings_architecture.md` §4.1
+// („Lokaler HTTP-Provider") und §4.3 des Llamafile-Vorbereitungs-PRs.
+// Diese Schicht ist bewusst ein **ehrlicher Stub**: sie modelliert die
+// Config, den Lifecycle und die Dispatch-Integration vollständig,
+// liefert aber beim Aufruf deterministisch einen Fehler mit klar
+// benannter Klasse (`disabled` / `not_configured` / `not_implemented`).
+// Die echte Prozess-Orchestrierung (Spawn, HTTP-Client, Idle-Timeout,
+// Warm-Standby) wohnt in einem expliziten Folge-PR. Dieser PR macht
+// ausschließlich die Architektur tragfähig.
+
+/// Lifecycle des lokalen llamafile-Providers. Das Vokabular ist
+/// absichtlich größer als heute produziert: die ersten drei Varianten
+/// entstehen bereits in diesem PR (Disabled / NotConfigured /
+/// Configured), die übrigen sind **Scaffolding** für die spätere
+/// Runtime-Stufe (Starting / Ready / Busy / Failed / Stopped).
+///
+/// Die Enum ist exhaustiv, damit der Stub heute schon keine
+/// undefinierten Zwischenzustände kennt und spätere Runtime-Übergänge
+/// additiv entlang dieser Strings laufen — ohne Enum-Umbau. Die
+/// Scaffolding-Varianten sind heute unerreichbar; `as_str()` deckt sie
+/// aber ab (siehe Test `llamafile_lifecycle_tag_strings_are_stable`),
+/// damit die Tag-Strings eingefroren sind, bevor der Runtime-PR sie
+/// aktiv nutzt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum LlamafileLifecycle {
+    /// Feature-Flag aus (`SMOLIT_LLAMAFILE_ENABLED` nicht gesetzt /
+    /// explizit `false`). Provider-Instanz existiert, ist aber inert.
+    Disabled,
+    /// Enabled, aber Pfad fehlt oder ist leer (`SMOLIT_LLAMAFILE_PATH`).
+    /// Ohne Path gibt es nichts zu starten — ein Request führt zu
+    /// einer klaren `not_configured`-Refusal, nicht zu einem
+    /// halbgültigen Startversuch.
+    NotConfigured,
+    /// Enabled und konfiguriert; Prozess noch nicht gestartet. In
+    /// dieser Stufe landet der Stub heute, wenn Env-Flags vollständig
+    /// gesetzt sind. Ein Request führt aktuell zu `not_implemented` —
+    /// die Runtime-Integration kommt in einem Folge-PR.
+    Configured,
+    /// Prozess wird hochgefahren. **Heute nicht erreichbar.**
+    Starting,
+    /// Prozess läuft und ist idle-ready. **Heute nicht erreichbar.**
+    Ready,
+    /// Prozess bedient gerade einen Request. **Heute nicht erreichbar.**
+    Busy,
+    /// Prozess hat sich abgemeldet, letzter Start ist fehlgeschlagen.
+    /// **Heute nicht erreichbar.**
+    Failed,
+    /// Prozess wurde kontrolliert beendet (z. B. Idle-Timeout oder
+    /// Shutdown). **Heute nicht erreichbar.**
+    Stopped,
+}
+
+impl LlamafileLifecycle {
+    /// Kleiner, stabiler String-Tag pro Lifecycle-Zustand. Primär für
+    /// Logs und Tests; könnte später in additive Statusfelder
+    /// wandern, wenn die UI das braucht.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Disabled => "disabled",
+            Self::NotConfigured => "not_configured",
+            Self::Configured => "configured",
+            Self::Starting => "starting",
+            Self::Ready => "ready",
+            Self::Busy => "busy",
+            Self::Failed => "failed",
+            Self::Stopped => "stopped",
+        }
+    }
+}
+
+/// Providers-interne Sicht auf die llamafile-Konfiguration. Gemapped
+/// vom serde-kompatiblen `config::LlamafileConfig` durch den
+/// Resolver-Builder. Bewusst eigene Struktur, damit `providers/text.rs`
+/// nicht auf `config` rückwärts abhängt und Tests diese Sicht direkt
+/// konstruieren können.
+#[derive(Debug, Clone)]
+pub struct LlamafileConfigView {
+    pub enabled: bool,
+    pub path: Option<String>,
+    /// Zulässige Werte (Stand Vorbereitungs-PR): `"on_demand"` /
+    /// `"standby"`. Der Wert wird gelesen und im Provider gehalten,
+    /// aber noch nicht ausgeführt — die produktive Unterscheidung
+    /// greift erst, wenn der Runtime-Pfad implementiert ist.
+    pub mode: String,
+    /// Sekunden, nach denen der lokale Prozess im `on_demand`-Modus
+    /// nach dem letzten Request wieder beendet werden soll. Heute
+    /// unausgeführt.
+    pub idle_timeout_seconds: u64,
+}
+
+
+/// Lokaler llamafile-Provider — Vorbereitungs-Stub.
+///
+/// **Heute produziert jeder `run()`-Aufruf einen ehrlichen Fehler.**
+/// Die Provider-Instanz hält den Lifecycle-Schatten, die kanonische
+/// Config-Sicht und erlaubt dem Resolver, ihn in einer Kette zu führen,
+/// ohne dass sich andere Provider-Varianten daran anpassen müssen.
+#[derive(Debug)]
+pub struct LlamafileLocalProvider {
+    config: LlamafileConfigView,
+    lifecycle: Mutex<LlamafileLifecycle>,
+}
+
+impl LlamafileLocalProvider {
+    pub fn new(config: LlamafileConfigView) -> Self {
+        let initial = Self::initial_lifecycle(&config);
+        Self {
+            config,
+            lifecycle: Mutex::new(initial),
+        }
+    }
+
+    fn initial_lifecycle(config: &LlamafileConfigView) -> LlamafileLifecycle {
+        if !config.enabled {
+            return LlamafileLifecycle::Disabled;
+        }
+        let path_empty = config
+            .path
+            .as_deref()
+            .map(|p| p.trim().is_empty())
+            .unwrap_or(true);
+        if path_empty {
+            LlamafileLifecycle::NotConfigured
+        } else {
+            LlamafileLifecycle::Configured
+        }
+    }
+
+    /// Aktueller Lifecycle-Zustand. Wird heute nie transitioniert —
+    /// der Provider hält den bei `new()` gesetzten Initialzustand. Der
+    /// spätere Runtime-PR wechselt hier zwischen Starting / Ready /
+    /// Busy / Failed / Stopped.
+    pub fn lifecycle(&self) -> LlamafileLifecycle {
+        *self
+            .lifecycle
+            .lock()
+            .expect("llamafile lifecycle mutex poisoned")
+    }
+
+    /// Read-only-Sicht auf die eingegangene Config (für Tests /
+    /// Diagnose).
+    #[cfg(test)]
+    pub fn config(&self) -> &LlamafileConfigView {
+        &self.config
+    }
+
+    pub async fn run(&self, _input: &str) -> Result<String> {
+        match self.lifecycle() {
+            LlamafileLifecycle::Disabled => {
+                bail!(
+                    "provider llamafile_local is disabled (set SMOLIT_LLAMAFILE_ENABLED=1 to enable)"
+                )
+            }
+            LlamafileLifecycle::NotConfigured => {
+                bail!(
+                    "provider llamafile_local is enabled but not configured (set SMOLIT_LLAMAFILE_PATH)"
+                )
+            }
+            LlamafileLifecycle::Configured | LlamafileLifecycle::Stopped => {
+                // Architektonisch vorbereitet; der produktive Runtime-
+                // Pfad (Prozess-Spawn, HTTP-Client, Idle-Timeout)
+                // kommt in einem dedizierten Folge-PR. Die Fehler-
+                // meldung trägt Mode + Idle-Timeout mit, damit
+                // Betreiber beim späteren Runtime-Start sofort sehen,
+                // mit welchem Parameter-Satz sie rechnen konnten.
+                bail!(
+                    "provider llamafile_local runtime is not yet implemented in this build (mode={}, idle_timeout_seconds={}; scheduled for a follow-up PR)",
+                    self.config.mode,
+                    self.config.idle_timeout_seconds,
+                )
+            }
+            other => {
+                // Die Prozess-Zustände Starting/Ready/Busy/Failed sind
+                // in diesem PR nicht erreichbar; wenn ein späterer
+                // Runtime-PR sie aktiviert, wird dieser Fallback
+                // ersetzt. Bis dahin: ehrliche Meldung.
+                bail!(
+                    "provider llamafile_local is in state {} which is not yet reachable in this build",
+                    other.as_str(),
+                )
+            }
+        }
     }
 }
 
@@ -259,10 +476,11 @@ impl TextProviderResolver {
         }
     }
 
-    /// Baut einen Resolver aus einer Kind-Kette und einer für ABrain
-    /// aufgelösten Kommandozeile. Unbekannte Kind-Namen werden
-    /// zusammen mit einem `warn!`-Log verworfen — der Core crasht nie
-    /// wegen einer kaputten `SMOLIT_TEXT_PROVIDER_CHAIN`.
+    /// Baut einen Resolver aus einer Kind-Kette, der ABrain-CLI-
+    /// Kommandozeile und der Llamafile-Config-Sicht. Unbekannte
+    /// Kind-Namen werden zusammen mit einem `warn!`-Log verworfen —
+    /// der Core crasht nie wegen einer kaputten
+    /// `SMOLIT_TEXT_PROVIDER_CHAIN`.
     ///
     /// Bleibt nach dem Filtern keine einzige bekannte Klasse übrig,
     /// fällt die Kette auf den **Default** (`["abrain"]`) zurück und
@@ -270,14 +488,32 @@ impl TextProviderResolver {
     /// §3 der Architektur-Doku („Fallback ist explizit"): wir fallen
     /// niemals in eine Cloud-Klasse zurück, und wir lassen die Kette
     /// auch nicht still leer.
-    pub fn from_chain(chain: &[TextProviderChainItem], abrain_cmd: &str) -> Self {
+    ///
+    /// `llamafile_local` wird in dieser Stufe **instanziiert**, auch
+    /// wenn die Config ihn als disabled oder nicht konfiguriert
+    /// ausweist — der Stub trägt das als Lifecycle sichtbar und
+    /// liefert bei `run()` einen ehrlichen klassifizierten Fehler,
+    /// statt still aus der Kette zu verschwinden. So bleibt der
+    /// Fallback-Fluss `llamafile_local → abrain` überprüfbar.
+    pub fn from_chain(
+        chain: &[TextProviderChainItem],
+        abrain_cmd: &str,
+        llamafile: &LlamafileConfigView,
+    ) -> Self {
         let mut providers: Vec<TextProviderImpl> = Vec::with_capacity(chain.len());
         let mut skipped_unknown: Vec<String> = Vec::new();
+        let mut saw_llamafile = false;
         for item in chain {
             let normalized = item.kind.trim().to_ascii_lowercase();
             match normalized.as_str() {
                 PROVIDER_NAME_ABRAIN => {
                     providers.push(TextProviderImpl::Abrain(AbrainCliProvider::new(abrain_cmd)));
+                }
+                PROVIDER_NAME_LLAMAFILE_LOCAL => {
+                    providers.push(TextProviderImpl::LlamafileLocal(
+                        LlamafileLocalProvider::new(llamafile.clone()),
+                    ));
+                    saw_llamafile = true;
                 }
                 other => {
                     skipped_unknown.push(other.to_string());
@@ -295,6 +531,22 @@ impl TextProviderResolver {
                 "no known text providers in configured chain — falling back to default chain [abrain]",
             );
             providers.push(TextProviderImpl::Abrain(AbrainCliProvider::new(abrain_cmd)));
+        }
+        if saw_llamafile {
+            // Ehrlicher Sichtbarkeits-Log beim Build: wenn ein
+            // llamafile-Stub aktiv mit disabled/not_configured startet,
+            // zeigt das Betreibern der Konfiguration, warum der Fallback
+            // später greifen wird. `ready` (heute unerreichbar) taucht
+            // hier nicht auf, damit Nutzer nicht glauben, der Runtime-
+            // Pfad sei schon aktiv.
+            if let Some(TextProviderImpl::LlamafileLocal(stub)) = providers.iter().find(|p| {
+                matches!(p, TextProviderImpl::LlamafileLocal(_))
+            }) {
+                info!(
+                    lifecycle = %stub.lifecycle().as_str(),
+                    "llamafile_local provider built (runtime not yet implemented; refusal is honest)",
+                );
+            }
         }
         Self::from_providers(providers)
     }
@@ -429,11 +681,132 @@ mod tests {
         }
     }
 
+    fn llamafile_item() -> TextProviderChainItem {
+        TextProviderChainItem {
+            kind: PROVIDER_NAME_LLAMAFILE_LOCAL.to_string(),
+        }
+    }
+
+    fn llamafile_view_disabled() -> LlamafileConfigView {
+        LlamafileConfigView {
+            enabled: false,
+            path: None,
+            mode: "on_demand".into(),
+            idle_timeout_seconds: 300,
+        }
+    }
+
+    fn llamafile_view_not_configured() -> LlamafileConfigView {
+        LlamafileConfigView {
+            enabled: true,
+            path: None,
+            mode: "on_demand".into(),
+            idle_timeout_seconds: 300,
+        }
+    }
+
+    fn llamafile_view_configured() -> LlamafileConfigView {
+        LlamafileConfigView {
+            enabled: true,
+            path: Some("/opt/llamafile/smolit.llamafile".into()),
+            mode: "standby".into(),
+            idle_timeout_seconds: 120,
+        }
+    }
+
+    // --- Lifecycle tag stability --------------------------------------
+
+    #[test]
+    fn llamafile_lifecycle_tag_strings_are_stable() {
+        // Die as_str()-Tags sind das einzige stabile externe
+        // Vokabular des Lifecycle-Modells (Logs, spätere StatusPayload-
+        // Erweiterung). Wir frieren sie hier ein, damit ein späterer
+        // Runtime-PR die Strings nicht versehentlich umbenennt.
+        assert_eq!(LlamafileLifecycle::Disabled.as_str(), "disabled");
+        assert_eq!(LlamafileLifecycle::NotConfigured.as_str(), "not_configured");
+        assert_eq!(LlamafileLifecycle::Configured.as_str(), "configured");
+        assert_eq!(LlamafileLifecycle::Starting.as_str(), "starting");
+        assert_eq!(LlamafileLifecycle::Ready.as_str(), "ready");
+        assert_eq!(LlamafileLifecycle::Busy.as_str(), "busy");
+        assert_eq!(LlamafileLifecycle::Failed.as_str(), "failed");
+        assert_eq!(LlamafileLifecycle::Stopped.as_str(), "stopped");
+    }
+
+    // --- LlamafileLocalProvider lifecycle init + run ------------------
+
+    #[test]
+    fn llamafile_disabled_when_enabled_flag_is_false() {
+        let p = LlamafileLocalProvider::new(llamafile_view_disabled());
+        assert_eq!(p.lifecycle(), LlamafileLifecycle::Disabled);
+    }
+
+    #[test]
+    fn llamafile_not_configured_when_enabled_but_path_missing() {
+        let p = LlamafileLocalProvider::new(llamafile_view_not_configured());
+        assert_eq!(p.lifecycle(), LlamafileLifecycle::NotConfigured);
+    }
+
+    #[test]
+    fn llamafile_configured_when_enabled_and_path_set() {
+        let p = LlamafileLocalProvider::new(llamafile_view_configured());
+        assert_eq!(p.lifecycle(), LlamafileLifecycle::Configured);
+        assert_eq!(p.config().mode, "standby");
+        assert_eq!(p.config().idle_timeout_seconds, 120);
+    }
+
+    #[test]
+    fn llamafile_path_with_only_whitespace_counts_as_not_configured() {
+        let view = LlamafileConfigView {
+            enabled: true,
+            path: Some("   ".into()),
+            mode: "on_demand".into(),
+            idle_timeout_seconds: 300,
+        };
+        let p = LlamafileLocalProvider::new(view);
+        assert_eq!(p.lifecycle(), LlamafileLifecycle::NotConfigured);
+    }
+
+    #[tokio::test]
+    async fn llamafile_run_reports_disabled_when_lifecycle_disabled() {
+        let p = LlamafileLocalProvider::new(llamafile_view_disabled());
+        let err = p.run("hi").await.expect_err("disabled must refuse");
+        let class = TextProviderImpl::classify_error(&err);
+        assert_eq!(class, "disabled");
+        assert!(format!("{err:#}").contains("llamafile_local"));
+    }
+
+    #[tokio::test]
+    async fn llamafile_run_reports_not_configured_when_path_missing() {
+        let p = LlamafileLocalProvider::new(llamafile_view_not_configured());
+        let err = p.run("hi").await.expect_err("missing path must refuse");
+        let class = TextProviderImpl::classify_error(&err);
+        assert_eq!(class, "not_configured");
+    }
+
+    #[tokio::test]
+    async fn llamafile_run_reports_not_implemented_when_configured() {
+        let p = LlamafileLocalProvider::new(llamafile_view_configured());
+        let err = p
+            .run("hi")
+            .await
+            .expect_err("configured stub must still refuse in this PR");
+        let class = TextProviderImpl::classify_error(&err);
+        assert_eq!(class, "not_implemented");
+        // Der Fehler trägt Mode + idle_timeout als Diagnose-Hinweis.
+        let msg = format!("{err:#}");
+        assert!(msg.contains("mode=standby"));
+        assert!(msg.contains("idle_timeout_seconds=120"));
+    }
+
     // --- Resolver chain building --------------------------------------
 
     #[test]
     fn from_chain_keeps_known_kinds() {
-        let r = TextProviderResolver::from_chain(&[abrain_item()], "/bin/true");
+        let r = TextProviderResolver::from_chain(
+            &[abrain_item()],
+            "/bin/true",
+            &llamafile_view_disabled(),
+        );
         assert_eq!(r.chain_len(), 1);
         assert_eq!(r.chain_kinds(), vec!["abrain"]);
         let status = r.status();
@@ -452,7 +825,11 @@ mod tests {
             },
             abrain_item(),
         ];
-        let r = TextProviderResolver::from_chain(&chain, "/bin/true");
+        let r = TextProviderResolver::from_chain(
+            &chain,
+            "/bin/true",
+            &llamafile_view_disabled(),
+        );
         assert_eq!(r.chain_kinds(), vec!["abrain"]);
     }
 
@@ -462,12 +839,110 @@ mod tests {
             TextProviderChainItem { kind: "foo".into() },
             TextProviderChainItem { kind: "bar".into() },
         ];
-        let r = TextProviderResolver::from_chain(&chain, "/bin/echo");
+        let r = TextProviderResolver::from_chain(
+            &chain,
+            "/bin/echo",
+            &llamafile_view_disabled(),
+        );
         assert_eq!(r.chain_kinds(), vec!["abrain"]);
         assert_eq!(r.status().configured, "abrain");
 
-        let r_empty = TextProviderResolver::from_chain(&[], "/bin/echo");
+        let r_empty = TextProviderResolver::from_chain(
+            &[],
+            "/bin/echo",
+            &llamafile_view_disabled(),
+        );
         assert_eq!(r_empty.chain_kinds(), vec!["abrain"]);
+    }
+
+    #[test]
+    fn from_chain_instantiates_llamafile_local_when_listed() {
+        let chain = vec![abrain_item(), llamafile_item()];
+        let r = TextProviderResolver::from_chain(
+            &chain,
+            "/bin/echo",
+            &llamafile_view_configured(),
+        );
+        assert_eq!(r.chain_kinds(), vec!["abrain", "llamafile_local"]);
+        // Primary bleibt abrain; availability nominell „available".
+        assert_eq!(r.status().configured, "abrain");
+    }
+
+    #[test]
+    fn from_chain_llamafile_first_then_abrain_preserves_order() {
+        let chain = vec![llamafile_item(), abrain_item()];
+        let r = TextProviderResolver::from_chain(
+            &chain,
+            "/bin/echo",
+            &llamafile_view_configured(),
+        );
+        assert_eq!(r.chain_kinds(), vec!["llamafile_local", "abrain"]);
+        // Primary ist jetzt llamafile_local (wird aber bei run() als
+        // not_implemented refused — nächster Test).
+        assert_eq!(r.status().configured, "llamafile_local");
+    }
+
+    #[tokio::test]
+    async fn run_falls_back_from_llamafile_stub_to_abrain_on_chain_head() {
+        // Kette: llamafile_local (Stub refused mit not_implemented) →
+        // abrain (/bin/echo, produziert Antwort). Erwartung: Resolver
+        // aktiviert den Fallback-Pfad, liefert die echo-Antwort und
+        // setzt availability=fallback_active.
+        let chain = vec![llamafile_item(), abrain_item()];
+        let r = TextProviderResolver::from_chain(
+            &chain,
+            "/bin/echo",
+            &llamafile_view_configured(),
+        );
+        let out = r.run("ping").await.expect("abrain fallback must succeed");
+        assert!(out.contains("ping"));
+        let status = r.status();
+        assert_eq!(status.configured, "llamafile_local");
+        assert_eq!(status.active, "abrain");
+        assert_eq!(status.availability, "fallback_active");
+        assert!(status.last_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn run_reports_unavailable_when_every_provider_in_chain_refuses() {
+        // Kette: llamafile_local (disabled → disabled-Klasse) →
+        // abrain (/bin/false → exit_nonzero). Alle Provider scheitern,
+        // availability=unavailable, last_error trägt den Tag des
+        // *letzten* Providers (abrain → exit_nonzero).
+        let chain = vec![llamafile_item(), abrain_item()];
+        let r = TextProviderResolver::from_chain(
+            &chain,
+            "/bin/false",
+            &llamafile_view_disabled(),
+        );
+        let err = r.run("hi").await.expect_err("all must fail");
+        assert!(matches!(err, TextProviderError::AllFailed(_)));
+        let status = r.status();
+        assert_eq!(status.configured, "llamafile_local");
+        assert_eq!(status.active, "");
+        assert_eq!(status.availability, "unavailable");
+        assert_eq!(status.last_error.as_deref(), Some("exit_nonzero"));
+    }
+
+    #[tokio::test]
+    async fn run_primary_abrain_success_keeps_llamafile_stub_untouched() {
+        // Kette: abrain (/bin/echo, Erfolg) → llamafile_local
+        // (Configured-Stub). Primary gelingt direkt, der Stub wird in
+        // diesem Request gar nicht erst aufgerufen — availability=
+        // available, active=abrain.
+        let chain = vec![abrain_item(), llamafile_item()];
+        let r = TextProviderResolver::from_chain(
+            &chain,
+            "/bin/echo",
+            &llamafile_view_configured(),
+        );
+        let out = r.run("hi").await.expect("primary abrain must win");
+        assert!(out.contains("hi"));
+        let status = r.status();
+        assert_eq!(status.configured, "abrain");
+        assert_eq!(status.active, "abrain");
+        assert_eq!(status.availability, "available");
+        assert!(status.last_error.is_none());
     }
 
     // --- run() semantics (via real AbrainCliProvider subprocess calls) -

@@ -29,7 +29,7 @@ use crate::ipc::protocol::{
     InteractionFocusTarget, OutgoingMessage, TargetClearedPayload, TargetSelectedPayload,
 };
 use crate::providers::text::{
-    TextProviderChainItem, TextProviderError, TextProviderResolver,
+    LlamafileConfigView, TextProviderChainItem, TextProviderError, TextProviderResolver,
 };
 #[cfg(test)]
 use crate::providers::text::TextProviderRuntimeStatus;
@@ -133,7 +133,17 @@ impl App {
             .iter()
             .map(|k| TextProviderChainItem { kind: k.clone() })
             .collect();
-        let text_provider = Arc::new(TextProviderResolver::from_chain(&chain, &config.abrain_cmd));
+        let llamafile_view = LlamafileConfigView {
+            enabled: config.text_provider.llamafile.enabled,
+            path: config.text_provider.llamafile.path.clone(),
+            mode: config.text_provider.llamafile.mode.clone(),
+            idle_timeout_seconds: config.text_provider.llamafile.idle_timeout_seconds,
+        };
+        let text_provider = Arc::new(TextProviderResolver::from_chain(
+            &chain,
+            &config.abrain_cmd,
+            &llamafile_view,
+        ));
 
         Self {
             config,

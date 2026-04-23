@@ -984,10 +984,22 @@ gesprochen, sondern über die interne Text-Provider-Schicht
 kann die Reihenfolge über die Konfiguration festgelegt werden:
 
 - Env: `SMOLIT_TEXT_PROVIDER_CHAIN` — komma-separierte Liste von
-  Kind-Namen. Heute produktiv unterstützt: nur `abrain`. Unbekannte
-  Namen werden sichtbar verworfen; leere Kette → Default `["abrain"]`.
-  Weitere Kinds (lokales Command/HTTP, Cloud) folgen in späteren
-  kleinen PRs und sind **heute nicht implementiert**.
+  Kind-Namen. Unbekannte Namen werden sichtbar verworfen; leere Kette
+  → Default `["abrain"]`.
+- Heute produktiv implementierte Kinds: **`abrain`** (CLI-Adapter,
+  siehe oben).
+- Architektonisch vorbereitet, Runtime folgt: **`llamafile_local`**.
+  Der Stub existiert im Core-Resolver
+  (`TextProviderImpl::LlamafileLocal`), konfigurierbar über
+  `SMOLIT_LLAMAFILE_ENABLED` / `SMOLIT_LLAMAFILE_PATH` /
+  `SMOLIT_LLAMAFILE_MODE` (Whitelist `on_demand` / `standby`) /
+  `SMOLIT_LLAMAFILE_IDLE_TIMEOUT_SECONDS`. Aufrufe liefern heute
+  deterministische Refusal-Klassen (`disabled` / `not_configured` /
+  `not_implemented`) — die eigentliche Prozess-Orchestrierung kommt
+  in einem Folge-PR. Details:
+  [`docs/provider_fallback_and_settings_architecture.md` §4.1a](./provider_fallback_and_settings_architecture.md).
+- Weitere Kinds (freier lokaler Command/HTTP, Cloud) folgen in späteren
+  PRs und sind **heute nicht implementiert**.
 
 ---
 

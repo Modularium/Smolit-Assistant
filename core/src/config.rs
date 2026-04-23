@@ -17,6 +17,15 @@ const DEFAULT_APPROVAL_TIMEOUT_SECONDS: u64 = 20;
 /// Konservativer Default der Text-Provider-Kette. ABrain bleibt
 /// Primary — explizit in der Architektur-Doku §3 / §5 festgelegt.
 const DEFAULT_TEXT_PROVIDER_CHAIN: &[&str] = &["abrain"];
+/// Default-Mode des lokalen llamafile-Providers. Wird heute nur
+/// gelesen und an den Provider-Stub weitergereicht — Runtime
+/// implementiert die Unterscheidung in einem Folge-PR.
+const DEFAULT_LLAMAFILE_MODE: &str = "on_demand";
+const DEFAULT_LLAMAFILE_IDLE_TIMEOUT_SECONDS: u64 = 300;
+/// Whitelist zulässiger Mode-Strings. Eingaben außerhalb dieser Menge
+/// werden beim Parsing verworfen und fallen auf den Default zurück;
+/// das hält das Vokabular klein und vermeidet stille Freiform-Werte.
+const ALLOWED_LLAMAFILE_MODES: &[&str] = &["on_demand", "standby"];
 
 #[derive(Debug, Parser)]
 #[command(name = "smolit", about = "Smolit Assistant core daemon")]
@@ -81,9 +90,10 @@ pub struct ApprovalConfig {
 ///   * Eine geordnete **Kette** von Provider-Kind-Namen. ABrain ist
 ///     Default und erster Eintrag, solange nichts anderes konfiguriert
 ///     ist.
-///   * Kein per-Kind-Struktur-Dict in PR 2. Per-Kind-Konfiguration
-///     (Endpoint, Timeout, Secret-Slot) kommt in späteren PRs, wenn
-///     zusätzliche Provider-Klassen tatsächlich implementiert werden.
+///   * Pro-Kind-Config wird **nur dort** ergänzt, wo ein Provider
+///     echte Runtime-Entscheidungen braucht (heute: llamafile_local,
+///     architektonisch vorbereitet). ABrain bleibt ohne eigene
+///     Sub-Struktur, weil er nur das oberste `abrain_cmd`-Feld nutzt.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TextProviderConfig {
     /// Reihenfolge der probierten Provider. Unbekannte Namen werden
@@ -91,6 +101,51 @@ pub struct TextProviderConfig {
     /// fällt der Resolver auf `["abrain"]` zurück (siehe
     /// [`crate::providers::text::TextProviderResolver::from_chain`]).
     pub chain: Vec<String>,
+    /// Llamafile-spezifische Einstellungen. Werden nur wirksam, wenn
+    /// `llamafile_local` in `chain` enthalten ist. Siehe
+    /// [`LlamafileConfig`] für die Semantik.
+    pub llamafile: LlamafileConfig,
+}
+
+/// Einstellungen für den lokalen **llamafile**-Provider
+/// (architektonisch vorbereitet; Runtime folgt, siehe
+/// `docs/provider_fallback_and_settings_architecture.md` §4.1 und den
+/// Llamafile-Vorbereitungs-PR).
+///
+/// ABrain bleibt Default-Reasoning-Provider. `LlamafileConfig::default()`
+/// entspricht einem **abgeschalteten** llamafile: ohne gesetzte
+/// Env-Variablen bleibt das Feature inert und verändert kein Verhalten.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlamafileConfig {
+    /// Harter Master-Schalter: ohne `SMOLIT_LLAMAFILE_ENABLED=1` bleibt
+    /// der llamafile-Stub auf `Disabled` — unabhängig davon, ob er in
+    /// der Chain steht. Das hält den Produktpfad konservativ und
+    /// macht ein unbeabsichtigtes Einschalten unmöglich.
+    pub enabled: bool,
+    /// Pfad zum llamafile-Binary bzw. Modell-Wrapper. Heute nur
+    /// gelesen und zur Lifecycle-Entscheidung genutzt
+    /// (`None` / leer → `NotConfigured`); wird vom Runtime-PR
+    /// tatsächlich aufgerufen.
+    pub path: Option<String>,
+    /// Modus: `"on_demand"` (Default — Prozess beim ersten Request
+    /// starten, nach Idle-Timeout wieder beenden) oder `"standby"`
+    /// (Prozess dauerhaft halten, solange `enabled`). Unbekannte
+    /// Eingaben fallen auf den Default zurück.
+    pub mode: String,
+    /// Idle-Timeout in Sekunden für den `on_demand`-Modus. Heute
+    /// gelesen und gespeichert, noch nicht ausgeführt.
+    pub idle_timeout_seconds: u64,
+}
+
+impl Default for LlamafileConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            path: None,
+            mode: DEFAULT_LLAMAFILE_MODE.to_string(),
+            idle_timeout_seconds: DEFAULT_LLAMAFILE_IDLE_TIMEOUT_SECONDS,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -182,6 +237,23 @@ impl Config {
             lookup("SMOLIT_TEXT_PROVIDER_CHAIN").as_deref(),
         );
 
+        // Llamafile-Provider-Konfiguration. Alle vier Felder sind
+        // opt-in: ohne Env-Variablen bleibt das Feature inert
+        // (`enabled=false`, `path=None`). Das schützt den Default-
+        // Lauf davor, still in einen lokalen LLM-Pfad abzukippen.
+        let llamafile_enabled = parse_bool(
+            lookup("SMOLIT_LLAMAFILE_ENABLED").as_deref(),
+            false,
+        );
+        let llamafile_path = non_empty(lookup("SMOLIT_LLAMAFILE_PATH"));
+        let llamafile_mode = parse_llamafile_mode(
+            lookup("SMOLIT_LLAMAFILE_MODE").as_deref(),
+        );
+        let llamafile_idle_timeout = parse_u64(
+            lookup("SMOLIT_LLAMAFILE_IDLE_TIMEOUT_SECONDS").as_deref(),
+            DEFAULT_LLAMAFILE_IDLE_TIMEOUT_SECONDS,
+        );
+
         Ok(Self {
             abrain_cmd,
             log_level,
@@ -214,6 +286,12 @@ impl Config {
             },
             text_provider: TextProviderConfig {
                 chain: text_provider_chain,
+                llamafile: LlamafileConfig {
+                    enabled: llamafile_enabled,
+                    path: llamafile_path,
+                    mode: llamafile_mode,
+                    idle_timeout_seconds: llamafile_idle_timeout,
+                },
             },
         })
     }
@@ -262,6 +340,21 @@ fn parse_text_provider_chain(raw: Option<&str>) -> Vec<String> {
             .collect()
     } else {
         items
+    }
+}
+
+/// Parst den rohen `SMOLIT_LLAMAFILE_MODE`-Wert in einen Mode-String
+/// aus der Whitelist. Unbekannte Eingaben fallen auf den Default
+/// zurück — kein Silent-Free-Form, keine zukunftsoffenen Sonderwerte.
+fn parse_llamafile_mode(raw: Option<&str>) -> String {
+    let Some(value) = raw else {
+        return DEFAULT_LLAMAFILE_MODE.to_string();
+    };
+    let normalized = value.trim().to_ascii_lowercase();
+    if ALLOWED_LLAMAFILE_MODES.iter().any(|m| *m == normalized) {
+        normalized
+    } else {
+        DEFAULT_LLAMAFILE_MODE.to_string()
     }
 }
 
@@ -363,5 +456,36 @@ mod tests {
     fn parse_text_provider_chain_empty_string_falls_back_to_default() {
         assert_eq!(parse_text_provider_chain(Some("")), vec!["abrain"]);
         assert_eq!(parse_text_provider_chain(Some(", , ")), vec!["abrain"]);
+    }
+
+    #[test]
+    fn parse_text_provider_chain_passes_llamafile_through() {
+        // Whitelist-Filter passiert im Resolver, nicht in Config. Hier
+        // reicht, dass der Name normalisiert (lowercase, stripped)
+        // durchgereicht wird.
+        assert_eq!(
+            parse_text_provider_chain(Some("abrain, LLAMAFILE_LOCAL")),
+            vec!["abrain", "llamafile_local"],
+        );
+    }
+
+    #[test]
+    fn parse_llamafile_mode_defaults_when_missing() {
+        assert_eq!(parse_llamafile_mode(None), "on_demand");
+    }
+
+    #[test]
+    fn parse_llamafile_mode_accepts_whitelist_values() {
+        assert_eq!(parse_llamafile_mode(Some("on_demand")), "on_demand");
+        assert_eq!(parse_llamafile_mode(Some("standby")), "standby");
+        // case-insensitive + whitespace
+        assert_eq!(parse_llamafile_mode(Some("  STANDBY ")), "standby");
+    }
+
+    #[test]
+    fn parse_llamafile_mode_rejects_unknown_values() {
+        assert_eq!(parse_llamafile_mode(Some("auto")), "on_demand");
+        assert_eq!(parse_llamafile_mode(Some("")), "on_demand");
+        assert_eq!(parse_llamafile_mode(Some("cloud")), "on_demand");
     }
 }
