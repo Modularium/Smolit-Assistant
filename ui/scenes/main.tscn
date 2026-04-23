@@ -7,6 +7,7 @@
 [ext_resource type="PackedScene" path="res://scenes/workflow_overlay/workflow_overlay_root.tscn" id="5_workflow_overlay"]
 [ext_resource type="PackedScene" path="res://scenes/dev_controls/dev_controls_panel.tscn" id="6_dev_controls"]
 [ext_resource type="PackedScene" path="res://scenes/utterance/utterance_bubble.tscn" id="7_utterance"]
+[ext_resource type="PackedScene" path="res://scenes/settings/settings_panel.tscn" id="8_settings"]
 
 [node name="Main" type="Control" unique_id=748218674]
 layout_mode = 3
@@ -43,6 +44,13 @@ modulate = Color(1, 1, 1, 0.75)
 layout_mode = 2
 size_flags_horizontal = 3
 text = "disconnected"
+
+[node name="SettingsButton" type="Button" parent="VBox/HeaderRow"]
+visible = false
+layout_mode = 2
+tooltip_text = "Settings (Shell, read-only)"
+text = "⚙ Settings"
+flat = true
 
 [node name="ActionBanner" type="PanelContainer" parent="VBox" unique_id=86414064]
 visible = false
@@ -215,6 +223,11 @@ text = "Send"
 [node name="PingButton" type="Button" parent="VBox/DockPanel/DockVBox/InputRow" unique_id=2041957409]
 layout_mode = 2
 text = "Ping"
+
+[node name="SettingsPanel" parent="VBox" instance=ExtResource("8_settings")]
+visible = false
+layout_mode = 2
+size_flags_vertical = 3
 
 [node name="CompactInputPanel" type="PanelContainer" parent="." unique_id=308524118]
 visible = false

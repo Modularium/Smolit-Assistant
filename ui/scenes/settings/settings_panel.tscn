@@ -1,0 +1,9 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/settings/settings_panel_controller.gd" id="1_ctrl"]
+
+[node name="SettingsPanel" type="PanelContainer"]
+visible = false
+size_flags_horizontal = 3
+size_flags_vertical = 3
+script = ExtResource("1_ctrl")

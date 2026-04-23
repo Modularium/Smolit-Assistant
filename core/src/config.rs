@@ -393,15 +393,24 @@ fn parse_text_provider_chain(raw: Option<&str>) -> Vec<String> {
 /// aus der Whitelist. Unbekannte Eingaben fallen auf den Default
 /// zurück — kein Silent-Free-Form, keine zukunftsoffenen Sonderwerte.
 fn parse_llamafile_mode(raw: Option<&str>) -> String {
-    let Some(value) = raw else {
-        return DEFAULT_LLAMAFILE_MODE.to_string();
-    };
-    let normalized = value.trim().to_ascii_lowercase();
-    if ALLOWED_LLAMAFILE_MODES.iter().any(|m| *m == normalized) {
-        normalized
-    } else {
-        DEFAULT_LLAMAFILE_MODE.to_string()
+    match raw.and_then(validate_llamafile_mode) {
+        Some(canonical) => canonical.to_string(),
+        None => DEFAULT_LLAMAFILE_MODE.to_string(),
     }
+}
+
+/// Kanonisiert einen Llamafile-Mode-String gegen die Whitelist. Gibt
+/// `None` zurück, wenn der Wert nicht aus
+/// [`ALLOWED_LLAMAFILE_MODES`] stammt. Wird sowohl beim Startup-Parser
+/// (leise Default-Fallback) als auch im Settings-Schreibpfad genutzt
+/// — dort lehnen wir unbekannte Werte **ausdrücklich** ab, statt sie
+/// still zu verwerfen. Single source of truth für die Whitelist.
+pub fn validate_llamafile_mode(raw: &str) -> Option<&'static str> {
+    let normalized = raw.trim().to_ascii_lowercase();
+    ALLOWED_LLAMAFILE_MODES
+        .iter()
+        .find(|m| **m == normalized)
+        .copied()
 }
 
 /// Parst einen rohen `SMOLIT_LLAMAFILE_PORT`-Wert. Unbekannte oder

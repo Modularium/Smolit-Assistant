@@ -52,3 +52,13 @@ signal accessibility_discovery_result_received(payload: Dictionary)
 ## held target.
 signal target_selected_received(payload: Dictionary)
 signal target_cleared_received(payload: Dictionary)
+
+## Settings / Secrets / Probe (PR 5, siehe docs/api.md §2.10 bzw.
+## docs/provider_fallback_and_settings_architecture.md §9). Das Panel
+## sendet `settings_set_llamafile_config` / `settings_probe_llamafile`
+## über IpcClient; der Core antwortet entweder mit einem frischen
+## `status`-Envelope (auf erfolgreiche Schreibaktion), einem
+## `settings_probe_result` (auf Probe) oder einem `error`-Envelope
+## (auf Validation-Fehler). Read-only: die UI trifft keine Provider-
+## Entscheidung, sie spiegelt den Core-Stand und zeigt Probe-Ergebnisse.
+signal settings_probe_result_received(payload: Dictionary)

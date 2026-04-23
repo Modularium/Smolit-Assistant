@@ -971,11 +971,28 @@ impl TextProviderResolver {
         self.providers.len()
     }
 
-    /// Kanonische Kind-Namen der aktuellen Kette. Primär für
-    /// Logs/Tests — kein stabiles Produkt-API.
-    #[cfg(test)]
+    /// Kanonische Kind-Namen der aktuellen Kette in Reihenfolge.
+    /// Wird ab PR 4 zusätzlich zum bestehenden `configured`-Feld in
+    /// das StatusPayload projiziert, damit die UI die gesamte Fallback-
+    /// Reihenfolge ehrlich anzeigen kann — kein neues Event, kein
+    /// Push-Kanal.
     pub fn chain_kinds(&self) -> Vec<&'static str> {
         self.providers.iter().map(|p| p.kind_name()).collect()
+    }
+
+    /// Lifecycle des `llamafile_local`-Providers aus der Kette, **falls
+    /// vorhanden**. Gibt `None` zurück, wenn die Kette keinen
+    /// llamafile-Provider enthält — so bleibt die UI ehrlich:
+    /// `None` bedeutet „nicht in der Kette", nicht „Runtime kaputt".
+    ///
+    /// Zwei llamafile-Einträge in derselben Kette sind laut Resolver-
+    /// Baupfad nicht vorgesehen; der Lookup liefert in diesem
+    /// (hypothetischen) Fall den Lifecycle des ersten Vorkommens.
+    pub fn llamafile_lifecycle(&self) -> Option<LlamafileLifecycle> {
+        self.providers.iter().find_map(|p| match p {
+            TextProviderImpl::LlamafileLocal(provider) => Some(provider.lifecycle()),
+            _ => None,
+        })
     }
 
     /// Hauptdispatch: probiert jeden Provider der Kette in Reihenfolge,
@@ -1684,6 +1701,90 @@ mod tests {
         assert_eq!(status.active, "");
         assert_eq!(status.availability, "unavailable");
         assert_eq!(status.last_error.as_deref(), Some("empty_chain"));
+    }
+
+    // --- Chain + Llamafile lifecycle accessors (PR 4) -----------------
+
+    /// `llamafile_lifecycle()` gibt `None` zurück, wenn keine
+    /// llamafile-Instanz in der Kette steht. So bleibt die UI-Seite
+    /// ehrlich: `None` == „nicht in der Kette", nicht „irgendein
+    /// Runtime-Problem".
+    #[test]
+    fn llamafile_lifecycle_none_when_not_in_chain() {
+        let r = TextProviderResolver::from_chain(
+            &[abrain_item()],
+            "/bin/echo",
+            &llamafile_view_disabled(),
+        );
+        assert_eq!(r.chain_kinds(), vec!["abrain"]);
+        assert!(r.llamafile_lifecycle().is_none());
+    }
+
+    /// Steht llamafile in der Kette **und** ist der Feature-Flag aus,
+    /// meldet der Stub `Disabled`. Wichtig: der Provider wird trotzdem
+    /// instanziiert (siehe Resolver-Baupfad) — die UI sieht also
+    /// deterministisch den Refusal-Grund.
+    #[test]
+    fn llamafile_lifecycle_disabled_when_flag_off() {
+        let chain = vec![llamafile_item(), abrain_item()];
+        let r = TextProviderResolver::from_chain(
+            &chain,
+            "/bin/echo",
+            &llamafile_view_disabled(),
+        );
+        assert_eq!(r.chain_kinds(), vec!["llamafile_local", "abrain"]);
+        assert_eq!(r.llamafile_lifecycle(), Some(LlamafileLifecycle::Disabled));
+    }
+
+    /// Enabled aber ohne Pfad → `NotConfigured`. Wieder sichtbar
+    /// für die UI, damit Betreiber den fehlenden `SMOLIT_LLAMAFILE_PATH`
+    /// direkt im Settings-Readout erkennen, ohne ins Log schauen zu
+    /// müssen.
+    #[test]
+    fn llamafile_lifecycle_not_configured_when_path_missing() {
+        let chain = vec![llamafile_item()];
+        let r = TextProviderResolver::from_chain(
+            &chain,
+            "/bin/echo",
+            &llamafile_view_not_configured(),
+        );
+        assert_eq!(r.chain_kinds(), vec!["llamafile_local"]);
+        assert_eq!(
+            r.llamafile_lifecycle(),
+            Some(LlamafileLifecycle::NotConfigured),
+        );
+    }
+
+    /// Enabled + Pfad vorhanden (auch wenn das Binary nicht existiert) →
+    /// Lifecycle startet auf `Configured`. Der tatsächliche Spawn läuft
+    /// erst beim ersten `run()`-Aufruf.
+    #[test]
+    fn llamafile_lifecycle_configured_when_enabled_and_pathed() {
+        let chain = vec![llamafile_item(), abrain_item()];
+        let r = TextProviderResolver::from_chain(
+            &chain,
+            "/bin/echo",
+            &llamafile_view_configured_missing_binary(),
+        );
+        assert_eq!(
+            r.llamafile_lifecycle(),
+            Some(LlamafileLifecycle::Configured),
+        );
+    }
+
+    /// `chain_kinds()` ist jetzt Teil des stabilen Produkt-API
+    /// (wird im StatusPayload projiziert). Der Test friert die
+    /// Reihenfolge ein — zwei Kinds, zwei Einträge in genau der
+    /// konfigurierten Sequenz.
+    #[test]
+    fn chain_kinds_preserves_configured_order() {
+        let chain = vec![llamafile_item(), abrain_item()];
+        let r = TextProviderResolver::from_chain(
+            &chain,
+            "/bin/echo",
+            &llamafile_view_disabled(),
+        );
+        assert_eq!(r.chain_kinds(), vec!["llamafile_local", "abrain"]);
     }
 
     // --- Error classification ------------------------------------------

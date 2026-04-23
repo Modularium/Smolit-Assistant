@@ -73,6 +73,18 @@ Für den Approval / Confirmation Flow (Details in Abschnitt 2.7):
 - `approval_response` mit `approval_id: string` und `decision`
   (`"approved" | "denied" | "cancelled"`).
 
+Für die Settings-Shell (Details in Abschnitt 2.10, seit PR 5):
+
+- `settings_set_llamafile_config` — editiert die `llamafile_local`-
+  Provider-Config. Pflicht-Feld `enabled: bool`. Optional:
+  `mode: "on_demand" | "standby"`, `idle_timeout_seconds: integer`,
+  `path: string` (leerer String löscht den Pfad). Core validiert,
+  rebuildet den Provider-Resolver und antwortet mit einem
+  `status`-Envelope (Erfolg) oder einem `error`-Envelope
+  (z. B. unbekannter Mode).
+- `settings_probe_llamafile` — Side-Effect-freie Diagnose-Probe.
+  Antwort: `settings_probe_result`.
+
 Beispiele:
 
 ```json
@@ -86,6 +98,8 @@ Beispiele:
 {"type":"interaction_probe_accessibility"}
 {"type":"interaction_discover_accessibility"}
 {"type":"interaction_discover_accessibility","hint":"firefox"}
+{"type":"settings_set_llamafile_config","enabled":true,"mode":"on_demand","idle_timeout_seconds":300,"path":"/opt/llamafile/server"}
+{"type":"settings_probe_llamafile"}
 ```
 
 ### 2.2 Ausgehend (Core → UI)
@@ -100,6 +114,7 @@ Beispiele:
 | `error`                          | `message: string`                 | Fehler bei Parsing, Ausführung oder Adapter.                       |
 | `accessibility_probe_result`     | `payload: AccessibilityProbe`     | Ergebnis einer `interaction_probe_accessibility`-Anfrage (2.8).    |
 | `accessibility_discovery_result` | `payload: AccessibilityDiscovery` | Ergebnis einer `interaction_discover_accessibility`-Anfrage (2.8). |
+| `settings_probe_result`          | `payload: SettingsProbeResult`    | Antwort auf `settings_probe_llamafile` (2.10, PR 5).               |
 
 Zusätzlich emittiert der Core **Action Events** (Action Event Model v1).
 Sie sind additiv; ältere UIs, die sie nicht kennen, dürfen sie
@@ -147,7 +162,14 @@ Beispiele:
   "text_provider_active":          "",
   "text_provider_availability":    "available",
   "text_provider_last_error":      null,
-  "text_provider_cloud":           false
+  "text_provider_cloud":           false,
+  "text_provider_chain":           ["abrain"],
+  "llamafile_in_chain":            false,
+  "llamafile_enabled":             false,
+  "llamafile_configured":          false,
+  "llamafile_lifecycle":           null,
+  "llamafile_mode":                null,
+  "llamafile_idle_timeout_seconds": null
 }
 ```
 
@@ -203,6 +225,54 @@ Semantik:
   Transparenzvertrag aus §7 der Architektur-Doku (Cloud-Kennzeichnung)
   ohne Protokoll-Revision einlösbar ist, sobald ein Cloud-Pfad
   existiert.
+
+Seit PR 4 der Provider-Fallback-Linie kommen sieben weitere,
+**additive** Felder dazu. Sie vertiefen den Status-Readout der
+Settings-Shell (siehe
+[`docs/provider_fallback_and_settings_architecture.md`](./provider_fallback_and_settings_architecture.md)
+§8), ohne eine neue Nachrichtenfamilie einzuführen. Ältere UI-Stände,
+die diese Felder nicht kennen, behandeln sie ignorant — das bestehende
+`text_provider_*`-Vokabular bleibt unverändert.
+
+- `text_provider_chain`: Geordnete Liste der produktiv instanziierten
+  Provider-Kinds. Spiegelt den Resolver-Zustand nach dem Bau der Kette,
+  d. h. unbekannte Kinds aus der Config sind hier bereits verworfen.
+  Fallback auf `["abrain"]`, wenn die Kette nach dem Filtern leer
+  wäre. Beispiele: `["abrain"]`, `["llamafile_local", "abrain"]`.
+- `llamafile_in_chain`: Boolesch. `true` genau dann, wenn
+  `"llamafile_local"` in `text_provider_chain` enthalten ist. Wenn
+  `false`, sind die folgenden vier `llamafile_*`-Felder semantisch
+  leer — `*_enabled` / `*_configured` bleiben als boolescher Readout
+  der Config sichtbar, `*_lifecycle` / `*_mode` /
+  `*_idle_timeout_seconds` werden `null`.
+- `llamafile_enabled`: Spiegelt `SMOLIT_LLAMAFILE_ENABLED`, unabhängig
+  davon, ob `llamafile_local` in der Kette steht. Lässt „konfiguriert,
+  aber nicht in der Kette" ehrlich sichtbar werden.
+- `llamafile_configured`: `enabled` **und** nicht-leerer
+  `SMOLIT_LLAMAFILE_PATH`. Das ist die ehrliche „in der Config bereit
+  zum Spawn"-Grenze. Beides muss stimmen, sonst landet der Provider
+  zur Laufzeit in `disabled` bzw. `not_configured`.
+- `llamafile_lifecycle`: Lifecycle-Tag des `llamafile_local`-Providers,
+  nur gesetzt wenn `llamafile_in_chain=true`. Vokabular aus
+  [`crate::providers::text::LlamafileLifecycle::as_str`]:
+  `"disabled"` / `"not_configured"` / `"configured"` / `"starting"` /
+  `"ready"` / `"busy"` / `"failed"` / `"stopped"`. `null` heißt **nicht
+  in der Kette** — nicht „Runtime kaputt". Das Vokabular ist stabil;
+  spätere Runtime-Erweiterungen bleiben additiv, nicht ersetzend.
+- `llamafile_mode`: `"on_demand"` / `"standby"`. Nur gesetzt, wenn
+  `llamafile_in_chain=true`. Reflektiert den bereits normalisierten
+  Config-Wert (unbekannte Eingaben sind in der Config-Stufe auf den
+  Default gefallen).
+- `llamafile_idle_timeout_seconds`: Ganzzahl (Sekunden). Nur gesetzt,
+  wenn `llamafile_in_chain=true`. Im `on_demand`-Modus: nach dieser
+  Zeitspanne ohne neuen Request stoppt der Watchdog den Prozess und
+  der Lifecycle wird auf `stopped` gesetzt.
+
+Für STT/TTS bleibt das bekannte `*_enabled` / `*_available` /
+`auto_speak`-Vokabular. Eine Provider-Abstraktion für diese Achsen
+kommt in einem späteren PR; sobald sie existiert, wandern
+strukturell gleichwertige Felder (`stt_provider_*`, `tts_provider_*`)
+additiv in dieses Schema.
 
 ### 2.4 Flow-Beispiele
 
@@ -958,6 +1028,99 @@ Die UI muss Auswahl-Zustand in mindestens diesen Fällen aktiv verwerfen:
 - **Keine** direkte A11y-Execution — Discovery und Selection enden
   hier, Execution läuft weiterhin über das bestehende Interaction-
   Backend inkl. Approval.
+
+### 2.10 Settings-Schreib-/Probe-Pfad (Ist-Zustand, PR 5)
+
+Kleine, kuratierte Schreib-/Diagnose-Oberfläche für die Settings-
+Shell. Additiv zum bestehenden Protokoll, keine neue
+Nachrichtenfamilie. Der heutige Scope umfasst ausschließlich
+`llamafile_local`-Felder; STT/TTS und Cloud-Provider bleiben
+außerhalb dieses PR.
+
+**Eingang:** `settings_set_llamafile_config`.
+
+```json
+{
+  "type": "settings_set_llamafile_config",
+  "enabled": true,
+  "mode": "on_demand",
+  "idle_timeout_seconds": 300,
+  "path": "/opt/llamafile/server"
+}
+```
+
+- `enabled` (bool, Pflicht) — spiegelt `SMOLIT_LLAMAFILE_ENABLED`.
+- `mode` (string, optional) — `"on_demand"` oder `"standby"`.
+  Unbekannte Werte ergeben ein `error`-Envelope; die Shell fällt
+  **nicht** still auf den Default zurück, weil der Schreibpfad
+  explizit ist.
+- `idle_timeout_seconds` (unsigned integer, optional) — Watchdog-
+  Fenster. `0` wird als Fehler abgelehnt.
+- `path` (string, optional) — Pfad zum llamafile-Binary.
+  Leerer/whitespace-String löscht den Pfad. Fehlendes Feld lässt
+  ihn unverändert.
+- Nicht editierbar über diesen Pfad: `port`, `startup_timeout_seconds`,
+  `request_timeout_seconds`. Diese bleiben env-gesteuert.
+
+Erfolg → der Core persistiert den neuen Stand in einer kleinen
+JSON-Datei (Dateiname `llamafile_local.json`; Verzeichnis-Lookup
+`SMOLIT_SETTINGS_DIR` → `$XDG_CONFIG_HOME/smolit-assistant/` →
+`$HOME/.config/smolit-assistant/`, Permissions 0600), rebuildet den
+`TextProviderResolver` mit der neuen Llamafile-View und antwortet
+mit einem frischen `status`-Envelope. Fehler → `error`-Envelope mit
+kurzer Meldung (Secret-frei).
+
+**Eingang:** `settings_probe_llamafile`.
+
+```json
+{"type":"settings_probe_llamafile"}
+```
+
+Keine Side-Effects (kein Spawn, kein HTTP). Der Core prüft Chain-
+Mitgliedschaft, Master-Flag, Path-Existenz, Regular-File-Status und
+Execute-Bit (Unix). Antwort: `settings_probe_result`.
+
+**Ausgang:** `settings_probe_result`.
+
+```json
+{
+  "type": "settings_probe_result",
+  "payload": {
+    "ok": false,
+    "class": "path_missing",
+    "message": "configured binary path does not exist",
+    "lifecycle": "configured",
+    "in_chain": true,
+    "enabled": true,
+    "configured": true
+  }
+}
+```
+
+- `ok` (bool) — `true` nur wenn `class="ok"`.
+- `class` (string) — kuratierter Tag:
+  `"ok"` / `"not_in_chain"` / `"disabled"` / `"not_configured"` /
+  `"path_missing"` / `"path_not_file"` / `"path_not_executable"`.
+- `message` (string) — kurze, Secret-freie Begründung. **Enthält
+  weder Pfad noch Roh-Fehlerstring.**
+- `lifecycle` (string | null) — aktueller Lifecycle, nur wenn
+  `in_chain=true`.
+- `in_chain` / `enabled` / `configured` — booleans, spiegeln den
+  Entscheidungsbaum des Probes und lassen die UI ohne Extra-
+  `get_status` zwischen „config falsch" und „Chain falsch"
+  unterscheiden.
+
+**Sicherheitsgrenzen dieser Fläche.**
+
+- **Keine Secrets über diese Nachrichten.** API-Keys, Tokens usw.
+  werden ausdrücklich nicht über `settings_set_*` transportiert —
+  sie sind für einen späteren, dedizierten Secrets-Pfad reserviert.
+- **Kein Pfad-Leak.** Der Binary-Pfad taucht weder in Logs noch im
+  `settings_probe_result` noch im `error`-Envelope auf.
+- **Atomarer Schreibpfad.** Der Settings-Store schreibt temp + rename.
+- **Keine neue Eventfamilie.** `settings_probe_result` ist ein
+  zusätzlicher `type`-Wert im bestehenden `OutgoingMessage`-Enum,
+  nicht ein paralleler Kanal.
 
 ---
 

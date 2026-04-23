@@ -163,7 +163,40 @@ async fn dispatch(app: &Arc<App>, raw: &str) -> Vec<OutgoingMessage> {
             approval_id,
             decision,
         } => handle_approval_response(app, approval_id, decision),
+        IncomingMessage::SettingsSetLlamafileConfig(update) => {
+            handle_settings_set_llamafile_config(app, update)
+        }
+        IncomingMessage::SettingsProbeLlamafile => handle_settings_probe_llamafile(app),
     }
+}
+
+/// PR 5 — Schreibpfad für die editierbare Llamafile-Config. Bei Erfolg
+/// antwortet der Core mit dem aktualisierten `status`-Envelope, damit
+/// der UI-Client sofort den neuen Readout sieht (kein Extra-Roundtrip
+/// via `get_status`). Validation-Fehler kommen als `error`-Envelope
+/// zurück; die Meldung ist bewusst Secret-frei (kein Pfad, keine
+/// Rohdaten).
+fn handle_settings_set_llamafile_config(
+    app: &Arc<App>,
+    update: crate::app::SettingsLlamafileUpdate,
+) -> Vec<OutgoingMessage> {
+    match app.update_llamafile_config(update) {
+        Ok(()) => vec![OutgoingMessage::Status {
+            payload: app.build_status_payload(),
+        }],
+        Err(message) => vec![OutgoingMessage::Error { message }],
+    }
+}
+
+/// PR 5 — Diagnose-Probe ohne Side-Effects. Antwortet immer mit einem
+/// `settings_probe_result`-Envelope; `ok=false` trägt einen kuratierten
+/// `class`-Tag (`not_in_chain` / `disabled` / `not_configured` /
+/// `path_missing` / `path_not_file` / `path_not_executable`), `ok=true`
+/// trägt `class="ok"`.
+fn handle_settings_probe_llamafile(app: &Arc<App>) -> Vec<OutgoingMessage> {
+    vec![OutgoingMessage::SettingsProbeResult {
+        payload: app.probe_llamafile(),
+    }]
 }
 
 fn handle_approval_response(
@@ -652,6 +685,11 @@ mod tests {
     // PR 2: `get_status` liefert die neuen text_provider_*-Felder
     // additiv aus. Die Antwort enthält `configured=abrain` (Default-
     // Kette) und `availability=available` im frischen Zustand.
+    //
+    // PR 4 erweitert diesen Test um die vertiefte Status-Oberfläche:
+    // `text_provider_chain` wird sichtbar, und die llamafile-Felder
+    // sind im Default-Fall (abrain-only) neutral — `in_chain=false`,
+    // Lifecycle/Mode/Idle-Timeout als JSON `null`.
     #[tokio::test]
     async fn get_status_includes_text_provider_fields() {
         let url = spawn_server().await;
@@ -665,6 +703,344 @@ mod tests {
         assert!(got.contains(r#""text_provider_availability":"available""#));
         assert!(got.contains(r#""text_provider_last_error":null"#));
         assert!(got.contains(r#""text_provider_cloud":false"#));
+        // PR 4 — Kette + Llamafile-Sicht (llamafile nicht in Default-Kette).
+        assert!(got.contains(r#""text_provider_chain":["abrain"]"#));
+        assert!(got.contains(r#""llamafile_in_chain":false"#));
+        assert!(got.contains(r#""llamafile_enabled":false"#));
+        assert!(got.contains(r#""llamafile_configured":false"#));
+        assert!(got.contains(r#""llamafile_lifecycle":null"#));
+        assert!(got.contains(r#""llamafile_mode":null"#));
+        assert!(got.contains(r#""llamafile_idle_timeout_seconds":null"#));
+    }
+
+    /// PR 4 — Der vertiefte Readout für `llamafile_local` muss ehrlich
+    /// an der Config hängen: steht der Provider in der Chain, werden
+    /// Lifecycle-, Mode- und Idle-Timeout-Felder gesetzt. Hier mit
+    /// `enabled=true` ohne Pfad → Lifecycle `not_configured` wird in
+    /// den StatusPayload gespiegelt.
+    #[tokio::test]
+    async fn get_status_reports_llamafile_lifecycle_when_in_chain() {
+        let app = Arc::new(App::new(Config {
+            abrain_cmd: "/bin/false".into(),
+            log_level: "info".into(),
+            audio: AudioConfig {
+                tts_enabled: true,
+                tts_cmd: None,
+                tts_timeout_seconds: 5,
+                stt_enabled: true,
+                stt_cmd: None,
+                stt_timeout_seconds: 5,
+                auto_speak: false,
+            },
+            ipc: IpcConfig {
+                enabled: true,
+                bind: "127.0.0.1:0".into(),
+            },
+            interaction: InteractionConfig {
+                enabled: true,
+                backend: "command".into(),
+                allow_open_application: true,
+                allow_focus_window: true,
+                allow_type_text: false,
+                allow_shortcuts: false,
+                require_confirmation: false,
+                open_app_cmd_template: Some("/bin/true".into()),
+                focus_window_cmd_template: Some("/bin/true".into()),
+            },
+            approval: default_approval_config(),
+            text_provider: crate::config::TextProviderConfig {
+                chain: vec!["llamafile_local".into(), "abrain".into()],
+                llamafile: crate::config::LlamafileConfig {
+                    enabled: true,
+                    path: None,
+                    mode: "standby".into(),
+                    idle_timeout_seconds: 120,
+                    port: 8788,
+                    startup_timeout_seconds: 10,
+                    request_timeout_seconds: 10,
+                },
+            },
+        }));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(r#"{"type":"get_status"}"#.into()))
+            .await
+            .unwrap();
+        let got = recv_text(&mut ws).await;
+        assert!(got.contains(r#""text_provider_configured":"llamafile_local""#));
+        assert!(got.contains(r#""text_provider_chain":["llamafile_local","abrain"]"#));
+        assert!(got.contains(r#""llamafile_in_chain":true"#));
+        assert!(got.contains(r#""llamafile_enabled":true"#));
+        assert!(got.contains(r#""llamafile_configured":false"#));
+        assert!(got.contains(r#""llamafile_lifecycle":"not_configured""#));
+        assert!(got.contains(r#""llamafile_mode":"standby""#));
+        assert!(got.contains(r#""llamafile_idle_timeout_seconds":120"#));
+    }
+
+    // ------------------------------------------------------------------
+    // PR 5 — Settings-Schreib-/Probe-Pfad.
+    //
+    // Die Tests isolieren den Settings-Store über `SMOLIT_SETTINGS_DIR`,
+    // damit sie weder die echte User-Config berühren noch sich
+    // gegenseitig stören. Vor jedem Test räumen wir die Zielverzeichnisse
+    // leer; am Ende wird die Env-Variable wiederhergestellt.
+    // ------------------------------------------------------------------
+
+    fn scoped_settings_dir(marker: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "smolit-ipc-settings-{marker}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn build_llamafile_chain_app(settings_dir: &std::path::Path) -> Arc<App> {
+        // SAFETY: Tests setzen die Env-Var selbst; wir restaurieren nicht
+        // im Destruktor-Stil, aber die Pfade sind eindeutig pro Test.
+        unsafe {
+            std::env::set_var("SMOLIT_SETTINGS_DIR", settings_dir.as_os_str());
+        }
+        Arc::new(App::new(Config {
+            abrain_cmd: "/bin/false".into(),
+            log_level: "info".into(),
+            audio: AudioConfig {
+                tts_enabled: true,
+                tts_cmd: None,
+                tts_timeout_seconds: 5,
+                stt_enabled: true,
+                stt_cmd: None,
+                stt_timeout_seconds: 5,
+                auto_speak: false,
+            },
+            ipc: IpcConfig {
+                enabled: true,
+                bind: "127.0.0.1:0".into(),
+            },
+            interaction: InteractionConfig {
+                enabled: true,
+                backend: "command".into(),
+                allow_open_application: true,
+                allow_focus_window: true,
+                allow_type_text: false,
+                allow_shortcuts: false,
+                require_confirmation: false,
+                open_app_cmd_template: Some("/bin/true".into()),
+                focus_window_cmd_template: Some("/bin/true".into()),
+            },
+            approval: default_approval_config(),
+            text_provider: crate::config::TextProviderConfig {
+                chain: vec!["llamafile_local".into(), "abrain".into()],
+                llamafile: crate::config::LlamafileConfig {
+                    enabled: false,
+                    path: None,
+                    mode: "on_demand".into(),
+                    idle_timeout_seconds: 300,
+                    port: 8788,
+                    startup_timeout_seconds: 10,
+                    request_timeout_seconds: 10,
+                },
+            },
+        }))
+    }
+
+    /// Der Schreibpfad aktualisiert den live-Stand, ersetzt den Resolver
+    /// atomar und antwortet mit einem `status`-Envelope, der den neuen
+    /// Stand bereits spiegelt. Sichtbar ist das an `llamafile_enabled`
+    /// und `llamafile_mode`.
+    #[tokio::test]
+    async fn settings_set_llamafile_config_applies_and_echoes_status() {
+        let dir = scoped_settings_dir("apply-echo");
+        let app = build_llamafile_chain_app(&dir);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+
+        // Vorher: enabled=false, mode=on_demand.
+        ws.send(Message::Text(r#"{"type":"get_status"}"#.into()))
+            .await
+            .unwrap();
+        let pre = recv_text(&mut ws).await;
+        assert!(pre.contains(r#""llamafile_enabled":false"#));
+        assert!(pre.contains(r#""llamafile_mode":"on_demand""#));
+
+        // Schreibpfad: enable + standby + neuer Idle-Timeout.
+        ws.send(Message::Text(
+            r#"{"type":"settings_set_llamafile_config","enabled":true,"mode":"standby","idle_timeout_seconds":900}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.contains(r#""type":"status""#));
+        assert!(resp.contains(r#""llamafile_enabled":true"#));
+        assert!(resp.contains(r#""llamafile_mode":"standby""#));
+        assert!(resp.contains(r#""llamafile_idle_timeout_seconds":900"#));
+
+        // Nachbar-Verifikation: `get_status` sieht den neuen Stand auch
+        // ohne den `status`-Echo.
+        ws.send(Message::Text(r#"{"type":"get_status"}"#.into()))
+            .await
+            .unwrap();
+        let post = recv_text(&mut ws).await;
+        assert!(post.contains(r#""llamafile_enabled":true"#));
+        assert!(post.contains(r#""llamafile_mode":"standby""#));
+
+        // Cleanup: Store-Dir wegwerfen (best effort).
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Ungültige Mode-Werte werden **nicht** still verworfen, sondern
+    /// erzeugen ein `error`-Envelope. Die Fehlermeldung ist bewusst
+    /// secret-frei: kein Pfad, keine Roh-Stringifizierung des Clients.
+    #[tokio::test]
+    async fn settings_set_llamafile_config_rejects_unknown_mode() {
+        let dir = scoped_settings_dir("reject-mode");
+        let app = build_llamafile_chain_app(&dir);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"settings_set_llamafile_config","enabled":true,"mode":"cloud"}"#
+                .into(),
+        ))
+        .await
+        .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.starts_with(r#"{"type":"error""#));
+        assert!(resp.contains("unknown llamafile mode"));
+        // Wichtig: keine Klartext-Secrets im Fehler — hier gibt es
+        // allerdings keine Secrets; die Meldung enthält nur den
+        // Nutzer-Input selbst. Das ist für Mode-Strings vertretbar.
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Probe ohne Pfad → Klasse `not_configured`. Enabled aber keinen
+    /// Pfad ist der häufigste Benutzerfehler; die Shell soll ihn ohne
+    /// Spawn diagnostizieren können.
+    #[tokio::test]
+    async fn settings_probe_llamafile_reports_not_configured_without_path() {
+        let dir = scoped_settings_dir("probe-notcfg");
+        let app = build_llamafile_chain_app(&dir);
+        // enable, aber Pfad nicht setzen.
+        app.update_llamafile_config(crate::app::SettingsLlamafileUpdate {
+            enabled: true,
+            mode: None,
+            idle_timeout_seconds: None,
+            path: None,
+        })
+        .unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(r#"{"type":"settings_probe_llamafile"}"#.into()))
+            .await
+            .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.contains(r#""type":"settings_probe_result""#));
+        assert!(resp.contains(r#""class":"not_configured""#));
+        assert!(resp.contains(r#""ok":false"#));
+        assert!(resp.contains(r#""in_chain":true"#));
+        assert!(resp.contains(r#""enabled":true"#));
+        assert!(resp.contains(r#""configured":false"#));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Probe mit gesetztem, nicht existierendem Pfad → Klasse
+    /// `path_missing`. Der konkrete Pfad darf **nicht** in `message`
+    /// oder `class` auftauchen — das wäre ein Secret-Disziplin-Bruch.
+    #[tokio::test]
+    async fn settings_probe_llamafile_reports_path_missing_without_leaking_path() {
+        let dir = scoped_settings_dir("probe-missing");
+        let app = build_llamafile_chain_app(&dir);
+        let secret_looking_path = "/nonexistent/smolit-probe-test-binary-please-do-not-leak";
+        app.update_llamafile_config(crate::app::SettingsLlamafileUpdate {
+            enabled: true,
+            mode: None,
+            idle_timeout_seconds: None,
+            path: Some(secret_looking_path.to_string()),
+        })
+        .unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(r#"{"type":"settings_probe_llamafile"}"#.into()))
+            .await
+            .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.contains(r#""class":"path_missing""#));
+        assert!(resp.contains(r#""ok":false"#));
+        // Der Pfad selbst darf nirgends in der Antwort auftauchen.
+        assert!(
+            !resp.contains(secret_looking_path),
+            "probe response must not leak the configured path; got: {resp}",
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Probe für einen existierenden, ausführbaren Pfad → Klasse `ok`.
+    /// Wir nutzen `/bin/true` als garantiert vorhandenes Binary.
+    #[tokio::test]
+    async fn settings_probe_llamafile_reports_ok_for_executable_path() {
+        let dir = scoped_settings_dir("probe-ok");
+        let app = build_llamafile_chain_app(&dir);
+        app.update_llamafile_config(crate::app::SettingsLlamafileUpdate {
+            enabled: true,
+            mode: None,
+            idle_timeout_seconds: None,
+            path: Some("/bin/true".into()),
+        })
+        .unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(r#"{"type":"settings_probe_llamafile"}"#.into()))
+            .await
+            .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.contains(r#""class":"ok""#));
+        assert!(resp.contains(r#""ok":true"#));
+        assert!(resp.contains(r#""in_chain":true"#));
+        assert!(resp.contains(r#""configured":true"#));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

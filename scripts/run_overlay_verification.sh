@@ -86,6 +86,17 @@
 #                   `avatar_identity_visual.gd` (Smolit / Robot-Head /
 #                   Humanoid-Head / Orb; unbekannte ID bleibt geklemmt,
 #                   kein Crash). Exit 0 = alle PASS.
+#   settings-shell-smoke
+#                 — Führt scripts/settings_shell_smoke.gd aus.
+#                   Prüft das Settings-Shell-MVP (Phase 8c PR 3):
+#                   Section-Reihenfolge / Labels / Slugs, defensive
+#                   `*_lines`-Renderer für leere/partielle/vollständige
+#                   StatusPayloads (inkl. llamafile_local-Sichtbarkeit),
+#                   sowie das Scene-Verhalten des Panel-Controllers
+#                   (Default unsichtbar, open_panel/close_panel,
+#                   close_requested-Signal, crash-freies apply_status /
+#                   apply_extras bei Nicht-Dictionary-Eingaben). Exit
+#                   0 = alle PASS.
 #   visual-action-mode-smoke
 #                 — Führt scripts/visual_action_mode_smoke.gd aus.
 #                   Prüft den Phase-3.3-Visual-Action-Mode-MVP
@@ -297,6 +308,17 @@ case "${CASE}" in
     # Orb) inkl. Unbekannte-ID-Clamping.
     exec godot --headless --path "${UI_DIR}" \
       --script "${REPO_ROOT}/scripts/avatar_render_polish_smoke.gd"
+    ;;
+  settings-shell-smoke)
+    # Spezialfall: Smoke für die Settings-Shell (Phase 8c PR 3).
+    # Prüft pure Helfer (Section-Reihenfolge / Labels / Slugs,
+    # defensive *_lines-Renderer für leere / partielle / vollständige
+    # StatusPayloads, inkl. llamafile_local-Sichtbarkeit) plus das
+    # Scene-Verhalten des Panel-Controllers (Default unsichtbar,
+    # open_panel / close_panel, close_requested-Signal, crash-freies
+    # apply_status / apply_extras bei Nicht-Dictionary-Eingaben).
+    exec godot --headless --path "${UI_DIR}" \
+      --script "${REPO_ROOT}/scripts/settings_shell_smoke.gd"
     ;;
   visual-action-mode-smoke)
     # Spezialfall: Smoke für den Phase-3.3-Visual-Action-Mode-MVP.

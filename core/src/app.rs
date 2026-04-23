@@ -1,10 +1,10 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, RwLock};
 use std::time::Duration;
 
 use anyhow::Result;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 use tokio::time::timeout;
 use tracing::{info, warn};
@@ -19,7 +19,7 @@ use crate::approvals::{
     PendingApprovalRegistry,
 };
 use crate::audio::{SttService, TtsService};
-use crate::config::Config;
+use crate::config::{validate_llamafile_mode, Config, LlamafileConfig};
 use crate::interaction::{
     AccessibilityDiscovery, AccessibilityProbe, CommandBackend, CommandBackendConfig,
     InteractionAction, InteractionExecutor, InteractionKind, InteractionPolicy, SelectedTarget,
@@ -33,6 +33,7 @@ use crate::providers::text::{
 };
 #[cfg(test)]
 use crate::providers::text::TextProviderRuntimeStatus;
+use crate::settings_store;
 
 const EVENTS_CHANNEL_CAPACITY: usize = 256;
 
@@ -54,7 +55,26 @@ pub struct App {
     /// Linie: `handle_text_query` routet ab jetzt ausschließlich über
     /// diesen Resolver. ABrain bleibt Default-Provider — der Resolver
     /// kapselt den CLI-Aufruf.
-    text_provider: Arc<TextProviderResolver>,
+    ///
+    /// Seit PR 5 hinter einem `RwLock`, damit `settings_set_llamafile_config`
+    /// den Resolver atomar durch einen frisch gebauten ersetzen kann.
+    /// `handle_text_query` klont den `Arc` unter dem Read-Lock kurz
+    /// heraus und hält das Lock **nicht** über den `await`-Punkt
+    /// (kein Deadlock, kein Lock-Halten während Provider-Aufrufen).
+    text_provider: RwLock<Arc<TextProviderResolver>>,
+    /// Kanonische Chain-Items — unverändert seit Startup. Wird bei einem
+    /// Rebuild des Resolvers (PR 5) mit einer aktualisierten Llamafile-
+    /// Config neu instanziiert; die Chain selbst bleibt Read-only in
+    /// dieser Stufe (keine UI-Editieroberfläche für Chain-Reihenfolge).
+    text_provider_chain: Vec<TextProviderChainItem>,
+    /// ABrain-CLI-Kommando, wird beim Resolver-Rebuild wiederverwendet.
+    abrain_cmd: String,
+    /// Laufender editierbarer Stand der Llamafile-Config (PR 5). Startet
+    /// als Kopie von `config.text_provider.llamafile`, bereits mit dem
+    /// Override aus dem Settings-Store verschmolzen. Änderungen über
+    /// `settings_set_llamafile_config` werden hier gespiegelt und in
+    /// den StatusPayload projiziert.
+    live_llamafile: Mutex<LlamafileConfig>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -105,6 +125,89 @@ pub struct StatusPayload {
     /// Protokoll-Revision einlösbar bleibt, sobald ein Cloud-Pfad
     /// existiert.
     pub text_provider_cloud: bool,
+    // --- Text Provider — vertiefter Status (PR 4, additiv) ----------
+    /// Geordnete Liste der Provider-Kinds in der aktuellen Kette. Hält
+    /// genau die Namen, die der Resolver produktiv instanziiert hat
+    /// — unbekannte Kinds aus der Config wurden bereits beim Bau
+    /// verworfen. Die UI rendert daraus die Fallback-Reihenfolge;
+    /// fehlt das Feld (ältere Cores), fällt die Shell stillschweigend
+    /// auf `text_provider_configured` zurück.
+    pub text_provider_chain: Vec<String>,
+    /// Ob `llamafile_local` Teil der aktuellen Kette ist. Bei `false`
+    /// sind alle weiteren `llamafile_*`-Felder bedeutungslos und werden
+    /// mit neutralen Werten / `None` gefüllt.
+    pub llamafile_in_chain: bool,
+    /// `SMOLIT_LLAMAFILE_ENABLED` ausgewertet. Spiegelt, ob der Operator
+    /// den Master-Schalter gezogen hat — unabhängig davon, ob der
+    /// Provider aktuell in der Kette steht. So kann die UI „konfiguriert,
+    /// aber nicht in der Kette" ehrlich sichtbar machen.
+    pub llamafile_enabled: bool,
+    /// `enabled` **und** ein nicht-leerer `SMOLIT_LLAMAFILE_PATH`. Das
+    /// ist die ehrliche „in der Config bereit für Spawn"-Grenze. Ohne
+    /// Path bleibt der Provider im Lifecycle `not_configured`.
+    pub llamafile_configured: bool,
+    /// Lifecycle-Tag aus
+    /// [`crate::providers::text::LlamafileLifecycle::as_str`], nur gesetzt,
+    /// wenn `llamafile_in_chain` gilt. `None` = nicht in der Kette.
+    pub llamafile_lifecycle: Option<String>,
+    /// `on_demand` / `standby`. Nur gesetzt, wenn `llamafile_in_chain`
+    /// gilt. Spiegelt den normalisierten Config-Wert 1:1 — unbekannte
+    /// Eingaben sind schon in der Config auf den Default gefallen.
+    pub llamafile_mode: Option<String>,
+    /// Idle-Timeout in Sekunden, nach dem der Watchdog einen idle
+    /// llamafile-Prozess wieder stoppt. Nur gesetzt, wenn
+    /// `llamafile_in_chain` gilt.
+    pub llamafile_idle_timeout_seconds: Option<u64>,
+}
+
+/// Eingabe-Payload für `settings_set_llamafile_config` (PR 5).
+/// Jedes Feld außer `enabled` ist optional — fehlende Felder bleiben
+/// auf dem bisherigen Wert. `path` akzeptiert explizit den leeren
+/// String zum Löschen.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SettingsLlamafileUpdate {
+    pub enabled: bool,
+    #[serde(default)]
+    pub mode: Option<String>,
+    #[serde(default)]
+    pub idle_timeout_seconds: Option<u64>,
+    /// `None`                → Pfad unverändert lassen.
+    /// `Some("")` / nur Whitespace → Pfad löschen.
+    /// `Some("/abs/path")`   → Pfad ersetzen.
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+/// Ergebnis einer `settings_probe_llamafile`-Anfrage (PR 5). Bewusst
+/// schmal: keine Pfad-/Fehler-Freitexte, nur ein kleiner, stabiler
+/// Tag plus eine kurze menschenlesbare Meldung, die **nie** den
+/// Binary-Pfad oder andere sensitive Werte enthält.
+#[derive(Debug, Clone, Serialize)]
+pub struct SettingsProbeResultPayload {
+    /// True nur, wenn der Provider in der Kette steht, enabled ist,
+    /// einen Pfad hat, das Binary existiert und ausführbar ist.
+    pub ok: bool,
+    /// Kurzer, stabiler Klassen-Tag. Werte:
+    ///
+    ///   * `"ok"` — Binary vorhanden, ausführbar, Config konsistent.
+    ///   * `"not_in_chain"` — `llamafile_local` steht nicht in der
+    ///     aktuellen Provider-Kette.
+    ///   * `"disabled"` — Master-Flag aus.
+    ///   * `"not_configured"` — enabled, aber Pfad leer / unset.
+    ///   * `"path_missing"` — Pfad gesetzt, aber Datei existiert nicht.
+    ///   * `"path_not_file"` — Pfad zeigt auf ein Verzeichnis o. ä.
+    ///   * `"path_not_executable"` — Datei existiert, aber ohne
+    ///     Execute-Bit (Unix).
+    pub class: String,
+    /// Kurze, menschenlesbare Begründung. **Enthält keinen Pfad,
+    /// kein Secret und keinen Roh-Fehlerstring.**
+    pub message: String,
+    /// Aktueller Lifecycle des Providers, falls er in der Kette steht.
+    /// `null`, wenn nicht in der Kette.
+    pub lifecycle: Option<String>,
+    pub in_chain: bool,
+    pub enabled: bool,
+    pub configured: bool,
 }
 
 impl App {
@@ -133,20 +236,22 @@ impl App {
             .iter()
             .map(|k| TextProviderChainItem { kind: k.clone() })
             .collect();
-        let llamafile_view = LlamafileConfigView {
-            enabled: config.text_provider.llamafile.enabled,
-            path: config.text_provider.llamafile.path.clone(),
-            mode: config.text_provider.llamafile.mode.clone(),
-            idle_timeout_seconds: config.text_provider.llamafile.idle_timeout_seconds,
-            port: config.text_provider.llamafile.port,
-            startup_timeout_seconds: config.text_provider.llamafile.startup_timeout_seconds,
-            request_timeout_seconds: config.text_provider.llamafile.request_timeout_seconds,
-        };
+        // PR 5: Persistierter Llamafile-Override aus dem Settings-Store
+        // einlesen und über die Env-Defaults legen. Die Config selbst
+        // bleibt unverändert (Immutable Snapshot der Startup-Werte);
+        // der live-Stand lebt in `live_llamafile`.
+        let override_file = settings_store::load_llamafile_override();
+        let live_llamafile = settings_store::apply_llamafile_override(
+            config.text_provider.llamafile.clone(),
+            &override_file,
+        );
+        let llamafile_view = llamafile_view_from(&live_llamafile);
         let text_provider = Arc::new(TextProviderResolver::from_chain(
             &chain,
             &config.abrain_cmd,
             &llamafile_view,
         ));
+        let abrain_cmd = config.abrain_cmd.clone();
 
         Self {
             config,
@@ -159,7 +264,10 @@ impl App {
             pending_approvals: Arc::new(PendingApprovalRegistry::new()),
             selected_target: Mutex::new(None),
             events_tx,
-            text_provider,
+            text_provider: RwLock::new(text_provider),
+            text_provider_chain: chain,
+            abrain_cmd,
+            live_llamafile: Mutex::new(live_llamafile),
         }
     }
 
@@ -169,7 +277,20 @@ impl App {
     /// `run`-Aufrufe in `handle_text_query` aktualisiert.
     #[cfg(test)]
     pub fn text_provider_status(&self) -> TextProviderRuntimeStatus {
-        self.text_provider.status()
+        self.current_resolver().status()
+    }
+
+    /// Klon-Snapshot des aktuell aktiven Resolvers. Hält den Read-Lock
+    /// nur kurz, klont den `Arc` und gibt ihn frei. Callsites dürfen
+    /// das Ergebnis unbegrenzt behalten (z. B. für ein `await` auf
+    /// `run`) — der Core rebuildet bei Config-Writes einen **neuen**
+    /// Resolver und ersetzt die Referenz; alte Snapshots bleiben für
+    /// ihre Lebensdauer konsistent.
+    fn current_resolver(&self) -> Arc<TextProviderResolver> {
+        self.text_provider
+            .read()
+            .expect("text provider lock poisoned")
+            .clone()
     }
 
     pub fn next_action_id(&self) -> String {
@@ -278,7 +399,8 @@ impl App {
         // verhält: ein Text-Antwort-Erfolg bleibt ein Erfolg, ein
         // Provider-Fehler bleibt ein `error`-Envelope mit
         // menschenlesbarer Meldung.
-        self.text_provider
+        let resolver = self.current_resolver();
+        resolver
             .run(input)
             .await
             .map_err(|err: TextProviderError| anyhow::anyhow!(err))
@@ -608,7 +730,55 @@ impl App {
         let tts = self.tts.state();
         let stt = self.stt.state();
         let probe = AccessibilityProbe::detect();
-        let text_provider = self.text_provider.status();
+        let resolver = self.current_resolver();
+        let text_provider = resolver.status();
+
+        // Chain-Sicht (PR 4) kommt direkt aus dem Resolver — stabiler
+        // als die Roh-Config, weil unbekannte Kinds beim Resolver-Bau
+        // bereits verworfen wurden und die produktive Kette hier zählt.
+        let chain: Vec<String> = resolver
+            .chain_kinds()
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect();
+        let llamafile_in_chain = chain.iter().any(|k| k == "llamafile_local");
+
+        // Llamafile-Config-Sicht liest ab PR 5 den **live**-Stand aus,
+        // nicht mehr den immutable Startup-Config-Snapshot: ein
+        // `settings_set_llamafile_config`-Write spiegelt sich also im
+        // nächsten `get_status` ohne Core-Neustart. `llamafile_configured`
+        // ist nicht das Lifecycle-Wort `Configured`, sondern die
+        // ehrliche „enabled + path gesetzt"-Grenze.
+        let llamafile_cfg = self
+            .live_llamafile
+            .lock()
+            .expect("live llamafile mutex poisoned")
+            .clone();
+        let llamafile_path_present = llamafile_cfg
+            .path
+            .as_deref()
+            .map(|p| !p.trim().is_empty())
+            .unwrap_or(false);
+        let llamafile_configured = llamafile_cfg.enabled && llamafile_path_present;
+
+        // Lifecycle wird nur dann exponiert, wenn llamafile tatsächlich
+        // in der Kette steht. Sonst sagt das Feld nichts Wahres und
+        // bleibt `None` — die UI unterscheidet dann ehrlich zwischen
+        // „nicht in der Kette" und „Runtime kaputt".
+        let (llamafile_lifecycle, llamafile_mode, llamafile_idle_timeout_seconds) =
+            if llamafile_in_chain {
+                let lifecycle = resolver
+                    .llamafile_lifecycle()
+                    .map(|lc| lc.as_str().to_string());
+                (
+                    lifecycle,
+                    Some(llamafile_cfg.mode.clone()),
+                    Some(llamafile_cfg.idle_timeout_seconds),
+                )
+            } else {
+                (None, None, None)
+            };
+
         StatusPayload {
             tts_enabled: tts.enabled,
             tts_available: tts.available,
@@ -626,7 +796,275 @@ impl App {
             text_provider_availability: text_provider.availability,
             text_provider_last_error: text_provider.last_error,
             text_provider_cloud: text_provider.cloud,
+            text_provider_chain: chain,
+            llamafile_in_chain,
+            llamafile_enabled: llamafile_cfg.enabled,
+            llamafile_configured,
+            llamafile_lifecycle,
+            llamafile_mode,
+            llamafile_idle_timeout_seconds,
         }
+    }
+
+    /// Aktualisiert den live-Stand der Llamafile-Config (PR 5).
+    ///
+    /// Ablauf:
+    ///
+    ///   1. Validiert Mode (Whitelist) und Idle-Timeout (> 0). Bei
+    ///      ungültigem Input `Err(...)` mit kurzer, Secret-freier
+    ///      Meldung — der Aufrufer emittiert ein `error`-Envelope.
+    ///   2. Merged die Eingabe mit dem bisherigen `live_llamafile`.
+    ///      Fehlende Optionen bleiben unverändert; `path=Some("")`
+    ///      löscht den Pfad.
+    ///   3. Persistiert den neuen Stand im Settings-Store
+    ///      ([`crate::settings_store`]). Persist-Fehler werden
+    ///      geloggt, aber nicht hart propagiert — der In-Memory-Stand
+    ///      ist für die laufende Session autoritativ.
+    ///   4. Baut einen **neuen** `TextProviderResolver` mit der alten
+    ///      Kette und der neuen Llamafile-View, ersetzt atomar die
+    ///      `text_provider`-Referenz. Ein evtl. laufender alter
+    ///      llamafile-Prozess wird beim Drop des alten Resolvers
+    ///      beendet (`kill_on_drop`).
+    ///   5. Der nächste `handle_text_query` / `build_status_payload`
+    ///      sieht die neue Config; der nächste `get_status` spiegelt
+    ///      sie in den UI-Readout.
+    ///
+    /// **Secret-/Log-Disziplin:** der Binary-Pfad taucht weder im
+    /// `info!`-Pfad noch in der Rückgabe-Meldung auf — wir loggen nur,
+    /// ob er gesetzt ist oder nicht.
+    pub fn update_llamafile_config(
+        &self,
+        update: SettingsLlamafileUpdate,
+    ) -> Result<(), String> {
+        // Mode-Validierung: wenn Feld gesetzt, muss es aus der
+        // Whitelist stammen. Im Schreibpfad lehnen wir unbekannte
+        // Werte ausdrücklich ab (anders als der Startup-Parser, der
+        // still auf den Default fällt).
+        let mode_override: Option<String> = match update.mode.as_deref() {
+            Some(raw) => match validate_llamafile_mode(raw) {
+                Some(canonical) => Some(canonical.to_string()),
+                None => {
+                    return Err(format!(
+                        "unknown llamafile mode `{raw}` — expected one of on_demand, standby",
+                    ));
+                }
+            },
+            None => None,
+        };
+
+        // Idle-Timeout-Validierung: 0 ist nicht sinnvoll (Watchdog
+        // würde den Prozess sofort killen). Obergrenze lassen wir frei,
+        // weil große Werte legitim sind (dauerhafter Betrieb).
+        let idle_override: Option<u64> = match update.idle_timeout_seconds {
+            Some(0) => {
+                return Err("idle_timeout_seconds must be greater than 0".to_string());
+            }
+            Some(n) => Some(n),
+            None => None,
+        };
+
+        // Merge mit bestehendem live-Stand.
+        let mut merged: LlamafileConfig = self
+            .live_llamafile
+            .lock()
+            .expect("live llamafile mutex poisoned")
+            .clone();
+        merged.enabled = update.enabled;
+        if let Some(m) = mode_override {
+            merged.mode = m;
+        }
+        if let Some(idle) = idle_override {
+            merged.idle_timeout_seconds = idle;
+        }
+        if let Some(raw_path) = update.path {
+            let trimmed = raw_path.trim();
+            if trimmed.is_empty() {
+                merged.path = None;
+            } else {
+                merged.path = Some(trimmed.to_string());
+            }
+        }
+
+        // Persistieren. Fehler werden geloggt, nicht propagiert — ein
+        // kaputter Settings-Store soll den In-Memory-Update-Pfad nicht
+        // blockieren. Der Store selbst loggt keine Pfade.
+        if let Err(err) = settings_store::save_llamafile_override(&merged) {
+            warn!(error = %err, "failed to persist llamafile override");
+        } else {
+            info!(
+                enabled = merged.enabled,
+                mode = %merged.mode,
+                idle_timeout_seconds = merged.idle_timeout_seconds,
+                path_set = merged.path.is_some(),
+                "llamafile override persisted",
+            );
+        }
+
+        // Resolver rebuilden. Die Chain-Items sind immutable seit
+        // Startup; nur die Llamafile-View ändert sich.
+        let new_view = llamafile_view_from(&merged);
+        let new_resolver = Arc::new(TextProviderResolver::from_chain(
+            &self.text_provider_chain,
+            &self.abrain_cmd,
+            &new_view,
+        ));
+
+        // Atomar ersetzen. Der alte Arc lebt weiter, solange andere
+        // Callsites (z. B. ein laufender `handle_text_query`) ihn
+        // klonen; sobald er fällt, wird ein eventueller llamafile-
+        // Prozess via `kill_on_drop` beendet.
+        {
+            let mut guard = self
+                .text_provider
+                .write()
+                .expect("text provider lock poisoned");
+            *guard = new_resolver;
+        }
+
+        // Live-Config aktualisieren (nach dem erfolgreichen Resolver-
+        // Replace, damit ein paralleles `build_status_payload` zwischen
+        // den beiden Locks einen kohärenten Stand sieht).
+        {
+            let mut guard = self
+                .live_llamafile
+                .lock()
+                .expect("live llamafile mutex poisoned");
+            *guard = merged;
+        }
+
+        Ok(())
+    }
+
+    /// Prüft defensiv, ob der `llamafile_local`-Provider startbereit
+    /// aussieht. Kein Spawn, kein HTTP-Call — nur Config-Inspektion
+    /// und eine Filesystem-Metadatenprüfung des Pfades. Gibt einen
+    /// strukturierten `SettingsProbeResultPayload` zurück (PR 5).
+    ///
+    /// **Secret-Disziplin:** Weder Pfad noch andere sensitive Werte
+    /// landen im Result — `message` und `class` sind ausschließlich
+    /// kuratierte Tags und Kurzbeschreibungen.
+    pub fn probe_llamafile(&self) -> SettingsProbeResultPayload {
+        let cfg = self
+            .live_llamafile
+            .lock()
+            .expect("live llamafile mutex poisoned")
+            .clone();
+        let resolver = self.current_resolver();
+        let chain = resolver.chain_kinds();
+        let in_chain = chain.iter().any(|k| *k == "llamafile_local");
+        let enabled = cfg.enabled;
+        let path_present = cfg
+            .path
+            .as_deref()
+            .map(|p| !p.trim().is_empty())
+            .unwrap_or(false);
+        let configured = enabled && path_present;
+        let lifecycle = if in_chain {
+            resolver
+                .llamafile_lifecycle()
+                .map(|lc| lc.as_str().to_string())
+        } else {
+            None
+        };
+
+        if !in_chain {
+            return SettingsProbeResultPayload {
+                ok: false,
+                class: "not_in_chain".into(),
+                message: "llamafile_local is not in the configured text provider chain".into(),
+                lifecycle,
+                in_chain,
+                enabled,
+                configured,
+            };
+        }
+        if !enabled {
+            return SettingsProbeResultPayload {
+                ok: false,
+                class: "disabled".into(),
+                message: "llamafile_local is disabled (master flag off)".into(),
+                lifecycle,
+                in_chain,
+                enabled,
+                configured,
+            };
+        }
+        let Some(path_value) = cfg.path.as_deref().map(str::trim).filter(|p| !p.is_empty())
+        else {
+            return SettingsProbeResultPayload {
+                ok: false,
+                class: "not_configured".into(),
+                message: "llamafile_local is enabled but has no binary path configured".into(),
+                lifecycle,
+                in_chain,
+                enabled,
+                configured,
+            };
+        };
+
+        match std::fs::metadata(path_value) {
+            Err(_) => SettingsProbeResultPayload {
+                ok: false,
+                class: "path_missing".into(),
+                message: "configured binary path does not exist".into(),
+                lifecycle,
+                in_chain,
+                enabled,
+                configured,
+            },
+            Ok(meta) if !meta.is_file() => SettingsProbeResultPayload {
+                ok: false,
+                class: "path_not_file".into(),
+                message: "configured binary path is not a regular file".into(),
+                lifecycle,
+                in_chain,
+                enabled,
+                configured,
+            },
+            Ok(meta) => {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    if meta.permissions().mode() & 0o111 == 0 {
+                        return SettingsProbeResultPayload {
+                            ok: false,
+                            class: "path_not_executable".into(),
+                            message: "configured binary is present but not executable".into(),
+                            lifecycle,
+                            in_chain,
+                            enabled,
+                            configured,
+                        };
+                    }
+                }
+                let _ = meta; // silence unused on non-unix
+                SettingsProbeResultPayload {
+                    ok: true,
+                    class: "ok".into(),
+                    message: "llamafile_local looks ready (binary present, executable)".into(),
+                    lifecycle,
+                    in_chain,
+                    enabled,
+                    configured,
+                }
+            }
+        }
+    }
+}
+
+/// Baut eine `LlamafileConfigView` aus einer ausgewerteten
+/// [`LlamafileConfig`]. Einzige Quelle der Wahrheit für die
+/// Mapping-Regeln — sowohl der Startup-Konstruktor als auch der
+/// PR-5-Schreibpfad gehen hier durch.
+fn llamafile_view_from(cfg: &LlamafileConfig) -> LlamafileConfigView {
+    LlamafileConfigView {
+        enabled: cfg.enabled,
+        path: cfg.path.clone(),
+        mode: cfg.mode.clone(),
+        idle_timeout_seconds: cfg.idle_timeout_seconds,
+        port: cfg.port,
+        startup_timeout_seconds: cfg.startup_timeout_seconds,
+        request_timeout_seconds: cfg.request_timeout_seconds,
     }
 }
 

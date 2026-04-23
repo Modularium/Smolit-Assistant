@@ -491,6 +491,69 @@ erweiterte `StatusPayload`-Unterstruktur (siehe
 Nachrichtenfamilie. Die genaue Form ist Teil eines späteren
 Protokoll-PRs, nicht dieses Dokuments.
 
+### 8.1 Vertiefter Status-Readout (PR 4, Ist-Zustand)
+
+Der in §8 skizzierte Rahmen ist für die **Text-Achse** mit PR 4
+bereits produktiv — weiterhin streng additiv auf dem bestehenden
+`StatusPayload` (siehe [`docs/api.md` §2.3](./api.md)), ohne neue
+Eventfamilie und ohne Push-Kanal. `get_status` liefert den
+kompletten Readout in einer Nachricht.
+
+**Text-Achse (produktiv).**
+
+- `text_provider_configured` / `text_provider_active` /
+  `text_provider_availability` / `text_provider_last_error` /
+  `text_provider_cloud` — unverändert aus PR 2.
+- `text_provider_chain` — Geordnete Liste der produktiv
+  instanziierten Provider-Kinds (Resolver-Sicht, nicht Roh-Config).
+  Die UI rendert daraus die Fallback-Reihenfolge („abrain"
+  vs. „llamafile_local → abrain").
+- `llamafile_in_chain` — Boolean, `true` wenn der lokale Provider
+  überhaupt Teil der aktuellen Kette ist. Entscheidet, ob die
+  folgenden Lifecycle-Felder Semantik haben.
+- `llamafile_enabled` / `llamafile_configured` — Config-Readout.
+  Beide Booleans stehen auch außerhalb der Chain sinnvoll zur
+  Verfügung, damit „aktiviert, aber nicht in der Kette" ehrlich
+  sichtbar ist.
+- `llamafile_lifecycle` — Lifecycle-Tag aus dem kuratierten
+  Vokabular (`disabled` / `not_configured` / `configured` /
+  `starting` / `ready` / `busy` / `failed` / `stopped`). Nur
+  gesetzt, wenn `llamafile_in_chain=true`; sonst `null`.
+- `llamafile_mode` — `on_demand` / `standby`. Nur gesetzt, wenn
+  `llamafile_in_chain=true`.
+- `llamafile_idle_timeout_seconds` — Watchdog-Fenster in Sekunden.
+  Nur gesetzt, wenn `llamafile_in_chain=true`.
+
+**STT-Achse (weiterhin nur Basis-Readout).** `stt_enabled` /
+`stt_available`. Eine Provider-Abstraktion für STT existiert noch
+nicht; das Schema bleibt bewusst klein. Sobald sie gelandet ist,
+entstehen `stt_provider_*`-Felder spiegelbildlich zu den Text-
+Feldern — additiv.
+
+**TTS-Achse (weiterhin nur Basis-Readout).** `tts_enabled` /
+`tts_available` / `auto_speak`. Gleiche Leitplanken wie STT.
+
+**Privacy-Rollup (UI-Projektion, kein Core-Feld).** Die Shell
+kombiniert `text_provider_cloud`, `llamafile_in_chain` und
+`llamafile_enabled` zu einer ehrlichen Lokal-/Cloud-Aussage pro
+Achse (siehe [`docs/ui_architecture.md`](./ui_architecture.md) §8d).
+Kein Core-Feld und keine neue Datenquelle — nur eine defensiv
+zusammengesetzte Zeile.
+
+**Bewusst nicht in PR 4 gelandet.**
+
+- Keine STT-/TTS-Provider-Abstraktion und damit keine
+  `stt_provider_*` / `tts_provider_*`-Felder (würden ohne
+  Provider-Schicht nur Fiktion sein).
+- Kein Cloud-Provider für Text (und damit kein neuer
+  `text_provider_cloud=true`-Pfad).
+- Kein `degraded`-Zustand in `text_provider_availability` — ohne
+  Latenz-/Partial-Fehler-Signale im Core wäre das ein rein
+  künstliches Feld.
+- Kein zusätzlicher Lifecycle-Push (`provider_status_changed`-
+  Event o. ä.). `get_status` reicht heute; ein Streaming-Kanal wäre
+  Scope-Creep.
+
 ---
 
 ## 9. Vorschlag für PR-Reihenfolge
@@ -572,23 +635,80 @@ gegen einen lokalen Fake-HTTP-Server plus ein Shell-Skript als
 `/bin/sleep`-Stand-in für den Spawn-Pfad), 7 Config-Tests in
 `config.rs`, 3 IPC-Server-Tests. Gesamtsumme Core-Tests: 129 PASS.
 
-- **PR 3 — Settings-Shell im UI.** Reine UI-Shell für ein
-  Settings-Panel im Expanded-Window: Bereiche aus §6 als leere /
-  read-only Kästen, erreichbar über einen neuen Dev-/Opt-in-Eintrag.
+- **PR 3 — Settings-Shell im UI (Ist).** Reine UI-Shell für ein
+  Settings-Panel im Expanded-Window. Sieben Bereiche aus §6 als
+  sichtbare, read-only Kästen in fester Reihenfolge: **General**,
+  **Presence / UI**, **Text Provider**, **STT**, **TTS**,
+  **Privacy / Cloud / Data handling**, **Connection / Status**.
+  Erreichbar über einen sichtbaren `⚙ Settings`-Button im Header-Row
+  des Expanded-Window (kein Dev-Gating — die Shell ist Teil des
+  normalen Produkt-UX). Text-Provider-Readout bindet an die fünf
+  additiven `text_provider_*`-Felder aus §8 (StatusPayload) und
+  benennt `llamafile_local` ehrlich als lokalen Runtime-Fallback.
   Kein neues Settings-Event-Protokoll, keine Schreibaktionen in den
-  Core. Erst Layout, dann Inhalte.
-- **PR 4 — STT-/TTS-Provider-Settings + Status-Anzeige.** Read-only-
-  Status-Felder (aktiv konfiguriert / aktuell genutzt / availability)
-  für STT und TTS in der Settings-Shell. Setzt die additive
-  `StatusPayload`-Erweiterung aus §8 voraus (separater Protokoll-
-  Schritt).
-- **PR 5 — Secrets-Handling + Verbindungsprüfung + Testaktionen.**
-  Endpoint-/Credential-Eingabe für lokale HTTP- und — sofern dann
-  beschlossen — Cloud-Provider. Maskierte Darstellung, Secret-Store
-  hinter einer schmalen Abstraktion, Test-Button pro Provider
-  („reachable? auth ok?"). Dies ist der PR mit der größten
-  Sicherheitsoberfläche und bekommt daher eine eigene
-  Review-Checkliste.
+  Core, kein Secret-Editor. Defensive Renderer: fehlende Felder →
+  `—`, Nicht-Dictionary-Eingaben werden still abgefangen. Scene:
+  `ui/scenes/settings/settings_panel.tscn`; pure Helfer in
+  `ui/scripts/settings/settings_sections.gd`; Controller in
+  `ui/scripts/settings/settings_panel_controller.gd`; Einbindung
+  additiv in `ui/scenes/main.tscn` + `ui/scripts/main.gd`. Navigation
+  als UI-Substate: Settings ersetzt das Dock-Panel innerhalb
+  derselben Presence-Hülle, Avatar / Banner / Workflow-Overlay /
+  Utterance-Bubble bleiben unberührt. Siehe
+  [`docs/ui_architecture.md`](./ui_architecture.md) §8d. Tests:
+  `scripts/settings_shell_smoke.gd` (70 Assertions PASS), Harness-
+  Case `settings-shell-smoke`.
+- **PR 4 — Vertiefter Status-Readout (Ist).** Der Text-Provider-
+  Readout ist jetzt belastbar: zusätzlich zu den fünf PR-2-Feldern
+  exponiert `StatusPayload` sieben weitere additive
+  Text-/Llamafile-Felder (`text_provider_chain`,
+  `llamafile_in_chain`, `llamafile_enabled`, `llamafile_configured`,
+  `llamafile_lifecycle`, `llamafile_mode`,
+  `llamafile_idle_timeout_seconds`, siehe §8.1 und
+  [`docs/api.md` §2.3](./api.md)). Die Settings-Shell rendert die
+  Kette als geordnete Fallback-Reihenfolge, öffnet bei
+  `llamafile_in_chain=true` einen vertieften Lifecycle-/Mode-/Idle-
+  Timeout-Block und projiziert die Cloud-/Lokal-Aussage im
+  Privacy-Abschnitt ehrlich. STT und TTS bleiben in dieser Stufe
+  bewusst auf dem bisherigen `*_enabled`/`*_available`/`auto_speak`-
+  Basisstatus — eine Provider-Abstraktion folgt in einem späteren
+  PR. Keine neuen IPC-Nachrichten, keine Schreibaktionen. Tests:
+  `scripts/settings_shell_smoke.gd` um 18 Assertions erweitert, zwei
+  neue IPC-Server-Tests (`get_status`-Baseline-Erweiterung und
+  `llamafile_in_chain`-Pfad) und fünf neue Resolver-/Lifecycle-Tests
+  in `core/src/providers/text.rs`. Gesamtsumme Core-Tests: 135 PASS
+  (+6 gegenüber PR 2b).
+- **PR 5 — Erste Schreib-/Probe-Oberfläche (Ist, konservativ).**
+  Die Settings-Shell bekommt erstmals einen kleinen, kuratierten
+  Schreibpfad — ausschließlich für die editierbaren Teile der
+  `llamafile_local`-Config (`enabled`, `mode`, `idle_timeout_seconds`,
+  `path`). Port, Startup- und Request-Timeout bleiben env-gesteuert
+  und erscheinen **nicht** im Schreibweg. Änderungen laufen über die
+  neue additive IPC-Nachricht `settings_set_llamafile_config`;
+  Core validiert (Whitelist für Mode, `idle > 0`), persistiert atomar
+  in einer kleinen JSON-Datei (Auflösungsreihenfolge:
+  `SMOLIT_SETTINGS_DIR` → `$XDG_CONFIG_HOME/smolit-assistant/` →
+  `$HOME/.config/smolit-assistant/`, Permissions 0600) und ersetzt
+  den `TextProviderResolver` atomar durch einen frisch gebauten.
+  Der Core antwortet mit einem frischen `status`-Envelope; Fehler
+  kommen als `error`-Envelope ohne Pfad-/Secret-Leck.
+  Zusätzlich eine schmale Diagnoseaktion
+  `settings_probe_llamafile` → `settings_probe_result` mit
+  kuratierten Tags (`ok` / `not_in_chain` / `disabled` /
+  `not_configured` / `path_missing` / `path_not_file` /
+  `path_not_executable`) und Secret-freier Kurzmeldung. Kein Spawn,
+  kein HTTP — nur Config-/Filesystem-Inspektion. Siehe §11 für die
+  Secrets-/Sensitive-Kategorien. UI-Widgets im Settings-Panel:
+  Enabled-CheckBox, Mode-OptionButton, Idle-Timeout-SpinBox,
+  Path-LineEdit, Apply-Button, Probe-Button plus zwei kleine
+  Status-Labels. Tests: neues Core-Modul `settings_store` (6 Unit-
+  Tests), vier Resolver-/Update-/Probe-Szenarien in
+  `ipc/server.rs`, vier Protocol-Tests, fünf neue UI-Smokes. Core
+  gesamt: 150 PASS (+15 vs. PR 4); UI-`settings-shell-smoke` auf
+  103 Assertions erweitert (+15). Bewusst **nicht** Teil von PR 5:
+  Cloud-Credentials-Editor, STT-/TTS-Provider-Auswahl, Secret-
+  Store für API-Keys, Chain-Reihenfolge-Editor, Port-/Timeouts-
+  Editor, Start/Stop-Buttons für den llamafile-Prozess.
 
 Zwischenprinzipien:
 
@@ -633,3 +753,65 @@ aufgehoben werden.
 - **Kein Settings-Universal-Panel.** Das Settings-UI bleibt auf die
   Bereiche aus §6 begrenzt. Keine Ad-hoc-Erweiterung für zukünftige,
   heute unklare Konfigurationsthemen.
+
+---
+
+## 11. Secrets- und Sensitive-Config-Kategorien (Ist, PR 5)
+
+Ab PR 5 existiert in
+[`core/src/settings_store.rs`](../core/src/settings_store.rs) ein
+kleiner persistenter Store für die editierbaren Teile der
+Llamafile-Config. Dieser Abschnitt legt die Trennlinien fest, die
+jede künftige Schreibfläche einhalten muss.
+
+**Kategorien.**
+
+- **Operational.** Boolesche Feature-Flags, Mode-Strings aus einer
+  geschlossenen Whitelist, Timeouts, Ports, Pfade zu lokalen
+  Binaries. Dürfen persistiert werden, dürfen im StatusPayload
+  erscheinen, dürfen in Logs stehen — mit der Sonderregel, dass
+  **Binary-Pfade** defensiv behandelt werden (siehe unten).
+- **Sensitive.** API-Keys, Tokens, Basic-Auth-Credentials, URLs mit
+  Schlüsseln im Query-String. Diese Kategorie ist heute **leer** —
+  es gibt keinen Cloud-Provider. Wenn sie entsteht, bekommt sie
+  einen separaten Store mit identischer Dateirechte-Disziplin
+  (0600 auf Unix), **darf nicht** in `StatusPayload`, Event-Envelopes,
+  Log-Zeilen oder UI-Readouts sichtbar werden, und wird in der UI
+  nur als maskierter Platzhalter dargestellt (`•••• last4`).
+
+**Pfad-Disziplin.** Ein Binary-Pfad ist formal operational, wird
+aber wie eine sensitive-lite-Ressource behandelt:
+
+- In Logs taucht er nicht als Literal auf; nur als
+  `path_set=true/false`.
+- Im Probe-Ergebnis (`settings_probe_result`) wird er **nicht**
+  zurückgeschickt; die `message` bleibt kuratiert.
+- Im Fehler-Envelope zu einem fehlgeschlagenen
+  `settings_set_llamafile_config` wird er nicht echo't.
+- Der StatusPayload enthält heute kein Pfad-Feld. Wenn ein späterer
+  PR ein solches Feld einführt, muss es als hashing-/masking-
+  kompatibel dokumentiert sein.
+
+**Schreib-/Persistenz-Pfade.**
+
+- **Editierbare Operational-Werte (heute: nur Llamafile-Felder).**
+  Dateiname `llamafile_local.json` im Settings-Verzeichnis.
+  Auflösungsreihenfolge: `SMOLIT_SETTINGS_DIR` →
+  `$XDG_CONFIG_HOME/smolit-assistant/` →
+  `$HOME/.config/smolit-assistant/`. Atomarer Write
+  (temp + rename). Unix-Permissions 0600, damit der Pfad derselben
+  Posture folgt wie ein zukünftiger Secret-Store.
+- **Sensitive-Werte.** Noch kein Store. Wenn einer entsteht,
+  separates File (z. B. `secrets.json`), **nie** gemeinsam mit
+  operational-Werten serialisiert, und nie aus dem Core in Richtung
+  UI/IPC exponiert — die UI sieht nur „gesetzt ja/nein" + Masking.
+
+**IPC-Disziplin.**
+
+- `settings_set_*`-Nachrichten transportieren nur Operational-
+  Werte. Sensitive-Werte wandern künftig über einen dedizierten
+  `secrets_set_*`-Pfad (Ausgestaltung offen, nicht Teil von PR 5).
+- Antworten auf Schreibaktionen spiegeln ausschließlich den
+  StatusPayload — kein Raw-Echo der Eingabe.
+- Probe-Aktionen (`settings_probe_llamafile`) sind Side-Effect-frei
+  und liefern kuratierte Tags.

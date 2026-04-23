@@ -32,6 +32,8 @@ var _click_through_controller: RefCounted = null
 @onready var _presence: Node = $PresenceController
 
 @onready var _status: Label = $VBox/HeaderRow/StatusLabel
+@onready var _settings_button: Button = $VBox/HeaderRow/SettingsButton
+@onready var _settings_panel: PanelContainer = $VBox/SettingsPanel
 
 @onready var _action_banner: PanelContainer = $VBox/ActionBanner
 @onready var _action_title: Label = $VBox/ActionBanner/ActionVBox/ActionTitle
@@ -112,6 +114,19 @@ var _compact_input_open: bool = false
 
 const _COMPACT_COMMANDS_TEXT: String = "help · voice · audio-status · interaction_probe_accessibility · interaction_discover_accessibility"
 
+## Settings-Shell (Phase 8c PR 3).
+##
+## Dünner Substate auf dem Expanded-Window: der Settings-Button im
+## Header öffnet die Shell, die sich in der bestehenden Presence-Hülle
+## anstelle des DockPanels zeigt. Avatar / Banner / Workflow-Overlay
+## bleiben unberührt — Settings ist *kein* neuer Presence-Mode.
+##
+## Der letzte `StatusPayload` wird gecached, damit die Shell beim
+## Öffnen sofort ihre read-only Felder rendert, ohne einen frischen
+## `get_status` erzwingen zu müssen.
+var _settings_open: bool = false
+var _last_status_payload: Dictionary = {}
+
 
 func _ready() -> void:
 	_send_button.pressed.connect(_on_send_pressed)
@@ -147,6 +162,10 @@ func _ready() -> void:
 	_deny_button.pressed.connect(_on_deny_pressed)
 	_clear_target_button.pressed.connect(_on_clear_target_pressed)
 
+	_settings_button.pressed.connect(_on_settings_button_pressed)
+	if _settings_panel != null and _settings_panel.has_signal("close_requested"):
+		_settings_panel.close_requested.connect(_on_settings_close_requested)
+
 	_compact_send_button.pressed.connect(_on_compact_send_pressed)
 	_compact_voice_button.pressed.connect(_on_compact_voice_pressed)
 	_compact_add_files_button.pressed.connect(_on_compact_add_files_pressed)
@@ -161,6 +180,9 @@ func _ready() -> void:
 	_presence.action_context_changed.connect(_on_action_context_changed)
 
 	_set_connected(IpcClient.is_connected_to_core())
+	_settings_open = false
+	_settings_panel.visible = false
+	_settings_button.visible = false
 	_apply_presence_mode(_presence.current_mode())
 	_action_banner.visible = false
 	_approval_banner.visible = false
@@ -250,6 +272,9 @@ func _on_pong() -> void:
 
 func _on_status(payload: Dictionary) -> void:
 	_append("[i]status: %s[/i]" % JSON.stringify(payload))
+	_last_status_payload = payload
+	if _settings_panel != null and _settings_panel.has_method("apply_status"):
+		_settings_panel.apply_status(payload)
 
 
 func _on_thinking() -> void:
@@ -278,8 +303,21 @@ func _apply_presence_mode(mode: int) -> void:
 	match mode:
 		PresenceStateRef.Mode.DOCKED:
 			_dock_panel.visible = false
+			# Docked hat weder Dock-Content noch einen Platz für die
+			# Settings-Shell — sie bleibt eine Expanded-Substate.
+			_close_settings()
+			_settings_button.visible = false
 		PresenceStateRef.Mode.EXPANDED:
-			_dock_panel.visible = true
+			# Settings bleibt eine Substate von Expanded: wenn das Panel
+			# offen war, kommt es beim erneuten Betreten zurück, sonst
+			# zeigt sich die normale Dock-/Log-Fläche. Der Button selbst
+			# ist nur in Expanded sichtbar.
+			_settings_button.visible = true
+			if _settings_open:
+				_dock_panel.visible = false
+				_settings_panel.visible = true
+			else:
+				_dock_panel.visible = true
 			# Expanded bringt bereits eine Volltext-Eingabe mit — das
 			# kleine Compact Panel wird damit überflüssig und würde
 			# nur doppelte UI erzeugen.
@@ -292,6 +330,15 @@ func _apply_presence_mode(mode: int) -> void:
 		PresenceStateRef.Mode.DISCONNECTED:
 			_dock_panel.visible = true
 			_close_compact_input()
+			# Ein Reconnect-Zyklus soll den Nutzer nicht plötzlich aus
+			# der Settings-Ansicht werfen; der Presence-Mode wird hier
+			# nur als "disconnected" gelesen, die Shell bleibt offen,
+			# falls sie offen war. Button bleibt aber sichtbar, damit
+			# der Nutzer sie auch ohne Core-Verbindung schließen kann.
+			_settings_button.visible = _settings_open
+			if _settings_open:
+				_dock_panel.visible = false
+				_settings_panel.visible = true
 
 
 func _on_action_context_changed(info: Dictionary) -> void:
@@ -907,6 +954,73 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		if key.pressed and not key.echo and key.keycode == KEY_ESCAPE:
 			_close_compact_input()
 			accept_event()
+
+
+# --- Settings Shell (Phase 8c PR 3) --------------------------------------
+
+
+## Öffnet die Settings-Shell als Substate des Expanded-Window. Sicht-
+## barkeit der Haupt-Flächen (Dock, Compact) wird hier zentral gesetzt
+## — die Shell selbst übernimmt bewusst keine Presence-/Layout-Ent-
+## scheidungen.
+func _open_settings() -> void:
+	if _settings_open:
+		return
+	_settings_open = true
+	_close_compact_input()
+	_dock_panel.visible = false
+	_settings_panel.visible = true
+	_push_settings_state()
+	if _settings_panel.has_method("open_panel"):
+		_settings_panel.open_panel()
+
+
+func _close_settings() -> void:
+	if not _settings_open:
+		# Trotzdem defensive Sichtbarkeit — falls die Shell nie offen
+		# war (Init-Pfad), bleibt sie garantiert versteckt.
+		if _settings_panel != null:
+			_settings_panel.visible = false
+		return
+	_settings_open = false
+	if _settings_panel != null:
+		if _settings_panel.has_method("close_panel"):
+			_settings_panel.close_panel()
+		_settings_panel.visible = false
+	# Dock-Fläche nur dann zurückholen, wenn wir in Expanded/Disconnect
+	# sind — in Docked bleibt sie bewusst versteckt.
+	var mode: int = _presence.current_mode()
+	if mode == PresenceStateRef.Mode.EXPANDED \
+			or mode == PresenceStateRef.Mode.DISCONNECTED:
+		_dock_panel.visible = true
+
+
+func _on_settings_button_pressed() -> void:
+	if _settings_open:
+		_close_settings()
+	else:
+		_open_settings()
+
+
+func _on_settings_close_requested() -> void:
+	_close_settings()
+
+
+## Versorgt die Shell vor jedem Öffnen mit dem letzten StatusPayload
+## plus ein paar UI-Extras (Visual-Action-Mode, Presence-Mode,
+## Connected). Keine IPC-Anfrage — wir rendern, was wir wissen, und
+## ehrlich `—`, was wir nicht wissen.
+func _push_settings_state() -> void:
+	if _settings_panel == null:
+		return
+	if _settings_panel.has_method("apply_status"):
+		_settings_panel.apply_status(_last_status_payload)
+	if _settings_panel.has_method("apply_extras"):
+		_settings_panel.apply_extras({
+			"visual_action_mode": VisualActionModeRef.name_of(_visual_action_mode),
+			"presence_mode": PresenceStateRef.name_of(_presence.current_mode()),
+			"connected": IpcClient.is_connected_to_core(),
+		})
 
 
 # --- Visual Action Mode (MVP UI-Staging, siehe §8.5) ---------------------

@@ -143,10 +143,15 @@ separaten Layout-Algorithmus, der HBoxContainer reicht):
 ui/
 ├── scenes/
 │   ├── main.tscn
+│   ├── settings/
+│   │   └── settings_panel.tscn
 │   └── workflow_overlay/
 │       └── workflow_overlay_root.tscn
 ├── scripts/
 │   ├── main.gd
+│   ├── settings/
+│   │   ├── settings_sections.gd
+│   │   └── settings_panel_controller.gd
 │   └── workflow_overlay/
 │       ├── workflow_overlay_controller.gd
 │       ├── workflow_overlay_state.gd
@@ -1561,6 +1566,250 @@ alle PASS): Panel-Phase-Namen gegen State-Modul gematcht,
 Theme-/Profile-Round-Trips, 4×3×3-`make_appearance`-Matrix auf
 Identität und Konsistenz geprüft, Identity-Invarianz bestätigt.
 Harness-Case `dev-controls-smoke` läuft den Test.
+
+---
+
+## 8d. Settings-Shell im Expanded Window (Phase 8c PR 3, Ist-Zustand)
+
+Smolit bekommt im Expanded Window einen eigenständigen, sichtbaren
+Einstieg in ein späteres Settings-Menü. Dieser PR liefert bewusst nur
+die **Shell** — Struktur, Navigation und read-only Readout. Keine
+Schreib-Aktionen, keine Secrets-Eingabe, kein Cloud-Pfad.
+
+Crosslinks:
+[`docs/provider_fallback_and_settings_architecture.md`](./provider_fallback_and_settings_architecture.md)
+§6 (Settings-Scope), §9 (PR-Reihenfolge); `docs/api.md` §2.3
+(StatusPayload-Felder, inkl. `text_provider_*`).
+
+### 8d.1 Rolle und Scope-Grenzen
+
+- **Rolle.** Additiver UI-Substate auf dem Expanded-Window. Die
+  Settings-Shell ersetzt das Dock-Panel *innerhalb derselben
+  Presence-Hülle* — kein neues Toplevel-Fenster, kein Overlay, kein
+  neuer Presence-Mode.
+- **Nicht erreichbar in Docked.** Der Settings-Button ist nur sichtbar,
+  wenn der Presence-Mode `expanded` (oder `disconnected` mit offener
+  Shell) ist. In Docked bleibt Smolit bewusst ruhig; Settings sind eine
+  aktive Handlung, keine Ablenkung.
+- **Avatar / Banner / Overlay bleiben unberührt.** Action-Banner,
+  Approval-Banner, Discovery-Panel, Avatar, Workflow-Overlay und
+  Utterance-Bubble liegen weiter in derselben Scene und behalten ihre
+  Sichtbarkeitslogik. Die Shell sitzt im selben `VBox` wie das
+  Dock-Panel und toggelt nur die Sichtbarkeit mit ihm.
+- **Keine Schreib-Aktionen.** Alle Bereiche sind read-only. Der
+  Controller emittiert ausschließlich ein `close_requested`-Signal;
+  sonst kennt er weder IPC noch Side-Effects.
+
+### 8d.2 Datei-Layout
+
+```text
+ui/
+├── scenes/
+│   └── settings/
+│       └── settings_panel.tscn
+└── scripts/
+    └── settings/
+        ├── settings_sections.gd          # pure Helfer (Sections, Labels, *_lines)
+        └── settings_panel_controller.gd  # Scene-Controller
+```
+
+- `settings_sections.gd` ist ein `RefCounted` ohne Scene-Kopplung:
+  `SectionId`-Enum, `all_sections()`, `label_for()`, `placeholder_for()`,
+  `slug_for()` und je Abschnitt eine `*_lines(status, extras)`-Funktion,
+  die eine flache Liste von `{label, value, muted}`-Rows liefert.
+- `settings_panel_controller.gd` ist ein `PanelContainer`: baut den
+  UI-Rahmen programmatisch auf (Header mit Back-Button + Titel,
+  ScrollContainer, Content-VBox), rendert die Sections aus
+  `SettingsSections` und hält nur zwei schwache Caches
+  (`_last_status`, `_last_extras`).
+
+### 8d.3 Navigation im Expanded-Flow
+
+- `main.tscn` hat einen neuen `SettingsButton` im `HeaderRow` (`⚙ Settings`,
+  `flat = true`). Der Button ist nur in Expanded sichtbar.
+- `main.gd` trackt `_settings_open: bool` und cached das letzte
+  `StatusPayload` als `_last_status_payload`. Umschaltung passiert in
+  zwei Methoden:
+  - `_open_settings()` versteckt `DockPanel`, versteckt Compact-Input,
+    zeigt `SettingsPanel`, ruft `apply_status` + `apply_extras` (Visual-
+    Action-Mode-Name, Presence-Mode-Name, Connected-Bool) auf und
+    macht ein finales `open_panel()`.
+  - `_close_settings()` versteckt das Panel wieder und zeigt das
+    Dock-Panel zurück, solange der Presence-Mode `expanded` oder
+    `disconnected` ist (in Docked bleibt das Dock-Panel versteckt).
+- Der Back-Button im Panel emittiert `close_requested` →
+  `_on_settings_close_requested` → `_close_settings()`. Ein zweiter
+  Klick auf den Header-Settings-Button schließt die Shell ebenfalls.
+- Bei Wechsel zu Docked wird die Shell hart geschlossen; bei Wechsel
+  zurück zu Expanded wird sie nur wiederhergestellt, wenn sie vor dem
+  Wechsel offen war. Bei `disconnected` bleibt sie sichtbar, falls sie
+  offen war — der Nutzer soll auch ohne Core-Verbindung zurück
+  navigieren können.
+
+### 8d.4 Sichtbare Bereiche (read-only)
+
+In der festen Reihenfolge: **General**, **Presence / UI**,
+**Text Provider**, **STT**, **TTS**, **Privacy / Cloud / Data
+handling**, **Connection / Status**. Jeder Abschnitt trägt:
+
+- Titel + kleiner deutscher Shell-Hinweis (`placeholder_for`),
+- eine Liste von `label · value`-Zeilen, die aus dem letzten bekannten
+  StatusPayload plus UI-Extras gerendert werden,
+- eine dünne Trennlinie.
+
+Gerenderte Felder (StatusPayload-Quelle siehe `docs/api.md` §2.3):
+
+- **General** — App-Name, Shell-Marker.
+- **Presence / UI** — `visual_action_mode` (aus `main.gd`),
+  `presence_mode` (aus `PresenceState.name_of`), Avatar-Appearance-
+  Hinweis auf Dev-Controls.
+- **Text Provider** — `text_provider_configured`,
+  `text_provider_active`, `text_provider_availability`,
+  `text_provider_last_error`, `text_provider_cloud`. Seit PR 4
+  zusätzlich: `text_provider_chain` als „→"-getrennte Fallback-
+  Reihenfolge und ein vertiefter `llamafile_local`-Block mit
+  `lifecycle` / `mode` / `idle timeout` sowie booleschem `enabled`
+  (Env-Flag) und `configured (path set)`. Der Block wird genau
+  dann gezeigt, wenn `llamafile_in_chain=true`; sonst rendert die
+  Shell ehrlich „nicht in der Chain" und — wenn der Env-Flag
+  trotzdem gesetzt ist — benennt den zuständigen
+  `SMOLIT_TEXT_PROVIDER_CHAIN`-Knopf. Alte Cores ohne
+  `llamafile_in_chain`-Feld fallen stillschweigend auf den
+  PR-3-Sammelhinweis zurück.
+- **STT / TTS** — `stt_enabled` / `stt_available` bzw. `tts_enabled` /
+  `tts_available` / `auto_speak`. Pro Abschnitt ein Hinweis, dass die
+  eigentliche Provider-Auswahl erst mit PR 4 kommt.
+- **Privacy** — Cloud-Flag für Text-Achse. Seit PR 4 zusätzlich
+  eine „Text: lokaler Pfad"-Zeile, die
+  `text_provider_cloud` + `llamafile_in_chain` + `llamafile_enabled`
+  zu einer ehrlichen Lokal-Aussage verdichtet (aktiver Lokalpfad
+  vs. „in Chain, aber disabled" vs. „nur abrain in Chain"). Weitere
+  Zeilen bleiben Platzhalter für STT/TTS-Cloud (noch nicht
+  modelliert), Offline-Only und Secrets (PR 5).
+- **Connection / Status** — `IPC (connected/disconnected)`,
+  `ipc_enabled`, `interaction_enabled`, `interaction_backend`,
+  `approval_timeout_seconds`, `accessibility_probe` (+ optional
+  `accessibility_probe_reason`).
+
+Defensive Regeln:
+
+- Fehlende oder `null`-Felder werden als `—` gerendert, nie als
+  geratener Default.
+- Unbekannte Booleans (z. B. String `"yes"`) werden tolerant
+  interpretiert; nicht interpretierbare Werte werden ebenfalls als `—`
+  gerendert.
+- Nicht-Dictionary-Eingaben an `apply_status` / `apply_extras` werden
+  still zu leeren Defaults — die Shell crasht nicht, zeigt aber
+  ehrlich nichts an.
+
+### 8d.5 Nicht-Ziele dieses PR
+
+- Keine Secrets-/Path-/Binary-Eingabe (kein Input-Feld in dieser Shell).
+- Keine Start/Stop-Buttons für `llamafile_local` oder andere Provider.
+- Keine Cloud-Provider-Integration, keine Opt-in-Flüsse.
+- Keine STT-/TTS-Provider-Abstraktion, keine neue IPC-Familie.
+- Keine neue Toplevel-Window-Struktur, kein Overlay-Verhalten.
+- Keine Stage-C-/Avatar-Appearance-Kopplung.
+- Keine Änderung an Approval / Interaction / Policy.
+- Kein generischer Settings-Router, kein Multi-Page-Framework.
+
+### 8d.5a Erste editierbare Oberfläche (PR 5, Ist-Zustand)
+
+Mit PR 5 bekommt die Shell die ersten kleinen, kuratierten Schreib-
+und Probe-Aktionen. Scope bleibt bewusst eng: nur
+`llamafile_local`. Alle anderen Felder bleiben read-only.
+
+**Direkt unter dem Text-Provider-Readout** rendert der Controller
+einen eigenen „llamafile_local · Edit"-Block mit:
+
+- **Enabled** — `CheckBox` spiegelt `SMOLIT_LLAMAFILE_ENABLED`.
+- **Mode** — `OptionButton` mit der Whitelist `on_demand` /
+  `standby`. Unbekannte Werte werden im Core **ausdrücklich**
+  abgelehnt (im Gegensatz zum Startup-Parser, der still auf den
+  Default fällt).
+- **Idle timeout (s)** — `SpinBox` (1 .. 86 400). `0` wird vom Core
+  als Fehler zurückgeschickt.
+- **Binary path** — `LineEdit` mit Tooltip „Wird nicht in Logs
+  ausgegeben". Leerer String löscht den Pfad. Der Core loggt nur
+  `path_set=true/false`; weder Shell noch Core schreiben den Pfad
+  in Status, Event-Envelopes oder Fehler-Meldungen.
+- **Apply-Button** — löst `IpcClient.settings_set_llamafile_config`
+  aus. Der Core validiert, rebuildet den Resolver atomar,
+  persistiert atomar (siehe
+  [`docs/provider_fallback_and_settings_architecture.md` §11](./provider_fallback_and_settings_architecture.md))
+  und echoed einen frischen `status`-Envelope. Die UI
+  synchronisiert ihre Widgets beim nächsten `apply_status`-Tick —
+  sie hält **keine** zweite Wahrheit.
+- **Probe-Button** — löst `IpcClient.settings_probe_llamafile` aus.
+  Seiten-effektfrei (kein Spawn, kein HTTP). Die Antwort kommt als
+  `settings_probe_result` auf einem neuen EventBus-Signal
+  (`settings_probe_result_received`); das Panel zeigt den Tag
+  (`[ok]` / `[path_missing]` / `[not_configured]` / …) plus die
+  kurze Core-Meldung. Die UI setzt **keinen** eigenen grünen
+  Haken; Erfolg wird ausschließlich durch den Core-Tag `ok`
+  angezeigt.
+
+Defensive Regeln:
+
+- Alle Widget-Stände kommen beim Render aus dem letzten
+  `StatusPayload`. Ein `_syncing_*`-Flag verhindert
+  Change-Handler-Kaskaden während des Re-Syncs.
+- Wenn der Core offline ist, bleibt Apply/Probe stumm — die
+  Buttons setzen lokal `"offline"`/`"probe: offline"` und senden
+  nichts.
+- Der Renderer baut den Editor-Block **nach** jedem Re-Render neu
+  auf; alte Widget-Referenzen werden explizit auf `null` gesetzt,
+  bevor die neuen Nodes entstehen.
+
+EventBus-/IPC-Erweiterungen (additiv):
+
+- Neues Signal `settings_probe_result_received(payload: Dictionary)`
+  in [`ui/autoload/event_bus.gd`](../ui/autoload/event_bus.gd).
+- Neue Client-Methoden in [`ui/autoload/ipc_client.gd`](../ui/autoload/ipc_client.gd):
+  `settings_set_llamafile_config(enabled, mode=null, idle_timeout_seconds=null, path=null)`
+  und `settings_probe_llamafile()`.
+
+Sicherheitsgrenzen für diese erste editierbare Fläche:
+
+- **Keine Secrets** werden über `settings_set_*` transportiert —
+  API-Keys, Tokens usw. bleiben für einen späteren dedizierten
+  Pfad reserviert.
+- **Keine Pfade in Logs / Status / Fehler / Probe-Ergebnissen.**
+- **Kein UI-seitiger Secret-Store.** Der Core bleibt einziger
+  Persistenz-Ort.
+
+### 8d.6 Verifikation
+
+- `scripts/settings_shell_smoke.gd` (103 Assertions, alle PASS —
+  +15 gegenüber PR 4, +33 gegenüber PR 3): Section-Reihenfolge,
+  Slug-Eindeutigkeit, defensive `*_lines`-Renderer für leere /
+  partielle / vollständige StatusPayloads inklusive PR-4-Felder
+  (`text_provider_chain`, `llamafile_in_chain`, `llamafile_lifecycle`,
+  `llamafile_mode`, `llamafile_idle_timeout_seconds`,
+  `llamafile_enabled`, `llamafile_configured`), Privacy-Rollup mit
+  Lokal-/Cloud-Aussage, Scene-Verhalten des Panel-Controllers
+  (Default unsichtbar, `open_panel` / `close_panel`,
+  `close_requested`-Signal, crash-freies `apply_status` /
+  `apply_extras` bei Nicht-Dictionary-Eingaben, Rückfall-Pfad für
+  alte Cores ohne PR-4-Felder). Seit PR 5: Editor-Block wird beim
+  `open_panel()` gebaut, Widgets synchronisieren sich mit
+  `apply_status`-Payloads (Enabled / Mode / Idle-Timeout),
+  Probe-Ergebnisse werden 1:1 mit Core-Tag gerendert, Pfad-Leak-
+  Disziplin im Probe-Label verifiziert. Harness-Case
+  `settings-shell-smoke` in `scripts/run_overlay_verification.sh`.
+- Core-Tests (PR 5 gelandet): 150 PASS (+15 gegenüber PR 4) — sechs
+  Unit-Tests im neuen Modul `settings_store`, vier IPC-Server-Tests
+  für Schreib-/Probe-Pfade (Apply-Echo, Unknown-Mode-Reject,
+  Probe-`not_configured`, Probe-`path_missing` ohne Leak,
+  Probe-`ok` für `/bin/true`), vier Protocol-Tests für die
+  zugehörigen `IncomingMessage`/`OutgoingMessage`-Varianten, plus
+  ein Mode-Validator-Test im `config`-Modul.
+- Bestehende Smokes (`visual-action-mode-smoke`,
+  `avatar-render-polish-smoke`, `avatar-appearance-smoke`,
+  `avatar-identity-smoke`, `avatar-template-capabilities-smoke`,
+  `avatar-preferences-smoke`, `dev-controls-smoke`,
+  `workflow-state-smoke`, `resolver-smoke`, `utterance-bubble-smoke`)
+  bleiben grün.
 
 ---
 

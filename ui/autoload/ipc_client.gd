@@ -80,6 +80,42 @@ func clear_target() -> void:
 	_send({"type": "interaction_clear_target"})
 
 
+## PR 5 — Schreibpfad für die editierbare `llamafile_local`-Config.
+## Der Core validiert, rebuildet den Resolver und antwortet entweder
+## mit einem `status`-Envelope (neuer Stand) oder einem `error` (bei
+## ungültigem Mode / Idle-Timeout). Optionen mit `null` bleiben
+## unverändert; `path=""` löscht den Pfad explizit.
+##
+## Der Binary-Pfad wird nicht geloggt — die UI reicht ihn nur direkt
+## an den Core weiter und behält ihn nicht in EventBus-Readouts.
+func settings_set_llamafile_config(
+	enabled: bool,
+	mode: Variant = null,
+	idle_timeout_seconds: Variant = null,
+	path: Variant = null,
+) -> void:
+	var payload: Dictionary = {
+		"type": "settings_set_llamafile_config",
+		"enabled": enabled,
+	}
+	if typeof(mode) == TYPE_STRING and String(mode) != "":
+		payload["mode"] = String(mode)
+	if typeof(idle_timeout_seconds) == TYPE_INT:
+		payload["idle_timeout_seconds"] = int(idle_timeout_seconds)
+	if typeof(path) == TYPE_STRING:
+		# Leere oder nur-whitespace-Strings reichen wir als "" durch —
+		# der Core interpretiert das als "Pfad löschen".
+		payload["path"] = String(path)
+	_send(payload)
+
+
+## PR 5 — Diagnose-Probe für `llamafile_local`. Keine Side-Effects
+## (kein Spawn, kein HTTP). Antwort kommt als
+## `settings_probe_result_received`-Signal am EventBus.
+func settings_probe_llamafile() -> void:
+	_send({"type": "settings_probe_llamafile"})
+
+
 func _load_config() -> void:
 	var cfg := ConfigFile.new()
 	var err := cfg.load(_CONFIG_PATH)
@@ -197,6 +233,8 @@ func _handle_frame(raw: String) -> void:
 			EventBus.target_selected_received.emit(_extract_payload(parsed))
 		"target_cleared":
 			EventBus.target_cleared_received.emit(_extract_payload(parsed))
+		"settings_probe_result":
+			EventBus.settings_probe_result_received.emit(_extract_payload(parsed))
 		_:
 			if _debug:
 				push_warning("[ipc] unknown message type: %s" % type)

@@ -1029,14 +1029,92 @@ und Nicht-Ziele.
       Modell-Bundling/Provisioning, echter `standby`-Mode, Streaming,
       GPU-/Advanced-Tuning, Settings-UI-Exposition des Lifecycles —
       jeweils eigene Folge-PRs.
-- [ ] PR 3: Settings-Shell im UI (Expanded-Window, read-only
-      Bereiche aus Doku §6; keine Schreibaktionen in den Core).
-- [ ] PR 4: STT-/TTS-Provider-Settings + Status-Anzeige (additive
-      `StatusPayload`-Erweiterung, read-only).
-- [ ] PR 5: Secrets-Handling + Verbindungsprüfung + Testaktionen
-      (maskierte Darstellung, schmaler Secrets-Store, Test-Button
-      pro Provider). Größte Sicherheitsoberfläche; eigene
-      Review-Checkliste.
+- [x] PR 3: Settings-Shell im UI — gelandet. Reine UI-Shell für ein
+      Settings-Panel im Expanded-Window: sichtbarer `⚙ Settings`-
+      Button im Header-Row, neuer UI-Substate innerhalb derselben
+      Presence-Hülle (Shell ersetzt das Dock-Panel, Avatar / Banner /
+      Workflow-Overlay / Utterance-Bubble bleiben unberührt). Sieben
+      read-only Bereiche aus Doku §6 in fester Reihenfolge:
+      **General**, **Presence / UI**, **Text Provider**, **STT**,
+      **TTS**, **Privacy / Cloud / Data handling**,
+      **Connection / Status**. Text-Provider-Readout bindet defensiv
+      an die fünf `text_provider_*`-Felder aus `StatusPayload` und
+      benennt `llamafile_local` ehrlich als lokalen Runtime-Fallback
+      (Configured/Active/Availability/Last-Error/Cloud sichtbar; keine
+      Pfad-/Secret-/Start/Stop-Eingabe). Keine neuen IPC-Nachrichten,
+      keine Schreibaktionen, kein Secrets-Editor, keine Cloud-Integration.
+      Neue Dateien: `ui/scenes/settings/settings_panel.tscn`,
+      `ui/scripts/settings/settings_sections.gd`,
+      `ui/scripts/settings/settings_panel_controller.gd`; additive
+      Einbindung in `ui/scenes/main.tscn` + `ui/scripts/main.gd`. Tests:
+      `scripts/settings_shell_smoke.gd` (70 Assertions PASS), Harness-
+      Case `settings-shell-smoke`. Alle bestehenden UI-Smokes bleiben
+      grün, Core-Tests unberührt. Details in
+      [docs/ui_architecture.md §8d](./docs/ui_architecture.md) und
+      [docs/provider_fallback_and_settings_architecture.md §9](./docs/provider_fallback_and_settings_architecture.md).
+- [x] PR 4: Vertiefter Status-Readout für Text/STT/TTS — gelandet
+      (Text-Achse produktiv; STT/TTS konservativ bei Basis-Readout).
+      `StatusPayload` um sieben additive Felder erweitert:
+      `text_provider_chain` (geordnete Resolver-Kette),
+      `llamafile_in_chain`, `llamafile_enabled`,
+      `llamafile_configured`, `llamafile_lifecycle`, `llamafile_mode`,
+      `llamafile_idle_timeout_seconds`. Lifecycle-/Mode-/Idle-Felder
+      sind `null`, wenn `llamafile_local` **nicht** in der Kette
+      steht — so bleibt `null` ehrlich als „nicht in der Kette"
+      lesbar, nicht als „Runtime kaputt". Resolver exponiert
+      `chain_kinds()` (jetzt öffentlich) und
+      `llamafile_lifecycle()`. Die Settings-Shell rendert die Kette
+      als „→"-getrennte Reihenfolge, öffnet bei
+      `llamafile_in_chain=true` einen vertieften llamafile-Block und
+      verdichtet Cloud-/Lokal-Status im Privacy-Abschnitt. Kein
+      Cloud-Provider, keine STT-/TTS-Provider-Abstraktion, keine
+      Secrets-Eingabe, keine Schreibaktionen, keine neue IPC-Familie.
+      Ältere UI-Stände ohne Kenntnis der neuen Felder bleiben ohne
+      Regression lesbar (defensiver Rückfall-Pfad im Renderer).
+      Tests: Core 135 PASS (+6 Resolver-/IPC-Tests); UI
+      `settings-shell-smoke` auf 88 Assertions erweitert (+18). Alle
+      anderen UI-Smokes grün. Details in
+      [docs/provider_fallback_and_settings_architecture.md §8.1](./docs/provider_fallback_and_settings_architecture.md),
+      [docs/api.md §2.3](./docs/api.md) und
+      [docs/ui_architecture.md §8d](./docs/ui_architecture.md).
+- [x] PR 5: Erste Schreib-/Probe-Oberfläche (Text-Achse,
+      `llamafile_local`) — gelandet, bewusst konservativ. Die
+      Settings-Shell bekommt einen schmalen Editor-Block direkt
+      unter dem Text-Provider-Readout: `enabled` (CheckBox),
+      `mode` (OptionButton `on_demand`/`standby`),
+      `idle_timeout_seconds` (SpinBox) und Binary-`path` (LineEdit),
+      plus Apply- und Probe-Button. Apply → neue additive IPC-
+      Nachricht `settings_set_llamafile_config`; Core validiert
+      (Whitelist für Mode, `idle > 0`), rebuildet den
+      `TextProviderResolver` atomar, persistiert atomar in einer
+      kleinen JSON-Datei unter `SMOLIT_SETTINGS_DIR` → `$XDG_CONFIG_HOME/smolit-assistant/` →
+      `$HOME/.config/smolit-assistant/` (Permissions 0600), und
+      antwortet mit einem frischen `status`-Envelope; unbekannte
+      Werte lehnen den Write **ausdrücklich** ab. Probe →
+      `settings_probe_llamafile` → `settings_probe_result` mit
+      kuratierten Tags (`ok` / `not_in_chain` / `disabled` /
+      `not_configured` / `path_missing` / `path_not_file` /
+      `path_not_executable`), Side-Effect-frei (kein Spawn, kein
+      HTTP). Sicherheitsdisziplin: Binary-Pfad taucht weder in Logs
+      noch im Probe-Ergebnis noch im Fehler-Envelope auf (`path_set`-
+      Boolean reicht); Sensitive-Werte (API-Keys etc.) sind
+      ausdrücklich **nicht** Teil von PR 5 und bleiben für einen
+      späteren dedizierten Secret-Pfad reserviert. Neues Core-Modul
+      `settings_store` mit Kategorien-Doku; App wrappt
+      `text_provider` jetzt hinter `RwLock<Arc<...>>` für atomare
+      Rebuilds. Keine neue IPC-Familie, keine STT-/TTS-Provider-
+      Abstraktion, keine Cloud-Integration, keine Provider-Auswahl,
+      keine Start/Stop-Logik in der UI, keine Pfad-Editor-
+      Clear-Affordance (bewusst ausgelassen — Apply mit leerem Feld
+      sendet `null`, nicht `""`). Details in
+      [docs/provider_fallback_and_settings_architecture.md §9 + §11](./docs/provider_fallback_and_settings_architecture.md),
+      [docs/api.md §2.10](./docs/api.md),
+      [docs/ui_architecture.md §8d.5a](./docs/ui_architecture.md).
+      Tests: Core 150 PASS (+15 vs. PR 4 — sechs
+      `settings_store`-Unit-Tests, vier IPC-Integrationstests, vier
+      Protocol-Tests, ein Mode-Validator-Test); UI
+      `settings-shell-smoke` auf 103 Assertions erweitert (+15).
+      Alle zehn anderen UI-Smokes grün; Headless-Boot sauber.
 
 ---
 
