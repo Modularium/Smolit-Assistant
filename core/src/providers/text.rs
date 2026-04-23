@@ -54,6 +54,12 @@ pub const PROVIDER_NAME_ABRAIN: &str = "abrain";
 /// In der Konfiguration als `llamafile_local` einzusetzen.
 pub const PROVIDER_NAME_LLAMAFILE_LOCAL: &str = "llamafile_local";
 
+/// Kanonischer Namensstring für den allgemeinen lokalen HTTP-Provider
+/// (PR 8). Ziel: ein schmaler, produktiver HTTP-Adapter gegen einen
+/// lokal laufenden, llama.cpp-kompatiblen Completion-Server, ohne
+/// Cloud-SDK, ohne Secrets, ohne Streaming.
+pub const PROVIDER_NAME_LOCAL_HTTP: &str = "local_http";
+
 const ABRAIN_DEFAULT_TIMEOUT_SECS: u64 = 30;
 
 /// Fehlerklassen, die der Resolver intern trackt. Die Strings sind
@@ -107,6 +113,11 @@ pub struct TextProviderChainItem {
 pub enum TextProviderImpl {
     Abrain(AbrainCliProvider),
     LlamafileLocal(LlamafileLocalProvider),
+    /// Lokaler HTTP-Provider (PR 8). Spricht einen konfigurierten
+    /// Endpoint per `POST` mit JSON-Body an und liest einen
+    /// Text-Feldwert aus der Antwort. Loopback-first, kein TLS,
+    /// keine Secrets in dieser Stufe.
+    LocalHttp(LocalHttpProvider),
 }
 
 impl TextProviderImpl {
@@ -116,6 +127,7 @@ impl TextProviderImpl {
         match self {
             Self::Abrain(_) => PROVIDER_NAME_ABRAIN,
             Self::LlamafileLocal(_) => PROVIDER_NAME_LLAMAFILE_LOCAL,
+            Self::LocalHttp(_) => PROVIDER_NAME_LOCAL_HTTP,
         }
     }
 
@@ -135,6 +147,39 @@ impl TextProviderImpl {
         // bzw. `LlamafileLocalProvider::run`.
         let chain: Vec<String> = err.chain().map(|e| e.to_string()).collect();
         let joined = chain.join(" | ").to_ascii_lowercase();
+
+        // local_http-spezifische Tags (PR 8). Wie bei llamafile
+        // zuerst geprüft, damit die allgemeinen Muster weiter unten
+        // nicht fälschlicherweise auf lokal-HTTP-Refusals greifen.
+        if joined.contains("local_http") {
+            if joined.contains("is disabled") {
+                return "disabled";
+            }
+            if joined.contains("not configured") {
+                return "not_configured";
+            }
+            if joined.contains("endpoint must start with http://") {
+                return "endpoint_scheme_unsupported";
+            }
+            if joined.contains("endpoint url is not parseable") {
+                return "endpoint_unparseable";
+            }
+            if joined.contains("timed out") {
+                return "timeout";
+            }
+            if joined.contains("http connect") {
+                return "http_connect_failed";
+            }
+            if joined.contains("http returned status") {
+                return "http_error";
+            }
+            if joined.contains("returned no content") {
+                return "empty_response";
+            }
+            if joined.contains("is not valid json") || joined.contains("not valid utf-8") {
+                return "invalid_response";
+            }
+        }
 
         // Llamafile-spezifische Tags zuerst prüfen, damit die
         // allgemeinen Muster („failed to spawn" o. ä.) nicht
@@ -199,6 +244,7 @@ impl TextProviderImpl {
         match self {
             Self::Abrain(p) => p.run(input).await,
             Self::LlamafileLocal(p) => p.run(input).await,
+            Self::LocalHttp(p) => p.run(input).await,
         }
     }
 }
@@ -712,6 +758,169 @@ impl LlamafileLocalProvider {
     }
 }
 
+// --- Local-HTTP-Provider (PR 8) ----------------------------------------
+//
+// Allgemeiner lokaler HTTP-Text-Provider. Spiegelt den minimalen
+// Request-/Response-Pfad des llamafile-Runtimes, aber gegen einen
+// **konfigurierbaren** Endpoint statt eines selbst gestarteten
+// Prozesses. Keine eigene HTTP-Library — wir nutzen den bereits
+// bestehenden [`http_request`]-Helfer (raw HTTP/1.1 über
+// `tokio::net::TcpStream`), damit wir keine neue Dependency einziehen
+// und die Secret-/Leak-Disziplin identisch bleibt.
+//
+// Architektur-Grenzen (siehe
+// `docs/provider_fallback_and_settings_architecture.md` §4.1):
+//
+//   * **Kein TLS.** `https://` wird beim Parse verworfen. PR 8 ist
+//     loopback-first; eine Remote-/TLS-Integration bräuchte eine
+//     eigene Credential-/Trust-Discovery, die dieser PR bewusst nicht
+//     einführt.
+//   * **Keine Secrets.** Kein Authorization-Header, keine API-Keys
+//     — der Provider transportiert sie nicht, die Config speichert sie
+//     nicht.
+//   * **Kein Streaming, kein Tool-/Schema-Mode.** Single-Shot-Request
+//     mit einem einzigen Prompt-Feld; Antwort ist ein einziges
+//     Text-Feld. Wer mehr braucht, kommt in einem späteren PR dran.
+
+#[derive(Debug, Clone)]
+pub struct LocalHttpConfigView {
+    pub enabled: bool,
+    pub endpoint: Option<String>,
+    pub request_timeout_seconds: u64,
+    pub prompt_field: String,
+    pub response_field: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct LocalHttpProvider {
+    config: LocalHttpConfigView,
+}
+
+impl LocalHttpProvider {
+    pub fn new(config: LocalHttpConfigView) -> Self {
+        Self { config }
+    }
+
+    /// Kleiner URL-Parser. Akzeptiert ausschließlich `http://`-URLs
+    /// ohne User-Info und ohne Query. Liefert `(host, port, path)`.
+    /// Fehlt der Port, wird `80` angenommen.
+    ///
+    /// Bewusst kein `url`-Crate, kein `http`-Crate, kein `reqwest` —
+    /// wir sprechen HTTP/1.1 direkt, und die Parse-Regeln sind so
+    /// schmal wie der Provider.
+    pub fn parse_endpoint(endpoint: &str) -> Result<(String, u16, String)> {
+        let trimmed = endpoint.trim();
+        if trimmed.is_empty() {
+            bail!("local_http endpoint is not configured");
+        }
+        if trimmed.starts_with("https://") {
+            bail!(
+                "local_http endpoint must start with http:// (https:// is not supported in this build)"
+            );
+        }
+        let Some(rest) = trimmed.strip_prefix("http://") else {
+            bail!("local_http endpoint url is not parseable (missing http:// prefix)");
+        };
+        if rest.contains('@') {
+            bail!("local_http endpoint url is not parseable (user-info in url not supported)");
+        }
+        let (authority, path) = match rest.find('/') {
+            Some(idx) => (&rest[..idx], &rest[idx..]),
+            None => (rest, "/"),
+        };
+        if authority.is_empty() {
+            bail!("local_http endpoint url is not parseable (empty host)");
+        }
+        let (host, port) = match authority.rfind(':') {
+            Some(idx) => {
+                let (h, p) = authority.split_at(idx);
+                let p_num = p[1..]
+                    .parse::<u16>()
+                    .map_err(|_| anyhow::anyhow!(
+                        "local_http endpoint url is not parseable (bad port)"
+                    ))?;
+                (h.to_string(), p_num)
+            }
+            None => (authority.to_string(), 80u16),
+        };
+        if host.is_empty() {
+            bail!("local_http endpoint url is not parseable (empty host)");
+        }
+        Ok((host, port, path.to_string()))
+    }
+
+    pub async fn run(&self, input: &str) -> Result<String> {
+        if !self.config.enabled {
+            bail!("provider local_http is disabled (set SMOLIT_LOCAL_HTTP_ENABLED=1 to enable)");
+        }
+        let endpoint = self
+            .config
+            .endpoint
+            .as_deref()
+            .map(str::trim)
+            .filter(|e| !e.is_empty())
+            .context("provider local_http is enabled but not configured (set SMOLIT_LOCAL_HTTP_ENDPOINT)")?;
+
+        let (host, port, path) = Self::parse_endpoint(endpoint)?;
+
+        // Request-Body: ein einziges JSON-Objekt mit dem konfigurierten
+        // Prompt-Feldnamen. `stream=false` bleibt konstant — siehe
+        // Nicht-Ziele.
+        let prompt_field = if self.config.prompt_field.trim().is_empty() {
+            "prompt"
+        } else {
+            self.config.prompt_field.as_str()
+        };
+        let response_field = if self.config.response_field.trim().is_empty() {
+            "content"
+        } else {
+            self.config.response_field.as_str()
+        };
+        let payload = serde_json::json!({
+            prompt_field: input,
+            "stream": false,
+        });
+        let body = payload.to_string();
+
+        let timeout_secs = self.config.request_timeout_seconds.max(1);
+        let (status, response_body) =
+            match http_request(&host, port, "POST", &path, Some(&body), timeout_secs).await {
+                Ok(v) => v,
+                Err(err) => {
+                    // Raw-Helper-Fehler tragen bereits Kontext
+                    // (`llamafile HTTP connect timed out` etc.). Um den
+                    // Fehler eindeutig dem `local_http`-Provider
+                    // zuzuordnen, wrappen wir die Meldung — der
+                    // Klassifikator in [`TextProviderImpl::classify_error`]
+                    // greift darauf zu.
+                    let msg = format!("{err}");
+                    if msg.contains("connect timed out") || msg.contains("connect failed") {
+                        return Err(err.context("local_http HTTP connect failed"));
+                    }
+                    if msg.contains("timed out") {
+                        return Err(err.context("local_http request timed out"));
+                    }
+                    return Err(err.context("local_http HTTP request failed"));
+                }
+            };
+        if status != 200 {
+            bail!("local_http HTTP returned status {status}");
+        }
+        let parsed: serde_json::Value = serde_json::from_str(&response_body)
+            .context("local_http response is not valid JSON")?;
+        let content = parsed
+            .get(response_field)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if content.is_empty() {
+            bail!("local_http returned no content");
+        }
+        Ok(content)
+    }
+}
+
 // --- Kleine lokale HTTP-Helfer (POST /completion + GET /health) -----
 //
 // Keine SDK-Abhängigkeit: wir sprechen HTTP/1.1 direkt über
@@ -904,6 +1113,7 @@ impl TextProviderResolver {
         chain: &[TextProviderChainItem],
         abrain_cmd: &str,
         llamafile: &LlamafileConfigView,
+        local_http: &LocalHttpConfigView,
     ) -> Self {
         let mut providers: Vec<TextProviderImpl> = Vec::with_capacity(chain.len());
         let mut skipped_unknown: Vec<String> = Vec::new();
@@ -919,6 +1129,11 @@ impl TextProviderResolver {
                         LlamafileLocalProvider::new(llamafile.clone()),
                     ));
                     saw_llamafile = true;
+                }
+                PROVIDER_NAME_LOCAL_HTTP => {
+                    providers.push(TextProviderImpl::LocalHttp(LocalHttpProvider::new(
+                        local_http.clone(),
+                    )));
                 }
                 other => {
                     skipped_unknown.push(other.to_string());
@@ -1106,6 +1321,38 @@ mod tests {
     fn llamafile_item() -> TextProviderChainItem {
         TextProviderChainItem {
             kind: PROVIDER_NAME_LLAMAFILE_LOCAL.to_string(),
+        }
+    }
+
+    fn local_http_item() -> TextProviderChainItem {
+        TextProviderChainItem {
+            kind: PROVIDER_NAME_LOCAL_HTTP.to_string(),
+        }
+    }
+
+    /// Default-`LocalHttpConfigView` mit disabled/None-Endpoint — für
+    /// Tests, die `local_http` gar nicht in der Kette haben und nur
+    /// einen ehrlichen Default-View an den Resolver-Builder reichen
+    /// müssen.
+    fn local_http_view_disabled() -> LocalHttpConfigView {
+        LocalHttpConfigView {
+            enabled: false,
+            endpoint: None,
+            request_timeout_seconds: 5,
+            prompt_field: "prompt".into(),
+            response_field: "content".into(),
+        }
+    }
+
+    /// Aktive View gegen einen Fake-Server. Der Aufrufer muss den Port
+    /// in die URL einsetzen.
+    fn local_http_view_with_endpoint(endpoint: String) -> LocalHttpConfigView {
+        LocalHttpConfigView {
+            enabled: true,
+            endpoint: Some(endpoint),
+            request_timeout_seconds: 3,
+            prompt_field: "prompt".into(),
+            response_field: "content".into(),
         }
     }
 
@@ -1497,6 +1744,7 @@ mod tests {
             &[abrain_item()],
             "/bin/true",
             &llamafile_view_disabled(),
+            &local_http_view_disabled(),
         );
         assert_eq!(r.chain_len(), 1);
         assert_eq!(r.chain_kinds(), vec!["abrain"]);
@@ -1520,6 +1768,7 @@ mod tests {
             &chain,
             "/bin/true",
             &llamafile_view_disabled(),
+            &local_http_view_disabled(),
         );
         assert_eq!(r.chain_kinds(), vec!["abrain"]);
     }
@@ -1534,6 +1783,7 @@ mod tests {
             &chain,
             "/bin/echo",
             &llamafile_view_disabled(),
+            &local_http_view_disabled(),
         );
         assert_eq!(r.chain_kinds(), vec!["abrain"]);
         assert_eq!(r.status().configured, "abrain");
@@ -1542,6 +1792,7 @@ mod tests {
             &[],
             "/bin/echo",
             &llamafile_view_disabled(),
+            &local_http_view_disabled(),
         );
         assert_eq!(r_empty.chain_kinds(), vec!["abrain"]);
     }
@@ -1553,6 +1804,7 @@ mod tests {
             &chain,
             "/bin/echo",
             &llamafile_view_configured_missing_binary(),
+            &local_http_view_disabled(),
         );
         assert_eq!(r.chain_kinds(), vec!["abrain", "llamafile_local"]);
         // Primary bleibt abrain; availability nominell „available".
@@ -1566,6 +1818,7 @@ mod tests {
             &chain,
             "/bin/echo",
             &llamafile_view_configured_missing_binary(),
+            &local_http_view_disabled(),
         );
         assert_eq!(r.chain_kinds(), vec!["llamafile_local", "abrain"]);
         // Primary ist jetzt llamafile_local.
@@ -1584,6 +1837,7 @@ mod tests {
             &chain,
             "/bin/echo",
             &llamafile_view_configured_missing_binary(),
+            &local_http_view_disabled(),
         );
         let out = r.run("ping").await.expect("abrain fallback must succeed");
         assert!(out.contains("ping"));
@@ -1605,6 +1859,7 @@ mod tests {
             &chain,
             "/bin/false",
             &llamafile_view_disabled(),
+            &local_http_view_disabled(),
         );
         let err = r.run("hi").await.expect_err("all must fail");
         assert!(matches!(err, TextProviderError::AllFailed(_)));
@@ -1626,6 +1881,7 @@ mod tests {
             &chain,
             "/bin/echo",
             &llamafile_view_configured_missing_binary(),
+            &local_http_view_disabled(),
         );
         let out = r.run("hi").await.expect("primary abrain must win");
         assert!(out.contains("hi"));
@@ -1703,6 +1959,144 @@ mod tests {
         assert_eq!(status.last_error.as_deref(), Some("empty_chain"));
     }
 
+    // --- Local-HTTP-Provider (PR 8) ----------------------------------
+    //
+    // Minimaler, ehrlicher HTTP-MVP: wir wiederverwenden den schon
+    // bestehenden `start_fake_llama_server`-Helfer. Er antwortet auf
+    // `POST /completion` mit `{"content": "..."}` — genau das, was der
+    // `local_http`-Default-Response-Field erwartet. So können wir den
+    // Request-/Response-Pfad vollständig prüfen, ohne eine neue
+    // Test-Infrastruktur einzuziehen.
+
+    #[test]
+    fn local_http_endpoint_parser_accepts_http_url_with_port_and_path() {
+        let (host, port, path) =
+            LocalHttpProvider::parse_endpoint("http://127.0.0.1:9000/v1/completion").unwrap();
+        assert_eq!(host, "127.0.0.1");
+        assert_eq!(port, 9000);
+        assert_eq!(path, "/v1/completion");
+    }
+
+    #[test]
+    fn local_http_endpoint_parser_defaults_port_80_and_root_path() {
+        let (host, port, path) = LocalHttpProvider::parse_endpoint("http://localhost").unwrap();
+        assert_eq!(host, "localhost");
+        assert_eq!(port, 80);
+        assert_eq!(path, "/");
+    }
+
+    #[test]
+    fn local_http_endpoint_parser_rejects_https() {
+        let err = LocalHttpProvider::parse_endpoint("https://example.test/").unwrap_err();
+        assert!(format!("{err}").contains("must start with http://"));
+    }
+
+    #[test]
+    fn local_http_endpoint_parser_rejects_non_http_scheme() {
+        let err = LocalHttpProvider::parse_endpoint("ftp://example.test/").unwrap_err();
+        assert!(format!("{err}").contains("not parseable"));
+    }
+
+    #[test]
+    fn local_http_endpoint_parser_rejects_user_info() {
+        let err = LocalHttpProvider::parse_endpoint("http://user:pw@host/").unwrap_err();
+        assert!(format!("{err}").contains("not parseable"));
+    }
+
+    #[test]
+    fn local_http_endpoint_parser_rejects_bad_port() {
+        let err = LocalHttpProvider::parse_endpoint("http://host:notaport/").unwrap_err();
+        assert!(format!("{err}").contains("not parseable"));
+    }
+
+    #[tokio::test]
+    async fn local_http_run_returns_content_from_fake_server() {
+        let (port, _server) = start_fake_llama_server("hallo lokal").await;
+        let endpoint = format!("http://127.0.0.1:{port}/completion");
+        let provider = LocalHttpProvider::new(local_http_view_with_endpoint(endpoint));
+        let response = provider.run("gruß?").await.expect("run must succeed");
+        assert_eq!(response, "hallo lokal");
+    }
+
+    #[tokio::test]
+    async fn local_http_run_disabled_reports_disabled_class() {
+        let provider = LocalHttpProvider::new(local_http_view_disabled());
+        let err = provider.run("x").await.unwrap_err();
+        assert_eq!(
+            TextProviderImpl::classify_error(&err),
+            "disabled",
+        );
+    }
+
+    #[tokio::test]
+    async fn local_http_run_enabled_without_endpoint_reports_not_configured() {
+        let view = LocalHttpConfigView {
+            enabled: true,
+            endpoint: None,
+            ..local_http_view_disabled()
+        };
+        let provider = LocalHttpProvider::new(view);
+        let err = provider.run("x").await.unwrap_err();
+        assert_eq!(
+            TextProviderImpl::classify_error(&err),
+            "not_configured",
+        );
+    }
+
+    #[tokio::test]
+    async fn local_http_run_rejects_https_with_stable_class() {
+        let provider = LocalHttpProvider::new(local_http_view_with_endpoint(
+            "https://example.test/".into(),
+        ));
+        let err = provider.run("x").await.unwrap_err();
+        assert_eq!(
+            TextProviderImpl::classify_error(&err),
+            "endpoint_scheme_unsupported",
+        );
+    }
+
+    #[tokio::test]
+    async fn local_http_run_non_200_reports_http_error_class() {
+        let (port, _server) = start_fake_llama_server_returning_500().await;
+        let provider = LocalHttpProvider::new(local_http_view_with_endpoint(format!(
+            "http://127.0.0.1:{port}/completion"
+        )));
+        let err = provider.run("x").await.unwrap_err();
+        assert_eq!(
+            TextProviderImpl::classify_error(&err),
+            "http_error",
+        );
+    }
+
+    #[test]
+    fn from_chain_instantiates_local_http_when_listed() {
+        let r = TextProviderResolver::from_chain(
+            &[local_http_item(), abrain_item()],
+            "/bin/echo",
+            &llamafile_view_disabled(),
+            &local_http_view_with_endpoint("http://127.0.0.1:59999/completion".into()),
+        );
+        assert_eq!(r.chain_kinds(), vec!["local_http", "abrain"]);
+    }
+
+    #[tokio::test]
+    async fn resolver_falls_back_from_local_http_to_abrain_on_connect_failure() {
+        // Niemand lauscht auf Port 59999 — der Connect läuft in einen
+        // Fehler; die Kette fällt deterministisch auf abrain zurück.
+        let r = TextProviderResolver::from_chain(
+            &[local_http_item(), abrain_item()],
+            "/bin/echo",
+            &llamafile_view_disabled(),
+            &local_http_view_with_endpoint("http://127.0.0.1:59999/completion".into()),
+        );
+        let response = r.run("hi").await.expect("fallback to abrain must succeed");
+        assert!(!response.is_empty());
+        let status = r.status();
+        assert_eq!(status.configured, "local_http");
+        assert_eq!(status.active, "abrain");
+        assert_eq!(status.availability, "fallback_active");
+    }
+
     // --- Chain + Llamafile lifecycle accessors (PR 4) -----------------
 
     /// `llamafile_lifecycle()` gibt `None` zurück, wenn keine
@@ -1715,6 +2109,7 @@ mod tests {
             &[abrain_item()],
             "/bin/echo",
             &llamafile_view_disabled(),
+            &local_http_view_disabled(),
         );
         assert_eq!(r.chain_kinds(), vec!["abrain"]);
         assert!(r.llamafile_lifecycle().is_none());
@@ -1731,6 +2126,7 @@ mod tests {
             &chain,
             "/bin/echo",
             &llamafile_view_disabled(),
+            &local_http_view_disabled(),
         );
         assert_eq!(r.chain_kinds(), vec!["llamafile_local", "abrain"]);
         assert_eq!(r.llamafile_lifecycle(), Some(LlamafileLifecycle::Disabled));
@@ -1747,6 +2143,7 @@ mod tests {
             &chain,
             "/bin/echo",
             &llamafile_view_not_configured(),
+            &local_http_view_disabled(),
         );
         assert_eq!(r.chain_kinds(), vec!["llamafile_local"]);
         assert_eq!(
@@ -1765,6 +2162,7 @@ mod tests {
             &chain,
             "/bin/echo",
             &llamafile_view_configured_missing_binary(),
+            &local_http_view_disabled(),
         );
         assert_eq!(
             r.llamafile_lifecycle(),
@@ -1783,6 +2181,7 @@ mod tests {
             &chain,
             "/bin/echo",
             &llamafile_view_disabled(),
+            &local_http_view_disabled(),
         );
         assert_eq!(r.chain_kinds(), vec!["llamafile_local", "abrain"]);
     }
