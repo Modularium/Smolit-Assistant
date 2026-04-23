@@ -185,7 +185,18 @@ Subeinheit 3.4 unten sowie
 ### Offen (Phase 3.2)
 
 - [ ] Echte Sprite-/Charakteranimation statt Platzhalter
-- [ ] Speech-Bubble für `response` und `heard`
+- [x] Speech-Bubble für `response` und `heard` — kleiner Utterance-MVP
+      (`ui/scripts/utterance/`, `ui/scenes/utterance/utterance_bubble.tscn`)
+      neben dem Avatar. Rein rendernd, EventBus-getrieben
+      (`heard_received` / `response_received` / `ipc_disconnected`),
+      genau ein aktiver Slot (kein Konversationsverlauf, kein
+      Transcript), deterministisches Text-Shaping (strip + Ellipsis bei
+      `MAX_CHARS = 240`), Kill-and-replace-Timer/-Tween. Keine IPC-
+      /Protokolländerung, kein TTS-Sync, keine Interaktion, keine
+      Stage-C-/Appearance-Kopplung. Verifiziert durch 52-Assertions-
+      Smoke `scripts/utterance_bubble_smoke.gd` (Harness-Case
+      `utterance-bubble-smoke`). Details in
+      [docs/ui_architecture.md §8.4](./docs/ui_architecture.md).
 - [ ] Speech-Sync via TTS-Lebenszyklus-Events (setzt Protokollerweiterung
       `speaking_started` / `speaking_ended` voraus)
 - [x] Avatar-State-Mapping auf Action Events (neuer `acting`-State,

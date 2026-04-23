@@ -277,8 +277,9 @@ die geplante Ausbaustrecke, nicht der heutige Stand.
   (`thinking_received`, `response_received`, `error_received`,
   `heard_received`).
 - Animationen für: `idle`, `thinking`, `talking`, `error`.
-- Speech-Bubble ersetzt das RichText-Log als Primär-Anzeige; das Log
-  kann als Debug-Panel bleiben.
+- Speech-Bubble (Utterance MVP) zeigt `heard`/`response` neben dem
+  Avatar an. Seit Phase 3.2 im Repo (siehe §8.4); das RichText-Log
+  bleibt unverändert als Debug-/Event-Log.
 - Keine Protokolländerung nötig; es werden nur bestehende Events gemappt.
 
 ### Phase B+ – Reaktion auf Action Events (Ziel)
@@ -504,6 +505,92 @@ Abgrenzungen (wichtig):
   oder Multi-Line-Composer-Arbeit.
 - Kein eigener Transport und keine Parallel-IPC; alles läuft über
   den bestehenden `IpcClient` und den bestehenden EventBus.
+
+### 8.4 Utterance-Bubble (Speech-Bubble MVP, Phase 3.2, Ist-Zustand)
+
+Kleine, rein rendernde Presence-Fläche für die beiden EventBus-Signale
+`heard_received` und `response_received`. Die Bubble zeigt das jeweils
+*aktuelle* Utterance neben dem Avatar — kein Konversationsverlauf, kein
+Transcript-Renderer, kein Ersatz für das Event-Log. Sie ist Phase 3.2
+in der Avatar-UI-Linie aus §7 und seit diesem PR im Repo.
+
+**Datei-Layout.**
+
+```text
+ui/scenes/utterance/
+└── utterance_bubble.tscn
+
+ui/scripts/utterance/
+├── utterance_bubble_state.gd       # pure Helfer, Kind-Enum, Konstanten
+└── utterance_bubble_controller.gd  # Scene-Controller
+```
+
+**Rolle.** Rein rendernd, core-/EventBus-getrieben, ohne eigene Wahrheit.
+Der Controller abonniert auf `heard_received` / `response_received` /
+`ipc_disconnected` und pflegt genau einen Einzel-Slot
+(`Kind.NONE / HEARD / RESPONSE`). Jedes neue Event ersetzt Inhalt und
+Kind deterministisch; Timer und Tween werden bei jedem Übergang
+kill-and-replace behandelt (keine Mehrfach-Timer, keine Tween-Leichen).
+
+**Bindende Grenzen.**
+
+- **Ein Utterance.** Immer nur der letzte Inhalt ist sichtbar. Keine
+  Historie, keine Scroll-Liste, keine Message-Collection.
+- **Rein visuell.** Keine Interaktion, keine Buttons, keine Aktionen;
+  `mouse_filter = MOUSE_FILTER_IGNORE` auf Bubble und Kind-Labels.
+- **Kein Markdown/BBCode.** Inhalte landen in einem `Label`, nicht in
+  `RichTextLabel` — eingehender Text wird nicht als Formatierung
+  interpretiert. Das hält die Vertrauensoberfläche klein.
+- **Defensives Text-Shaping.** `normalize_text` strippt Whitespace und
+  kürzt auf `MAX_CHARS = 240` mit Unicode-Ellipsis. Keine
+  Bildschirmwand, keine Log-artige Wall-of-Text.
+- **Stummer Fallback.** Leerer Text und Whitespace-only-Text blenden
+  die Bubble aus und setzen den internen Zustand auf `Kind.NONE` —
+  kein Crash, keine halbsichtbare Leertafel.
+- **Kein TTS-Sync, kein Speech-Lebenszyklus.** TTS-Start/-Ende bleibt
+  bewusst einer späteren Phase vorbehalten. Dieser MVP hört nur auf
+  `heard`/`response` (und räumt auf `ipc_disconnected` sofort auf).
+- **Keine Stage-C-/Appearance-Kopplung.** Die Bubble kennt weder
+  Identity noch Theme; die Presence-Personalisierung aus §8b bleibt
+  davon unberührt.
+- **Keine IPC-/Protokolländerung.** Die EventBus-Signale selbst sind
+  unverändert; der Controller ist reiner Konsument.
+
+**Lifecycle.** Bubble startet unsichtbar (`modulate.a = 0.0`). Ein
+belastbares `heard`/`response` startet einen Fade-in-Tween
+(`FADE_IN_SECONDS = 0.12`) und einen Hide-Timer
+(`DISPLAY_SECONDS_HEARD = 3.5`, `DISPLAY_SECONDS_RESPONSE = 6.0`).
+Nach Timer-Ablauf fadet die Bubble aus (`FADE_OUT_SECONDS = 0.30`) und
+räumt ihren Slot auf `Kind.NONE` zurück. Jedes neue Event während eines
+laufenden Cycles ersetzt Text und Kind, killt den bestehenden Tween und
+startet Timer + Fade neu. `ipc_disconnected` räumt sofort ohne Fade auf.
+
+**Platzierung.** Die Bubble hängt als Direkt-Kind von `Main` neben dem
+Avatar (`offset_left=130`, `offset_top=46`, `offset_right=460`,
+`offset_bottom=150`, `z_index=45`). Sie liegt damit über dem Workflow-
+Overlay (`z_index=40`) und unter Compact-Input (`z_index=50`), Avatar
+(`z_index=100`) und Dev-Panel (`z_index=120`). Presence-Banner in der
+VBox (Action / Approval / Discovery) können bei gleichzeitig aktiven
+Flüssen sichtbar neben der Bubble liegen — das ist bewusst akzeptiert;
+in der Praxis konkurrieren `heard`/`response` und aktive Desktop-Flows
+selten um denselben Slot, und wenn doch, bleibt die Bubble durch ihre
+kurze Standzeit schnell wieder still.
+
+**Scope-Grenzen (nicht Teil dieses MVPs).** Kein Chat-Transcript,
+kein Markdown-/BBCode-Renderer, keine Sprecherrollen-Konversation,
+keine Dateianhänge, keine Bubble-Actions, keine TTS-Sync-Animation,
+keine Audio-Lebenszyklus-Events, keine Presence-Mode-abhängige
+Zweitgröße. Das Event-Log (`RichTextLabel` im `DockPanel`) bleibt
+unverändert als Entwickler-/Debug-Anzeige.
+
+**Verifikation.** `scripts/utterance_bubble_smoke.gd` (52 Assertions,
+alle PASS): pure Helfer (Kind-Namen, Chip-Labels, `has_content`,
+`display_seconds_for`, `normalize_text` inkl. Truncation/Ellipsis und
+Identitätsgrenzen bei exakt `MAX_CHARS`) plus Scene-Verhalten des
+Controllers (`set_utterance`, `clear_utterance`, leere und
+whitespace-only Eingaben, Response-ersetzt-Heard, wiederholte Updates
+ohne Tween- oder Timer-Leichen, Long-Text-Ellipsis). Harness-Case:
+`scripts/run_overlay_verification.sh utterance-bubble-smoke`.
 
 ---
 

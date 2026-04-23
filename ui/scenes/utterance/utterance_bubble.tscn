@@ -1,0 +1,24 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/utterance/utterance_bubble_controller.gd" id="1_ctrl"]
+
+[node name="UtteranceBubble" type="PanelContainer"]
+visible = false
+mouse_filter = 2
+custom_minimum_size = Vector2(240, 0)
+script = ExtResource("1_ctrl")
+
+[node name="VBox" type="VBoxContainer" parent="."]
+mouse_filter = 2
+theme_override_constants/separation = 2
+
+[node name="KindChip" type="Label" parent="VBox"]
+modulate = Color(0.75, 0.85, 1, 0.6)
+mouse_filter = 2
+theme_override_font_sizes/font_size = 10
+text = ""
+
+[node name="Text" type="Label" parent="VBox"]
+modulate = Color(1, 1, 1, 0.9)
+mouse_filter = 2
+autowrap_mode = 2

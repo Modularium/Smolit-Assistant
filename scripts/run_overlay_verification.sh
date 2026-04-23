@@ -68,6 +68,14 @@
 #                   States, State-Fallback (orb.TALKING → ACTING),
 #                   Expression-Levels (wiggle/pulse/startle/tint/profile),
 #                   Multiplier-Mapping, Fallback-auf-Smolit. Exit 0 = alle PASS.
+#   utterance-bubble-smoke
+#                 — Führt scripts/utterance_bubble_smoke.gd aus.
+#                   Prüft das kleine Speech-Bubble-/Utterance-MVP
+#                   (ui/scripts/utterance/): Kind-Enum, Text-Normalisierung
+#                   (strip / ellipsis bei MAX_CHARS), Timing-Konstanten,
+#                   sowie Scene-Verhalten des Controllers (set_utterance,
+#                   clear_utterance, leere/whitespace-Eingaben, Replace,
+#                   wiederholte Updates). Exit 0 = alle PASS.
 #   resolver-wayland-mutter
 #                 — Env-Override (Wayland + GNOME) + Report. Zeigt, dass
 #                   der Resolver backend_wayland_mutter wählt und der
@@ -246,6 +254,16 @@ case "${CASE}" in
     # Mapping / Unbekannte-Identity-Clamping (Phase B hardening).
     exec godot --headless --path "${UI_DIR}" \
       --script "${REPO_ROOT}/scripts/avatar_template_capabilities_smoke.gd"
+    ;;
+  utterance-bubble-smoke)
+    # Spezialfall: Smoke für das Speech-Bubble-/Utterance-MVP
+    # (ui/scripts/utterance/). Prüft pure Helfer (normalize_text,
+    # kind_name, display_seconds_for, chip_label_for) plus Scene-
+    # Verhalten des Controllers (set_utterance, clear_utterance,
+    # leere/whitespace-Eingaben, Replace, Long-Text-Ellipsis,
+    # wiederholte Updates). Keine IPC, kein EventBus-Roundtrip.
+    exec godot --headless --path "${UI_DIR}" \
+      --script "${REPO_ROOT}/scripts/utterance_bubble_smoke.gd"
     ;;
   resolver-wayland-mutter)
     export SMOLIT_WINDOW_REPORT=1

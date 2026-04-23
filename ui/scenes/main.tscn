@@ -6,6 +6,7 @@
 [ext_resource type="Theme" path="res://themes/compact_panel.tres" id="4_theme"]
 [ext_resource type="PackedScene" path="res://scenes/workflow_overlay/workflow_overlay_root.tscn" id="5_workflow_overlay"]
 [ext_resource type="PackedScene" path="res://scenes/dev_controls/dev_controls_panel.tscn" id="6_dev_controls"]
+[ext_resource type="PackedScene" path="res://scenes/utterance/utterance_bubble.tscn" id="7_utterance"]
 
 [node name="Main" type="Control" unique_id=748218674]
 layout_mode = 3
@@ -315,3 +316,11 @@ offset_right = -16.0
 offset_bottom = -16.0
 grow_horizontal = 0
 grow_vertical = 0
+
+[node name="UtteranceBubble" parent="." instance=ExtResource("7_utterance")]
+z_index = 45
+layout_mode = 0
+offset_left = 130.0
+offset_top = 46.0
+offset_right = 460.0
+offset_bottom = 150.0
