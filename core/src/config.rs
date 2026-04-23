@@ -17,11 +17,25 @@ const DEFAULT_APPROVAL_TIMEOUT_SECONDS: u64 = 20;
 /// Konservativer Default der Text-Provider-Kette. ABrain bleibt
 /// Primary — explizit in der Architektur-Doku §3 / §5 festgelegt.
 const DEFAULT_TEXT_PROVIDER_CHAIN: &[&str] = &["abrain"];
-/// Default-Mode des lokalen llamafile-Providers. Wird heute nur
-/// gelesen und an den Provider-Stub weitergereicht — Runtime
-/// implementiert die Unterscheidung in einem Folge-PR.
+/// Default-Mode des lokalen llamafile-Providers. Die Runtime-Stufe
+/// (PR 2b) implementiert heute `on_demand` vollständig; `standby` ist
+/// reserviert für einen späteren PR und wird aktuell wie `on_demand`
+/// behandelt (siehe `providers/text.rs`).
 const DEFAULT_LLAMAFILE_MODE: &str = "on_demand";
 const DEFAULT_LLAMAFILE_IDLE_TIMEOUT_SECONDS: u64 = 300;
+/// TCP-Port des lokalen llamafile-Servers. Default ist bewusst
+/// abweichend vom IPC-Port (8787), damit die beiden Dienste sich nicht
+/// in die Quere kommen. llamafile lauscht immer ausschließlich auf
+/// `127.0.0.1` (Loopback); der Host ist nicht konfigurierbar.
+const DEFAULT_LLAMAFILE_PORT: u16 = 8788;
+/// Maximale Wartezeit zwischen „Prozess gespawnt" und „`GET /health`
+/// liefert 200 OK". Wird überschritten → Runtime-Lifecycle `Failed`.
+const DEFAULT_LLAMAFILE_STARTUP_TIMEOUT_SECONDS: u64 = 30;
+/// Maximale Wartezeit pro Completion-Request gegen den lokalen
+/// llamafile-Server. Dient dazu, hängende Requests sichtbar mit
+/// `timeout`-Klasse zu terminieren und den Resolver-Fallback nicht
+/// blockieren zu lassen.
+const DEFAULT_LLAMAFILE_REQUEST_TIMEOUT_SECONDS: u64 = 60;
 /// Whitelist zulässiger Mode-Strings. Eingaben außerhalb dieser Menge
 /// werden beim Parsing verworfen und fallen auf den Default zurück;
 /// das hält das Vokabular klein und vermeidet stille Freiform-Werte.
@@ -122,19 +136,34 @@ pub struct LlamafileConfig {
     /// der Chain steht. Das hält den Produktpfad konservativ und
     /// macht ein unbeabsichtigtes Einschalten unmöglich.
     pub enabled: bool,
-    /// Pfad zum llamafile-Binary bzw. Modell-Wrapper. Heute nur
-    /// gelesen und zur Lifecycle-Entscheidung genutzt
-    /// (`None` / leer → `NotConfigured`); wird vom Runtime-PR
-    /// tatsächlich aufgerufen.
+    /// Pfad zum llamafile-Binary bzw. Modell-Wrapper. Der Runtime-Pfad
+    /// (PR 2b) ruft dieses Binary mit
+    /// `--server --host 127.0.0.1 --port <port>` auf. Ohne Pfad bleibt
+    /// der Provider im Lifecycle `NotConfigured`.
     pub path: Option<String>,
     /// Modus: `"on_demand"` (Default — Prozess beim ersten Request
     /// starten, nach Idle-Timeout wieder beenden) oder `"standby"`
     /// (Prozess dauerhaft halten, solange `enabled`). Unbekannte
-    /// Eingaben fallen auf den Default zurück.
+    /// Eingaben fallen auf den Default zurück. `standby` wird in
+    /// PR 2b bewusst wie `on_demand` behandelt (siehe
+    /// `docs/provider_fallback_and_settings_architecture.md` §4.1a).
     pub mode: String,
-    /// Idle-Timeout in Sekunden für den `on_demand`-Modus. Heute
-    /// gelesen und gespeichert, noch nicht ausgeführt.
+    /// Idle-Timeout in Sekunden für den `on_demand`-Modus. Greift in
+    /// PR 2b real: nach dieser Zeit ohne neuen Request beendet der
+    /// Runtime-Watchdog den lokalen Prozess und setzt den Lifecycle
+    /// auf `Stopped`.
     pub idle_timeout_seconds: u64,
+    /// TCP-Port, auf dem der lokale llamafile-Server lauscht. Default
+    /// `8788`. Loopback-only (`127.0.0.1`) — der Host ist nicht
+    /// konfigurierbar, damit die Oberfläche nicht versehentlich nach
+    /// außen gebunden wird.
+    pub port: u16,
+    /// Zeitbudget für das Warten auf `GET /health`-Erreichbarkeit nach
+    /// dem Prozess-Spawn. Überschreitung → Lifecycle `Failed`.
+    pub startup_timeout_seconds: u64,
+    /// Zeitbudget pro Completion-Request. Überschreitung → kurze
+    /// Fehlerklasse `timeout` im `text_provider_last_error`.
+    pub request_timeout_seconds: u64,
 }
 
 impl Default for LlamafileConfig {
@@ -144,6 +173,9 @@ impl Default for LlamafileConfig {
             path: None,
             mode: DEFAULT_LLAMAFILE_MODE.to_string(),
             idle_timeout_seconds: DEFAULT_LLAMAFILE_IDLE_TIMEOUT_SECONDS,
+            port: DEFAULT_LLAMAFILE_PORT,
+            startup_timeout_seconds: DEFAULT_LLAMAFILE_STARTUP_TIMEOUT_SECONDS,
+            request_timeout_seconds: DEFAULT_LLAMAFILE_REQUEST_TIMEOUT_SECONDS,
         }
     }
 }
@@ -237,8 +269,8 @@ impl Config {
             lookup("SMOLIT_TEXT_PROVIDER_CHAIN").as_deref(),
         );
 
-        // Llamafile-Provider-Konfiguration. Alle vier Felder sind
-        // opt-in: ohne Env-Variablen bleibt das Feature inert
+        // Llamafile-Provider-Konfiguration. Alle Felder sind opt-in:
+        // ohne Env-Variablen bleibt das Feature inert
         // (`enabled=false`, `path=None`). Das schützt den Default-
         // Lauf davor, still in einen lokalen LLM-Pfad abzukippen.
         let llamafile_enabled = parse_bool(
@@ -252,6 +284,17 @@ impl Config {
         let llamafile_idle_timeout = parse_u64(
             lookup("SMOLIT_LLAMAFILE_IDLE_TIMEOUT_SECONDS").as_deref(),
             DEFAULT_LLAMAFILE_IDLE_TIMEOUT_SECONDS,
+        );
+        let llamafile_port = parse_llamafile_port(
+            lookup("SMOLIT_LLAMAFILE_PORT").as_deref(),
+        );
+        let llamafile_startup_timeout = parse_u64(
+            lookup("SMOLIT_LLAMAFILE_STARTUP_TIMEOUT_SECONDS").as_deref(),
+            DEFAULT_LLAMAFILE_STARTUP_TIMEOUT_SECONDS,
+        );
+        let llamafile_request_timeout = parse_u64(
+            lookup("SMOLIT_LLAMAFILE_REQUEST_TIMEOUT_SECONDS").as_deref(),
+            DEFAULT_LLAMAFILE_REQUEST_TIMEOUT_SECONDS,
         );
 
         Ok(Self {
@@ -291,6 +334,9 @@ impl Config {
                     path: llamafile_path,
                     mode: llamafile_mode,
                     idle_timeout_seconds: llamafile_idle_timeout,
+                    port: llamafile_port,
+                    startup_timeout_seconds: llamafile_startup_timeout,
+                    request_timeout_seconds: llamafile_request_timeout,
                 },
             },
         })
@@ -355,6 +401,22 @@ fn parse_llamafile_mode(raw: Option<&str>) -> String {
         normalized
     } else {
         DEFAULT_LLAMAFILE_MODE.to_string()
+    }
+}
+
+/// Parst einen rohen `SMOLIT_LLAMAFILE_PORT`-Wert. Unbekannte oder
+/// ungültige Ports fallen auf den Default zurück. Ports im
+/// Well-Known-Bereich (< 1024) werden abgelehnt — der Runtime-PR
+/// startet den Prozess als Nutzer und hat dort ohnehin keine
+/// Berechtigung, und reservierte Ports sind keine legitime Ziel-
+/// konfiguration für einen lokalen LLM-Server.
+fn parse_llamafile_port(raw: Option<&str>) -> u16 {
+    let Some(value) = raw else {
+        return DEFAULT_LLAMAFILE_PORT;
+    };
+    match value.trim().parse::<u16>() {
+        Ok(p) if p >= 1024 => p,
+        _ => DEFAULT_LLAMAFILE_PORT,
     }
 }
 
@@ -487,5 +549,29 @@ mod tests {
         assert_eq!(parse_llamafile_mode(Some("auto")), "on_demand");
         assert_eq!(parse_llamafile_mode(Some("")), "on_demand");
         assert_eq!(parse_llamafile_mode(Some("cloud")), "on_demand");
+    }
+
+    #[test]
+    fn parse_llamafile_port_uses_default_when_missing() {
+        assert_eq!(parse_llamafile_port(None), 8788);
+    }
+
+    #[test]
+    fn parse_llamafile_port_accepts_valid_unprivileged_ports() {
+        assert_eq!(parse_llamafile_port(Some("8788")), 8788);
+        assert_eq!(parse_llamafile_port(Some("  9001 ")), 9001);
+        assert_eq!(parse_llamafile_port(Some("65535")), 65535);
+    }
+
+    #[test]
+    fn parse_llamafile_port_rejects_privileged_and_invalid() {
+        // Well-Known-Ports unzulässig — fallen auf Default zurück.
+        assert_eq!(parse_llamafile_port(Some("80")), 8788);
+        assert_eq!(parse_llamafile_port(Some("443")), 8788);
+        assert_eq!(parse_llamafile_port(Some("1023")), 8788);
+        // Nicht-Zahlen, Overflows, leere Strings.
+        assert_eq!(parse_llamafile_port(Some("foo")), 8788);
+        assert_eq!(parse_llamafile_port(Some("70000")), 8788);
+        assert_eq!(parse_llamafile_port(Some("")), 8788);
     }
 }

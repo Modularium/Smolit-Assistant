@@ -1007,10 +1007,28 @@ und Nicht-Ziele.
       keine Secrets, keine UI, keine Cloud. Core-Tests: 120 PASS
       (17 neue Resolver-/Lifecycle-Tests, 4 neue Config-Tests); alle
       10 UI-Smokes bleiben grün.
-- [ ] PR 2b: Llamafile Runtime — offen. Prozess-Spawn, HTTP-Client,
-      Idle-Timeout-Transitions, `Starting`/`Ready`/`Busy`/`Failed`/
-      `Stopped`-Semantik, ggf. additive StatusPayload-Erweiterung um
-      Lifecycle-Sichtbarkeit. Setzt PR 2a voraus.
+- [x] PR 2b: Llamafile Runtime — gelandet. Realer `on_demand`-
+      Runtime-Pfad für `llamafile_local`: Prozess-Spawn (tokio mit
+      `kill_on_drop`), Readiness-Poll gegen `GET /health`, Completion
+      via `POST /completion` (`stream: false`), interner HTTP/1.1-
+      Client auf `tokio::net::TcpStream` (keine SDK-Abhängigkeit).
+      Watchdog-Task hält `Weak`-Referenz und beendet den Prozess nach
+      `idle_timeout_seconds` Ruhe; Folge-Request spawnt wieder. Alle
+      acht Lifecycle-Zustände (`disabled` / `not_configured` /
+      `configured` / `starting` / `ready` / `busy` / `failed` /
+      `stopped`) werden real durchlaufen. Drei neue Env-Vars
+      (`SMOLIT_LLAMAFILE_PORT` / `_STARTUP_TIMEOUT_SECONDS` /
+      `_REQUEST_TIMEOUT_SECONDS`), acht zusätzliche Fehlerklassen im
+      Klassifikator. Single-Process-/Single-Request-MVP; kein
+      Streaming, kein `standby` (reserviert, verhält sich heute wie
+      `on_demand`). Core-Tests: 129 PASS (+9 gegenüber PR 2a, darunter
+      drei Integrationstests gegen einen Fake-HTTP-Server plus Shell-
+      Skript als Spawn-Ziel); alle 10 UI-Smokes grün. Details in
+      [docs/provider_fallback_and_settings_architecture.md §4.1a](./docs/provider_fallback_and_settings_architecture.md)
+      und [docs/api.md §3](./docs/api.md). **Weiterhin offen:**
+      Modell-Bundling/Provisioning, echter `standby`-Mode, Streaming,
+      GPU-/Advanced-Tuning, Settings-UI-Exposition des Lifecycles —
+      jeweils eigene Folge-PRs.
 - [ ] PR 3: Settings-Shell im UI (Expanded-Window, read-only
       Bereiche aus Doku §6; keine Schreibaktionen in den Core).
 - [ ] PR 4: STT-/TTS-Provider-Settings + Status-Anzeige (additive

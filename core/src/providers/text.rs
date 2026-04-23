@@ -32,12 +32,16 @@
 //!   halten, müssen deren eigene `run`-Implementierungen sie sauber
 //!   kapseln.
 
-use std::sync::Mutex;
-use std::time::Duration;
+use std::process::Stdio;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
-use tokio::process::Command;
-use tokio::time::timeout;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
+use tokio::process::{Child, Command};
+use tokio::sync::Mutex as AsyncMutex;
+use tokio::time::{sleep, timeout};
 use tracing::{info, warn};
 
 /// Kanonischer Namensstring für den ABrain-Provider. Wird an vielen
@@ -134,8 +138,12 @@ impl TextProviderImpl {
 
         // Llamafile-spezifische Tags zuerst prüfen, damit die
         // allgemeinen Muster („failed to spawn" o. ä.) nicht
-        // fälschlicherweise auf Prep-Refusals greifen.
-        if joined.contains("llamafile_local") {
+        // fälschlicherweise auf Refusal- oder Runtime-Fehler greifen.
+        if joined.contains("llamafile") {
+            // Prep-Refusals (PR 2a): weiterhin gültig, wenn der
+            // Provider im Lifecycle `Disabled`/`NotConfigured`
+            // steht — die Runtime prüft das selbst und reicht die
+            // Meldung nach oben.
             if joined.contains("is disabled") {
                 return "disabled";
             }
@@ -144,6 +152,31 @@ impl TextProviderImpl {
             }
             if joined.contains("runtime is not yet implemented") {
                 return "not_implemented";
+            }
+            // Runtime-Fehler (PR 2b).
+            if joined.contains("readiness check timed out") {
+                return "startup_timeout";
+            }
+            if joined.contains("exited during startup") {
+                return "process_exit_early";
+            }
+            if joined.contains("process spawn failed") {
+                return "process_missing";
+            }
+            if joined.contains("http returned status") {
+                return "http_error";
+            }
+            if joined.contains("returned no content") {
+                return "empty_response";
+            }
+            if joined.contains("is not valid json") || joined.contains("not valid utf-8") {
+                return "invalid_response";
+            }
+            if joined.contains("timed out") {
+                return "timeout";
+            }
+            if joined.contains("http connect") {
+                return "http_connect_failed";
             }
         }
 
@@ -310,37 +343,113 @@ impl LlamafileLifecycle {
 pub struct LlamafileConfigView {
     pub enabled: bool,
     pub path: Option<String>,
-    /// Zulässige Werte (Stand Vorbereitungs-PR): `"on_demand"` /
-    /// `"standby"`. Der Wert wird gelesen und im Provider gehalten,
-    /// aber noch nicht ausgeführt — die produktive Unterscheidung
-    /// greift erst, wenn der Runtime-Pfad implementiert ist.
+    /// Zulässige Werte (Stand PR 2b): `"on_demand"` / `"standby"`.
+    /// Heute wird `standby` bewusst wie `on_demand` behandelt — der
+    /// Runtime-Unterschied (Prozess dauerhaft halten) ist einem
+    /// späteren PR vorbehalten. Der Wert ist gelesen/gespeichert.
     pub mode: String,
     /// Sekunden, nach denen der lokale Prozess im `on_demand`-Modus
-    /// nach dem letzten Request wieder beendet werden soll. Heute
-    /// unausgeführt.
+    /// nach dem letzten Request wieder beendet werden soll. In PR 2b
+    /// vom Watchdog tatsächlich überprüft.
     pub idle_timeout_seconds: u64,
+    /// TCP-Port auf `127.0.0.1`, auf dem der lokale llamafile-Server
+    /// erwartet wird bzw. gestartet wird.
+    pub port: u16,
+    /// Zeitbudget für das Warten auf `GET /health`-Erreichbarkeit
+    /// nach Prozess-Spawn.
+    pub startup_timeout_seconds: u64,
+    /// Zeitbudget pro Completion-Request.
+    pub request_timeout_seconds: u64,
 }
 
 
-/// Lokaler llamafile-Provider — Vorbereitungs-Stub.
+/// Constante HTTP-Host des lokalen llamafile-Servers. Bewusst **nicht**
+/// konfigurierbar, damit die Oberfläche nicht versehentlich nach außen
+/// gebunden wird (siehe Architektur-Doku §7).
+const LLAMAFILE_HOST: &str = "127.0.0.1";
+/// Intervall zwischen `/health`-Polls während der Readiness-Phase.
+const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
+/// Default-`n_predict` für den HTTP-Completion-Pfad. Bewusst konservativ
+/// gewählt: kurze Antworten, überschaubare Latenz, keine Streaming-
+/// Komplexität im MVP.
+const DEFAULT_N_PREDICT: u32 = 256;
+
+/// Runtime-Zustand des lokalen llamafile-Prozesses. Wird hinter einer
+/// `tokio::sync::Mutex` serialisiert: genau ein Spawn und genau ein
+/// Request zur selben Zeit (siehe Architektur-Entscheidung „Single-
+/// Process-/Single-Request-MVP").
+struct LlamafileRuntimeState {
+    /// Laufender Kind-Prozess. `None` = kein Prozess aktiv (nie
+    /// gespawnt oder bereits gestoppt). `kill_on_drop(true)` garantiert,
+    /// dass ein Drop der Struktur den Prozess zuverlässig beendet.
+    child: Option<Child>,
+    /// Zeitstempel des letzten erfolgreichen Requests oder Spawn-
+    /// Endes. Der Watchdog vergleicht ihn mit `idle_timeout_seconds`.
+    last_used: Instant,
+    /// Markiert, ob bereits ein Watchdog-Task läuft. Verhindert
+    /// mehrfaches Spawnen bei Stop→Start-Zyklen.
+    watchdog_running: bool,
+}
+
+/// Gemeinsamer Zustand, den der Watchdog-Task per `Weak`-Referenz
+/// erreicht. Der Arc hält zwei Mutexe: einen `tokio::sync::Mutex` für
+/// die serialisierte Runtime (`state`) und einen `std::sync::Mutex` für
+/// den Lifecycle, damit Observers kurze, nicht-asynchrone Reads machen
+/// können. Schreiben erfolgt immer aus dem `run()`-Pfad oder vom
+/// Watchdog; beide halten nie beide Locks gleichzeitig (Reihenfolge:
+/// erst `state.lock()`, dann `lifecycle.lock()`, wieder frei).
+struct LlamafileInner {
+    state: AsyncMutex<LlamafileRuntimeState>,
+    lifecycle: Mutex<LlamafileLifecycle>,
+    /// Test-Hook: wenn gesetzt, wird der HTTP-Client auf diesen Port
+    /// geleitet statt auf `config.port`. Produktionspfade setzen das
+    /// Feld nie; es bleibt dann `None`. Kein Secret-Relevanz.
+    test_port_override: Mutex<Option<u16>>,
+}
+
+/// Lokaler llamafile-Provider mit Lazy-Load-Runtime (PR 2b).
 ///
-/// **Heute produziert jeder `run()`-Aufruf einen ehrlichen Fehler.**
-/// Die Provider-Instanz hält den Lifecycle-Schatten, die kanonische
-/// Config-Sicht und erlaubt dem Resolver, ihn in einer Kette zu führen,
-/// ohne dass sich andere Provider-Varianten daran anpassen müssen.
-#[derive(Debug)]
+/// Lifecycle (real):
+///
+///   * `Disabled` / `NotConfigured` → `run()` liefert ehrliche
+///     Refusal (unverändert zu PR 2a).
+///   * `Configured` → erster `run()` führt `Starting` → `Ready` →
+///     `Busy` → `Ready` aus. Watchdog-Task wird einmalig gestartet
+///     und beendet den Prozess nach `idle_timeout_seconds` Ruhe.
+///   * `Stopped` → nächster `run()` startet den Prozess wieder.
+///   * `Failed` → nächster `run()` versucht einen frischen Neustart;
+///     bei weiterem Fehlschlag bleibt der Lifecycle `Failed` und der
+///     Fehler wird klassifiziert.
 pub struct LlamafileLocalProvider {
     config: LlamafileConfigView,
-    lifecycle: Mutex<LlamafileLifecycle>,
+    inner: Arc<LlamafileInner>,
+}
+
+impl std::fmt::Debug for LlamafileLocalProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Eigener Debug-Impl ohne die Runtime-Mutexe, um
+        // Mutex-Debug-Formate (und potenzielle Lock-Akquirierungen
+        // beim Loggen) zu vermeiden.
+        f.debug_struct("LlamafileLocalProvider")
+            .field("config", &self.config)
+            .field("lifecycle", &self.lifecycle().as_str())
+            .finish()
+    }
 }
 
 impl LlamafileLocalProvider {
     pub fn new(config: LlamafileConfigView) -> Self {
         let initial = Self::initial_lifecycle(&config);
-        Self {
-            config,
+        let inner = Arc::new(LlamafileInner {
+            state: AsyncMutex::new(LlamafileRuntimeState {
+                child: None,
+                last_used: Instant::now(),
+                watchdog_running: false,
+            }),
             lifecycle: Mutex::new(initial),
-        }
+            test_port_override: Mutex::new(None),
+        });
+        Self { config, inner }
     }
 
     fn initial_lifecycle(config: &LlamafileConfigView) -> LlamafileLifecycle {
@@ -359,15 +468,22 @@ impl LlamafileLocalProvider {
         }
     }
 
-    /// Aktueller Lifecycle-Zustand. Wird heute nie transitioniert —
-    /// der Provider hält den bei `new()` gesetzten Initialzustand. Der
-    /// spätere Runtime-PR wechselt hier zwischen Starting / Ready /
-    /// Busy / Failed / Stopped.
+    /// Aktueller Lifecycle-Zustand. Non-blocking (std mutex); der
+    /// Watchdog aktualisiert ihn, sobald der Prozess stoppt.
     pub fn lifecycle(&self) -> LlamafileLifecycle {
         *self
+            .inner
             .lifecycle
             .lock()
             .expect("llamafile lifecycle mutex poisoned")
+    }
+
+    fn set_lifecycle(&self, next: LlamafileLifecycle) {
+        *self
+            .inner
+            .lifecycle
+            .lock()
+            .expect("llamafile lifecycle mutex poisoned") = next;
     }
 
     /// Read-only-Sicht auf die eingegangene Config (für Tests /
@@ -377,7 +493,7 @@ impl LlamafileLocalProvider {
         &self.config
     }
 
-    pub async fn run(&self, _input: &str) -> Result<String> {
+    pub async fn run(&self, input: &str) -> Result<String> {
         match self.lifecycle() {
             LlamafileLifecycle::Disabled => {
                 bail!(
@@ -389,31 +505,320 @@ impl LlamafileLocalProvider {
                     "provider llamafile_local is enabled but not configured (set SMOLIT_LLAMAFILE_PATH)"
                 )
             }
-            LlamafileLifecycle::Configured | LlamafileLifecycle::Stopped => {
-                // Architektonisch vorbereitet; der produktive Runtime-
-                // Pfad (Prozess-Spawn, HTTP-Client, Idle-Timeout)
-                // kommt in einem dedizierten Folge-PR. Die Fehler-
-                // meldung trägt Mode + Idle-Timeout mit, damit
-                // Betreiber beim späteren Runtime-Start sofort sehen,
-                // mit welchem Parameter-Satz sie rechnen konnten.
-                bail!(
-                    "provider llamafile_local runtime is not yet implemented in this build (mode={}, idle_timeout_seconds={}; scheduled for a follow-up PR)",
-                    self.config.mode,
-                    self.config.idle_timeout_seconds,
-                )
+            _ => {}
+        }
+
+        // Serialisierter Runtime-Block: Spawn (falls nötig), Readiness,
+        // Request. `state` bleibt den gesamten run()-Aufruf gelockt —
+        // das ist der bewusste Single-Request-MVP.
+        let mut state = self.inner.state.lock().await;
+
+        // Falls bereits gestoppt oder nie gestartet, starte jetzt.
+        // Der Test-Port-Override lenkt nur den HTTP-Client um; der
+        // Prozess-Spawn wird nicht übersprungen.
+        let need_spawn = state.child.is_none();
+        if need_spawn {
+            self.spawn_and_wait_ready(&mut state).await?;
+        }
+
+        // Request senden. Busy für die Dauer des HTTP-Calls, anschließend
+        // zurück auf Ready.
+        self.set_lifecycle(LlamafileLifecycle::Busy);
+        let port = self.effective_port();
+        let timeout_secs = self.config.request_timeout_seconds;
+        let result = post_completion(LLAMAFILE_HOST, port, input, DEFAULT_N_PREDICT, timeout_secs).await;
+        match result {
+            Ok(text) => {
+                state.last_used = Instant::now();
+                self.set_lifecycle(LlamafileLifecycle::Ready);
+                // Watchdog einmalig starten, sobald echter Runtime
+                // aktiv ist (nicht im Test-Port-Override-Pfad).
+                if !state.watchdog_running && state.child.is_some() {
+                    state.watchdog_running = true;
+                    self.spawn_watchdog();
+                }
+                Ok(text)
             }
-            other => {
-                // Die Prozess-Zustände Starting/Ready/Busy/Failed sind
-                // in diesem PR nicht erreichbar; wenn ein späterer
-                // Runtime-PR sie aktiviert, wird dieser Fallback
-                // ersetzt. Bis dahin: ehrliche Meldung.
-                bail!(
-                    "provider llamafile_local is in state {} which is not yet reachable in this build",
-                    other.as_str(),
-                )
+            Err(err) => {
+                // Ehrliche Runtime-Semantik: Lifecycle auf Failed,
+                // Fehler hochreichen. Nächster run() versucht einen
+                // frischen Spawn (siehe `need_spawn`-Check).
+                self.set_lifecycle(LlamafileLifecycle::Failed);
+                // Prozess killen (Drop + kill_on_drop), damit der
+                // nächste Request nicht auf einen halbkaputten
+                // Hintergrundprozess trifft.
+                state.child = None;
+                state.watchdog_running = false;
+                Err(err)
             }
         }
     }
+
+    /// Startet den lokalen Prozess und pollt `/health`, bis er antwortet
+    /// oder `startup_timeout_seconds` erreicht ist. Setzt Lifecycle von
+    /// `Starting` auf `Ready` — bei Fehler auf `Failed`.
+    async fn spawn_and_wait_ready(
+        &self,
+        state: &mut LlamafileRuntimeState,
+    ) -> Result<()> {
+        self.set_lifecycle(LlamafileLifecycle::Starting);
+
+        let path = self
+            .config
+            .path
+            .clone()
+            .unwrap_or_default();
+        if path.trim().is_empty() {
+            // Darf eigentlich nicht passieren (initial_lifecycle setzt
+            // NotConfigured), defensiv trotzdem behandelt.
+            self.set_lifecycle(LlamafileLifecycle::NotConfigured);
+            bail!(
+                "provider llamafile_local is enabled but not configured (set SMOLIT_LLAMAFILE_PATH)"
+            );
+        }
+
+        // Prozess-Spawn. `kill_on_drop(true)` ist die wichtigste
+        // Sicherheitsleine — wird der Provider (oder der Resolver)
+        // gedroppt, stirbt auch der Kind-Prozess zuverlässig.
+        let mut cmd = Command::new(&path);
+        cmd.arg("--server")
+            .arg("--host")
+            .arg(LLAMAFILE_HOST)
+            .arg("--port")
+            .arg(self.config.port.to_string())
+            .arg("--nobrowser")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+
+        let child = cmd.spawn().map_err(|e| {
+            self.set_lifecycle(LlamafileLifecycle::Failed);
+            // Kind-spezifischen Fehler sichtbar machen; den
+            // konfigurierten Binary-Pfad *nicht* in den Text spiegeln,
+            // um Pfad-Leak in Status/Logs zu vermeiden.
+            anyhow::anyhow!(
+                "llamafile process spawn failed: {}",
+                e.kind()
+            )
+        })?;
+        info!(
+            mode = %self.config.mode,
+            port = self.config.port,
+            idle_timeout_seconds = self.config.idle_timeout_seconds,
+            startup_timeout_seconds = self.config.startup_timeout_seconds,
+            "llamafile process spawned (mode `standby` is reserved and currently behaves like `on_demand`)",
+        );
+        state.child = Some(child);
+        state.last_used = Instant::now();
+
+        // Readiness-Loop. Wir pollen `effective_port()` — in
+        // Produktions-Läufen identisch zu `config.port`; in Tests mit
+        // gesetztem `test_port_override` wird der HTTP-Client auf den
+        // Fake-Server umgelenkt, ohne den Spawn-Pfad zu verbiegen.
+        let port = self.effective_port();
+        let startup_total = Duration::from_secs(self.config.startup_timeout_seconds);
+        let start = Instant::now();
+        loop {
+            // Wenn der Prozess früh stirbt, Loop abbrechen.
+            let child_ref = state
+                .child
+                .as_mut()
+                .expect("child must be Some during readiness");
+            if let Ok(Some(status)) = child_ref.try_wait() {
+                self.set_lifecycle(LlamafileLifecycle::Failed);
+                state.child = None;
+                bail!(
+                    "llamafile process exited during startup with {}",
+                    status,
+                );
+            }
+            // Eine einzelne /health-Probe mit kurzem eigenem Timeout,
+            // damit der äußere Readiness-Timeout die Richtschnur bleibt.
+            let probe_deadline = start + startup_total;
+            let remaining = probe_deadline
+                .saturating_duration_since(Instant::now())
+                .max(Duration::from_millis(100));
+            if check_health(LLAMAFILE_HOST, port, remaining.as_secs().max(1)).await {
+                self.set_lifecycle(LlamafileLifecycle::Ready);
+                state.last_used = Instant::now();
+                return Ok(());
+            }
+            if start.elapsed() >= startup_total {
+                self.set_lifecycle(LlamafileLifecycle::Failed);
+                state.child = None;
+                bail!("llamafile readiness check timed out");
+            }
+            sleep(HEALTH_POLL_INTERVAL).await;
+        }
+    }
+
+    fn spawn_watchdog(&self) {
+        // Watchdog hält nur eine `Weak`-Referenz, damit er das Drop des
+        // Providers nicht blockiert. Sobald der Arc freigegeben ist,
+        // beendet sich der Watchdog beim nächsten Tick.
+        let weak = Arc::downgrade(&self.inner);
+        // Check-Intervall: halber idle_timeout, mindestens 100 ms,
+        // höchstens 5 s. Kurze Werte machen kurze Test-Timeouts
+        // reaktionsschnell; lange Werte halten die Last im Produktiv-
+        // Betrieb minimal.
+        let idle_timeout = Duration::from_secs(self.config.idle_timeout_seconds.max(1));
+        let check_interval = idle_timeout
+            .checked_div(2)
+            .unwrap_or(idle_timeout)
+            .max(Duration::from_millis(100))
+            .min(Duration::from_secs(5));
+        tokio::spawn(async move {
+            loop {
+                sleep(check_interval).await;
+                let Some(inner) = weak.upgrade() else {
+                    return;
+                };
+                let mut state = inner.state.lock().await;
+                if state.child.is_none() {
+                    state.watchdog_running = false;
+                    return;
+                }
+                if state.last_used.elapsed() >= idle_timeout {
+                    // Drop = kill_on_drop (SIGKILL + reap).
+                    state.child = None;
+                    state.watchdog_running = false;
+                    *inner
+                        .lifecycle
+                        .lock()
+                        .expect("llamafile lifecycle mutex poisoned") =
+                        LlamafileLifecycle::Stopped;
+                    info!("llamafile idle timeout reached; process stopped");
+                    return;
+                }
+            }
+        });
+    }
+
+    fn effective_port(&self) -> u16 {
+        self.test_port().unwrap_or(self.config.port)
+    }
+
+    fn test_port(&self) -> Option<u16> {
+        // In Produktions-Läufen nie gesetzt — Feld bleibt dort
+        // permanent `None`. Der kleine Mutex-Read schont Cache-Line
+        // und hat keine Kosten im Hot-Path, weil `run()` diese
+        // Funktion genau einmal pro Request aufruft.
+        *self
+            .inner
+            .test_port_override
+            .lock()
+            .expect("test port override poisoned")
+    }
+}
+
+// --- Kleine lokale HTTP-Helfer (POST /completion + GET /health) -----
+//
+// Keine SDK-Abhängigkeit: wir sprechen HTTP/1.1 direkt über
+// `tokio::net::TcpStream`. llamafile bzw. llama.cpp-Server antworten
+// standardmäßig mit `Content-Length` (kein Streaming in dieser Stufe),
+// `Connection: close` auf unserer Seite erzwingt das Schließen nach
+// der Response. So können wir `read_to_end` nutzen, ohne eine
+// komplette HTTP-Parsing-Bibliothek einzuziehen.
+
+async fn http_request(
+    host: &str,
+    port: u16,
+    method: &str,
+    path: &str,
+    body: Option<&str>,
+    timeout_secs: u64,
+) -> Result<(u16, String)> {
+    let addr = format!("{host}:{port}");
+    let total_timeout = Duration::from_secs(timeout_secs.max(1));
+
+    let mut request = String::new();
+    request.push_str(&format!("{method} {path} HTTP/1.1\r\n"));
+    request.push_str(&format!("Host: {host}:{port}\r\n"));
+    request.push_str("Connection: close\r\n");
+    if let Some(b) = body {
+        request.push_str("Content-Type: application/json\r\n");
+        request.push_str(&format!("Content-Length: {}\r\n", b.len()));
+    }
+    request.push_str("\r\n");
+    if let Some(b) = body {
+        request.push_str(b);
+    }
+
+    let mut stream = timeout(total_timeout, TcpStream::connect(&addr))
+        .await
+        .context("llamafile HTTP connect timed out")?
+        .context("llamafile HTTP connect failed")?;
+    timeout(total_timeout, stream.write_all(request.as_bytes()))
+        .await
+        .context("llamafile HTTP write timed out")?
+        .context("llamafile HTTP write failed")?;
+    let mut buf = Vec::with_capacity(4096);
+    timeout(total_timeout, stream.read_to_end(&mut buf))
+        .await
+        .context("llamafile HTTP read timed out")?
+        .context("llamafile HTTP read failed")?;
+
+    let text = String::from_utf8(buf).context("llamafile HTTP response not valid UTF-8")?;
+    let (status_line, rest) = text
+        .split_once("\r\n")
+        .context("llamafile HTTP response missing status line")?;
+    let status = status_line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse::<u16>().ok())
+        .context("llamafile HTTP response has no numeric status code")?;
+    let (_headers, body_out) = rest
+        .split_once("\r\n\r\n")
+        .context("llamafile HTTP response has no body separator")?;
+    Ok((status, body_out.to_string()))
+}
+
+/// Kleiner `GET /health`-Ping. Liefert `true`, wenn der Server mit
+/// Status 200 antwortet. Jeder andere Fehler wird still als `false`
+/// behandelt, damit die Readiness-Schleife weiter pollt, statt sofort
+/// abzubrechen.
+async fn check_health(host: &str, port: u16, timeout_secs: u64) -> bool {
+    match http_request(host, port, "GET", "/health", None, timeout_secs).await {
+        Ok((200, _)) => true,
+        _ => false,
+    }
+}
+
+/// `POST /completion` gegen einen lokalen llama.cpp-kompatiblen Server.
+/// Erwartet die nicht-streaming-Antwortform `{"content": "..."}`. Leere
+/// Antworten und JSON-Parse-Fehler werden klassifiziert und ehrlich
+/// weitergereicht (siehe `TextProviderImpl::classify_error`).
+async fn post_completion(
+    host: &str,
+    port: u16,
+    prompt: &str,
+    n_predict: u32,
+    timeout_secs: u64,
+) -> Result<String> {
+    let payload = serde_json::json!({
+        "prompt": prompt,
+        "n_predict": n_predict,
+        "stream": false,
+    });
+    let body = payload.to_string();
+    let (status, response_body) =
+        http_request(host, port, "POST", "/completion", Some(&body), timeout_secs).await?;
+    if status != 200 {
+        bail!("llamafile HTTP returned status {status}");
+    }
+    let parsed: serde_json::Value =
+        serde_json::from_str(&response_body).context("llamafile response is not valid JSON")?;
+    let content = parsed
+        .get("content")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if content.is_empty() {
+        bail!("llamafile returned no content");
+    }
+    Ok(content)
 }
 
 /// Laufzeit-Status des Resolvers. Wird pro Request aktualisiert und im
@@ -693,6 +1098,9 @@ mod tests {
             path: None,
             mode: "on_demand".into(),
             idle_timeout_seconds: 300,
+            port: 8788,
+            startup_timeout_seconds: 5,
+            request_timeout_seconds: 5,
         }
     }
 
@@ -702,15 +1110,24 @@ mod tests {
             path: None,
             mode: "on_demand".into(),
             idle_timeout_seconds: 300,
+            port: 8788,
+            startup_timeout_seconds: 5,
+            request_timeout_seconds: 5,
         }
     }
 
-    fn llamafile_view_configured() -> LlamafileConfigView {
+    /// "Configured" mit einem Pfad, der garantiert *nicht* existiert.
+    /// Wird verwendet, um den Spawn-Failure-Pfad (→ `process_missing`)
+    /// zu testen, ohne einen echten llamafile-Prozess zu brauchen.
+    fn llamafile_view_configured_missing_binary() -> LlamafileConfigView {
         LlamafileConfigView {
             enabled: true,
-            path: Some("/opt/llamafile/smolit.llamafile".into()),
+            path: Some("/nonexistent/smolit-llamafile-test-binary".into()),
             mode: "standby".into(),
             idle_timeout_seconds: 120,
+            port: 8788,
+            startup_timeout_seconds: 1,
+            request_timeout_seconds: 1,
         }
     }
 
@@ -748,7 +1165,7 @@ mod tests {
 
     #[test]
     fn llamafile_configured_when_enabled_and_path_set() {
-        let p = LlamafileLocalProvider::new(llamafile_view_configured());
+        let p = LlamafileLocalProvider::new(llamafile_view_configured_missing_binary());
         assert_eq!(p.lifecycle(), LlamafileLifecycle::Configured);
         assert_eq!(p.config().mode, "standby");
         assert_eq!(p.config().idle_timeout_seconds, 120);
@@ -761,6 +1178,9 @@ mod tests {
             path: Some("   ".into()),
             mode: "on_demand".into(),
             idle_timeout_seconds: 300,
+            port: 8788,
+            startup_timeout_seconds: 1,
+            request_timeout_seconds: 1,
         };
         let p = LlamafileLocalProvider::new(view);
         assert_eq!(p.lifecycle(), LlamafileLifecycle::NotConfigured);
@@ -784,18 +1204,272 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn llamafile_run_reports_not_implemented_when_configured() {
-        let p = LlamafileLocalProvider::new(llamafile_view_configured());
+    async fn llamafile_run_spawn_failure_reports_process_missing() {
+        // PR 2b: Configured-Lifecycle versucht einen echten Spawn. Ein
+        // nicht existierender Binary-Pfad schlägt sofort mit einer
+        // os::ErrorKind fehl und landet im `process_missing`-Tag. Nach
+        // dem Fehlschlag ist der Lifecycle `Failed` und der Pfad bleibt
+        // *nicht* im Fehlertext sichtbar (Pfad-Leak-Schutz).
+        let p = LlamafileLocalProvider::new(llamafile_view_configured_missing_binary());
         let err = p
             .run("hi")
             .await
-            .expect_err("configured stub must still refuse in this PR");
+            .expect_err("spawn with missing binary must fail");
         let class = TextProviderImpl::classify_error(&err);
-        assert_eq!(class, "not_implemented");
-        // Der Fehler trägt Mode + idle_timeout als Diagnose-Hinweis.
+        assert_eq!(class, "process_missing");
+        assert_eq!(p.lifecycle(), LlamafileLifecycle::Failed);
         let msg = format!("{err:#}");
-        assert!(msg.contains("mode=standby"));
-        assert!(msg.contains("idle_timeout_seconds=120"));
+        assert!(
+            !msg.contains("/nonexistent/smolit-llamafile-test-binary"),
+            "binary path must not leak into error text (got: {msg})",
+        );
+    }
+
+    // --- Runtime-Integrationstests ------------------------------------
+    //
+    // Ohne echten llamafile-Binary: wir setzen zwei Primitiven auf:
+    //
+    //   * einen kleinen lokalen Tokio-HTTP-Server, der `GET /health`
+    //     mit 200 OK und `POST /completion` mit einer fixen
+    //     `{"content": "..."}`-Antwort beantwortet,
+    //   * ein kurzes Shell-Skript unter `/tmp`, das bei Start
+    //     unkonditional `sleep 60` ausführt und damit als
+    //     „Runtime-Prozess" lebendig bleibt.
+    //
+    // Über den (cfg(test)-gated) `test_port_override` lenken wir den
+    // HTTP-Client des Providers auf den Fake-Server um. Der Provider
+    // durchläuft dadurch die produktive Code-Bahn (Spawn → try_wait-
+    // Probe → Readiness-Poll → HTTP → Busy/Ready-Transitions), ohne
+    // ein echtes llamafile-Binary zu brauchen.
+
+    use tokio::net::TcpListener;
+    use tokio::task::JoinHandle;
+
+    /// Startet einen winzigen lokalen HTTP-Server auf `127.0.0.1:0`,
+    /// der `GET /health` mit 200 OK und `POST /completion` mit einer
+    /// fixen Completion-Antwort beantwortet. Liefert den effektiven
+    /// Port und ein Handle auf den Accept-Loop. Der Loop wird beim
+    /// Drop des Handles abgewürgt (`abort()`), nicht graceful — für
+    /// Tests ausreichend.
+    async fn start_fake_llama_server(content: &'static str) -> (u16, JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        let handle = tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
+                // Kleines Request-Puffer-Read; für Health/Completion-
+                // Requests reicht ein einmaliger read — kein
+                // dynamisches Content-Length-Handling.
+                let mut buf = [0u8; 4096];
+                let Ok(n) = socket.read(&mut buf).await else {
+                    let _ = socket.shutdown().await;
+                    continue;
+                };
+                let request = String::from_utf8_lossy(&buf[..n]);
+                let (status, body) = if request.starts_with("GET /health") {
+                    ("HTTP/1.1 200 OK", "{\"status\":\"ok\"}".to_string())
+                } else if request.starts_with("POST /completion") {
+                    let json = format!(r#"{{"content":"{content}"}}"#);
+                    ("HTTP/1.1 200 OK", json)
+                } else {
+                    ("HTTP/1.1 404 Not Found", String::new())
+                };
+                let response = format!(
+                    "{status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len(),
+                );
+                let _ = socket.write_all(response.as_bytes()).await;
+                let _ = socket.shutdown().await;
+            }
+        });
+        (port, handle)
+    }
+
+    /// Wie `start_fake_llama_server`, aber der Server liefert immer
+    /// `500 Internal Server Error` — für Tests, die den non-200-Pfad
+    /// brauchen.
+    async fn start_fake_llama_server_returning_500() -> (u16, JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        let handle = tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
+                let mut buf = [0u8; 1024];
+                let _ = socket.read(&mut buf).await;
+                let response =
+                    "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                let _ = socket.write_all(response.as_bytes()).await;
+                let _ = socket.shutdown().await;
+            }
+        });
+        (port, handle)
+    }
+
+    /// Legt ein kleines Shell-Skript unter `/tmp` an, das `sleep 60`
+    /// ausführt und damit als „lebendiger Runtime-Prozess" für
+    /// Spawn-Tests dient. Ruft `chmod 755`, damit der Kernel es
+    /// exec'en darf. Ignoriert alle CLI-Args, die der Provider
+    /// anhängt (`--server`, `--host`, `--port`, `--nobrowser`).
+    fn make_fake_llama_binary(suffix: &str) -> String {
+        let path = format!(
+            "/tmp/smolit-test-llama-{pid}-{suffix}.sh",
+            pid = std::process::id(),
+        );
+        std::fs::write(&path, "#!/bin/sh\nexec sleep 60\n").expect("write fake binary");
+        let status = std::process::Command::new("chmod")
+            .arg("755")
+            .arg(&path)
+            .status()
+            .expect("chmod");
+        assert!(status.success(), "chmod failed on {path}");
+        path
+    }
+
+    fn llamafile_view_runtime(path: &str, idle_timeout_seconds: u64) -> LlamafileConfigView {
+        LlamafileConfigView {
+            enabled: true,
+            path: Some(path.to_string()),
+            mode: "on_demand".into(),
+            idle_timeout_seconds,
+            // Dummy Port; wird im Test durch test_port_override
+            // überschrieben, sodass der HTTP-Client den Fake-Server
+            // erreicht.
+            port: 9,
+            startup_timeout_seconds: 3,
+            request_timeout_seconds: 3,
+        }
+    }
+
+    /// Test-Hilfsfunktion: setzt den Port-Override direkt auf dem
+    /// Inner-Arc. Produktionspfade verwenden das nicht (siehe
+    /// `test_port()`-Kommentar).
+    fn set_port_override(provider: &LlamafileLocalProvider, port: u16) {
+        *provider
+            .inner
+            .test_port_override
+            .lock()
+            .expect("test port override poisoned") = Some(port);
+    }
+
+    // --- HTTP-Helfer gegen den Fake-Server ---------------------------
+
+    #[tokio::test]
+    async fn http_request_hits_fake_health_endpoint() {
+        let (port, _server) = start_fake_llama_server("hi").await;
+        let (status, body) = http_request("127.0.0.1", port, "GET", "/health", None, 3)
+            .await
+            .expect("health request must succeed");
+        assert_eq!(status, 200);
+        assert!(body.contains("ok"));
+    }
+
+    #[tokio::test]
+    async fn post_completion_parses_content_field() {
+        let (port, _server) = start_fake_llama_server("hallo welt").await;
+        let response = post_completion("127.0.0.1", port, "gruß?", 128, 3)
+            .await
+            .expect("completion must succeed");
+        assert_eq!(response, "hallo welt");
+    }
+
+    #[tokio::test]
+    async fn post_completion_rejects_non_200_status() {
+        let (port, _server) = start_fake_llama_server_returning_500().await;
+        let err = post_completion("127.0.0.1", port, "x", 16, 3)
+            .await
+            .expect_err("non-200 must propagate as error");
+        let class = TextProviderImpl::classify_error(&err);
+        assert_eq!(class, "http_error");
+    }
+
+    // --- Runtime: Happy Path --------------------------------------------
+
+    #[tokio::test]
+    async fn llamafile_runtime_happy_path_with_fake_server() {
+        let (port, _server) = start_fake_llama_server("fake response").await;
+        let binary = make_fake_llama_binary("happy");
+        let p = LlamafileLocalProvider::new(llamafile_view_runtime(&binary, 600));
+        // Port-Override vor dem ersten run() setzen, damit sowohl der
+        // Readiness-Poll als auch der Completion-Call am Fake-Server
+        // landen.
+        set_port_override(&p, port);
+
+        assert_eq!(p.lifecycle(), LlamafileLifecycle::Configured);
+        let out = p.run("prompt").await.expect("run must succeed");
+        assert_eq!(out, "fake response");
+        // Nach erfolgreichem Request zurück auf Ready.
+        assert_eq!(p.lifecycle(), LlamafileLifecycle::Ready);
+        // Der zweite Request darf nicht erneut spawnen (state.child
+        // bleibt Some), aber wieder eine erfolgreiche Antwort liefern.
+        let out2 = p.run("prompt 2").await.expect("second run must succeed");
+        assert_eq!(out2, "fake response");
+        assert_eq!(p.lifecycle(), LlamafileLifecycle::Ready);
+
+        // Cleanup: Provider droppen → kill_on_drop schießt den
+        // /bin/sleep-Kind-Prozess ab; Fake-Server-Task wird am Ende des
+        // Tests durch `_server` -> JoinHandle::abort() (implizit via
+        // Drop) terminiert.
+        drop(p);
+        let _ = std::fs::remove_file(&binary);
+    }
+
+    // --- Runtime: Idle Timeout + Respawn --------------------------------
+
+    #[tokio::test]
+    async fn llamafile_idle_timeout_stops_process_and_respawn_recovers() {
+        let (port, _server) = start_fake_llama_server("ok").await;
+        let binary = make_fake_llama_binary("idle");
+        // idle_timeout_seconds = 1 → Watchdog-Intervall ca. 500 ms.
+        let p = LlamafileLocalProvider::new(llamafile_view_runtime(&binary, 1));
+        set_port_override(&p, port);
+
+        // Erster Request startet Runtime und triggert den Watchdog.
+        let _ = p.run("a").await.expect("first run");
+        assert_eq!(p.lifecycle(), LlamafileLifecycle::Ready);
+
+        // Auf Stopped warten — max 5 s, in 100-ms-Polls.
+        let mut stopped = false;
+        for _ in 0..50 {
+            sleep(Duration::from_millis(100)).await;
+            if p.lifecycle() == LlamafileLifecycle::Stopped {
+                stopped = true;
+                break;
+            }
+        }
+        assert!(stopped, "watchdog should transition to Stopped");
+
+        // Folge-Request nach Stop muss sauber respawnen und liefern.
+        let out = p.run("b").await.expect("respawn must succeed");
+        assert_eq!(out, "ok");
+        assert_eq!(p.lifecycle(), LlamafileLifecycle::Ready);
+
+        drop(p);
+        let _ = std::fs::remove_file(&binary);
+    }
+
+    // --- Runtime: Readiness-Timeout -------------------------------------
+
+    #[tokio::test]
+    async fn llamafile_readiness_timeout_when_no_http_endpoint() {
+        // Kein Fake-Server → Port 1 (reserviert, nichts lauscht) liefert
+        // sofort ConnectionRefused für `check_health`. Mit
+        // startup_timeout_seconds=1 muss der Readiness-Loop innerhalb
+        // kurzer Zeit abbrechen und Lifecycle=Failed setzen.
+        let binary = make_fake_llama_binary("readiness");
+        let p = LlamafileLocalProvider::new(llamafile_view_runtime(&binary, 600));
+        set_port_override(&p, 1);
+
+        let err = p.run("x").await.expect_err("readiness must time out");
+        let class = TextProviderImpl::classify_error(&err);
+        assert_eq!(class, "startup_timeout");
+        assert_eq!(p.lifecycle(), LlamafileLifecycle::Failed);
+
+        drop(p);
+        let _ = std::fs::remove_file(&binary);
     }
 
     // --- Resolver chain building --------------------------------------
@@ -861,7 +1535,7 @@ mod tests {
         let r = TextProviderResolver::from_chain(
             &chain,
             "/bin/echo",
-            &llamafile_view_configured(),
+            &llamafile_view_configured_missing_binary(),
         );
         assert_eq!(r.chain_kinds(), vec!["abrain", "llamafile_local"]);
         // Primary bleibt abrain; availability nominell „available".
@@ -874,25 +1548,25 @@ mod tests {
         let r = TextProviderResolver::from_chain(
             &chain,
             "/bin/echo",
-            &llamafile_view_configured(),
+            &llamafile_view_configured_missing_binary(),
         );
         assert_eq!(r.chain_kinds(), vec!["llamafile_local", "abrain"]);
-        // Primary ist jetzt llamafile_local (wird aber bei run() als
-        // not_implemented refused — nächster Test).
+        // Primary ist jetzt llamafile_local.
         assert_eq!(r.status().configured, "llamafile_local");
     }
 
     #[tokio::test]
-    async fn run_falls_back_from_llamafile_stub_to_abrain_on_chain_head() {
-        // Kette: llamafile_local (Stub refused mit not_implemented) →
-        // abrain (/bin/echo, produziert Antwort). Erwartung: Resolver
+    async fn run_falls_back_from_llamafile_spawn_failure_to_abrain() {
+        // Kette: llamafile_local mit ungültigem Binary-Pfad (Spawn
+        // schlägt mit Klasse `process_missing` fehl) → abrain
+        // (/bin/echo, produziert Antwort). Erwartung: Resolver
         // aktiviert den Fallback-Pfad, liefert die echo-Antwort und
         // setzt availability=fallback_active.
         let chain = vec![llamafile_item(), abrain_item()];
         let r = TextProviderResolver::from_chain(
             &chain,
             "/bin/echo",
-            &llamafile_view_configured(),
+            &llamafile_view_configured_missing_binary(),
         );
         let out = r.run("ping").await.expect("abrain fallback must succeed");
         assert!(out.contains("ping"));
@@ -934,7 +1608,7 @@ mod tests {
         let r = TextProviderResolver::from_chain(
             &chain,
             "/bin/echo",
-            &llamafile_view_configured(),
+            &llamafile_view_configured_missing_binary(),
         );
         let out = r.run("hi").await.expect("primary abrain must win");
         assert!(out.contains("hi"));

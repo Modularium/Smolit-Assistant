@@ -138,6 +138,9 @@ impl App {
             path: config.text_provider.llamafile.path.clone(),
             mode: config.text_provider.llamafile.mode.clone(),
             idle_timeout_seconds: config.text_provider.llamafile.idle_timeout_seconds,
+            port: config.text_provider.llamafile.port,
+            startup_timeout_seconds: config.text_provider.llamafile.startup_timeout_seconds,
+            request_timeout_seconds: config.text_provider.llamafile.request_timeout_seconds,
         };
         let text_provider = Arc::new(TextProviderResolver::from_chain(
             &chain,

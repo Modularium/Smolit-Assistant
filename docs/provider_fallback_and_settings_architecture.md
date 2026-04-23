@@ -156,28 +156,28 @@ ist einzeln entscheid- und ablehnbar.
   (z. B. `llama.cpp`-Server, lokaler vLLM, Ollama). Der Core spricht
   JSON/HTTP; der Dienst läuft vollständig auf dem Host.
   Netzwerkzugriffe nur auf Loopback.
-- **`llamafile_local` (architektonisch vorbereitet, Runtime folgt).**
+- **`llamafile_local` (lokaler Runtime-Provider, Ist-Zustand).**
   Konkreter kuratierter Unterfall des lokalen HTTP-Providers: ein auf
-  dem Host laufendes **llamafile** (Single-Binary-LLM), das lazy
-  gestartet und nach einem konfigurierten Idle-Timeout wieder
-  beendet werden kann. Dieser Kind existiert seit diesem PR als
-  Provider-Variante im Core-Resolver (`TextProviderImpl::LlamafileLocal`)
-  mit vollständigem Config- und Lifecycle-Modell (siehe §4.1a). Die
-  eigentliche Prozess- und HTTP-Orchestrierung ist **noch nicht**
-  implementiert; `run()`-Aufrufe liefern deterministische
-  Refusal-Klassen (`disabled` / `not_configured` / `not_implemented`),
-  die der Resolver in `text_provider_last_error` spiegelt. ABrain
-  bleibt Default und wird nicht berührt.
+  dem Host laufendes **llamafile** (Single-Binary-LLM), das lazy beim
+  ersten Request gestartet und nach einem konfigurierbaren Idle-Timeout
+  vom internen Watchdog wieder beendet wird. Seit PR 2b mit echter
+  Prozess-Orchestrierung (Spawn über `tokio::process::Command` mit
+  `kill_on_drop`, Readiness-Poll gegen `GET /health`, Completion-
+  Dispatch gegen `POST /completion` über einen kleinen internen
+  HTTP/1.1-Client — keine SDK-Abhängigkeit). Lifecycle-Transitions
+  `Configured → Starting → Ready → Busy → Ready → Stopped → Starting …`
+  werden real durchlaufen (siehe §4.1a). ABrain bleibt Default und
+  wird nicht berührt.
 - **Cloud-Provider.** Externer Reasoning-Dienst über das öffentliche
   Netz (HTTPS). Muss den Secret-Regeln aus §7 genügen und wird in
   der UI als `cloud` gekennzeichnet.
 
 ### 4.1a `llamafile_local` — Config- und Lifecycle-Modell
 
-Architektonisch vorbereitet seit dem Llamafile-Prep-PR. Der Provider
-ist im Core-Resolver als eigener Kind geführt und **kein Sonderfall
-von ABrain** — er hat eigene Config, eigenen Lifecycle und eigenen
-Fehlerpfad.
+Seit PR 2b als echter lokaler Runtime-Provider implementiert. Der
+Provider ist im Core-Resolver als eigener Kind geführt und **kein
+Sonderfall von ABrain** — er hat eigene Config, eigenen Lifecycle und
+eigenen Fehlerpfad.
 
 **Konfiguration** (`config.rs::LlamafileConfig`, Env-basiert):
 
@@ -185,40 +185,121 @@ Fehlerpfad.
   Schalter. Ohne diesen Flag bleibt der Provider auf `Disabled`,
   unabhängig davon, ob `llamafile_local` in der Provider-Chain steht.
 - `SMOLIT_LLAMAFILE_PATH` (optionaler String, Default leer) — Pfad zum
-  llamafile-Binary. Ohne Pfad: `NotConfigured`.
+  llamafile-Binary. Ohne Pfad: `NotConfigured`. Der Runtime-Pfad
+  führt das Binary mit `--server --host 127.0.0.1 --port <port>
+  --nobrowser` aus. Host ist fest auf Loopback (siehe §7); der Pfad
+  wird **nicht** in Fehlertexte oder Status-Felder gespiegelt, um
+  Pfad-Leaks in Logs zu vermeiden.
 - `SMOLIT_LLAMAFILE_MODE` (String, Whitelist `on_demand` / `standby`,
-  Default `on_demand`) — spätere Prozess-Strategie. Wird gelesen und
-  in die Fehlermeldung gereicht, aber noch nicht ausgeführt.
+  Default `on_demand`) — Prozess-Strategie. `on_demand` ist in PR 2b
+  vollständig umgesetzt; `standby` wird gelesen, gespeichert und in
+  einem `info!`-Log beim Spawn benannt, verhält sich aber heute
+  identisch zu `on_demand`. Echter Standby-Unterschied (Prozess
+  dauerhaft halten) bleibt einem späteren PR vorbehalten.
 - `SMOLIT_LLAMAFILE_IDLE_TIMEOUT_SECONDS` (u64, Default `300`) —
-  Idle-Timeout für den `on_demand`-Modus. Heute gelesen, noch nicht
-  ausgeführt.
+  Idle-Timeout für den `on_demand`-Modus. Wird vom internen Watchdog
+  real überwacht: nach dieser Zeit ohne neuen Request stoppt der
+  Watchdog den Prozess und setzt den Lifecycle auf `Stopped`.
+- `SMOLIT_LLAMAFILE_PORT` (u16, Default `8788`) — TCP-Port des lokalen
+  Servers. Loopback-only. Well-Known-Ports (< 1024) werden beim Parsen
+  abgelehnt und fallen auf den Default zurück, damit der Provider
+  nicht versehentlich in privilegierte Bereiche ausweicht.
+- `SMOLIT_LLAMAFILE_STARTUP_TIMEOUT_SECONDS` (u64, Default `30`) —
+  Zeitbudget zwischen Prozess-Spawn und `GET /health` 200 OK.
+  Überschreitung → Lifecycle `Failed`, Klasse `startup_timeout`.
+- `SMOLIT_LLAMAFILE_REQUEST_TIMEOUT_SECONDS` (u64, Default `60`) —
+  Zeitbudget pro Completion-Request. Überschreitung → Klasse
+  `timeout` im `text_provider_last_error`.
 
 Unbekannte Mode-Werte fallen beim Parsing still auf den Default
 zurück; keine Freiform-Werte werden akzeptiert.
 
-**Lifecycle** (`providers::text::LlamafileLifecycle`): ein kleines
-Enum-Vokabular, das **heute nur die ersten drei Zustände produziert**
-und den Rest als Scaffolding für die Runtime-Stufe reserviert.
+**Runtime-Pfad** (PR 2b):
 
-| Zustand (heute erreichbar?) | Bedeutung                                                                                                                                                                                          |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `disabled` (ja)             | Feature-Flag aus. Provider inert, `run()` → Refusal mit Klasse `disabled`.                                                                                                                         |
-| `not_configured` (ja)       | Enabled, aber Pfad leer. `run()` → Refusal mit Klasse `not_configured`.                                                                                                                            |
-| `configured` (ja)           | Enabled + Pfad gesetzt. `run()` → Refusal mit Klasse `not_implemented` (Mode und Idle-Timeout werden im Fehlertext mitgeführt).                                                                    |
-| `starting` / `ready` / `busy` / `failed` / `stopped` (nein) | Scaffolding für den Runtime-PR. Die Tag-Strings sind per Test eingefroren (`llamafile_lifecycle_tag_strings_are_stable`), damit spätere Runtime-Übergänge kein Enum-Umbau erfordern. |
+1. `run()` prüft Lifecycle. `Disabled` / `NotConfigured` → sofortige
+   Refusal mit entsprechender Klasse.
+2. Wenn Lifecycle nicht `Disabled`/`NotConfigured` **und** kein Kind-
+   Prozess aktiv, Spawn:
+   - `Command::new(path)` mit `--server --host 127.0.0.1 --port <port>
+     --nobrowser`, `stdin=null`, `stdout=null`, `stderr=piped`,
+     `kill_on_drop(true)`. Letzteres ist die zentrale
+     Sicherheitsleine: wird der Provider (oder der Resolver) gedroppt,
+     stirbt der Prozess zuverlässig.
+   - Lifecycle `Starting`.
+3. Readiness-Poll (Intervall 250 ms) gegen `GET /health`, bis 200 OK
+   ankommt oder `startup_timeout_seconds` erreicht sind. Bei Prozess-
+   Exit während der Probe → Klasse `process_exit_early`.
+   Bei Timeout → Klasse `startup_timeout`, Prozess gedroppt,
+   Lifecycle `Failed`.
+4. Lifecycle `Ready`. Request: Lifecycle `Busy`, `POST /completion`
+   mit `{"prompt": ..., "n_predict": 256, "stream": false}`. Antwort-
+   `content` wird getrimmt und zurückgegeben; leere Antworten →
+   Klasse `empty_response`.
+5. Bei Erfolg: Lifecycle zurück auf `Ready`, `last_used = now()`.
+   Der Watchdog wird **einmalig** nach dem ersten Erfolg gestartet
+   (siehe §4.1a Watchdog) und läuft, bis er den Prozess stoppt oder
+   der Provider freigegeben wird.
+6. Bei Fehler: Lifecycle `Failed`, Kind-Prozess gedroppt (kill), Fehler
+   hochreichen. Der nächste `run()` versucht einen frischen Spawn —
+   kein Dauerzustand `Failed`, damit ein Admin nach einer Fehlklick-
+   Konfiguration nicht erst neu starten muss.
+
+**Watchdog**: eigener `tokio::spawn`-Task, hält eine `Weak`-Referenz
+auf den inneren Arc (verlängert die Lebenszeit des Providers nicht).
+Check-Intervall = `max(100 ms, min(5 s, idle_timeout/2))`. Bei jedem
+Tick: Wenn kein Prozess aktiv → Watchdog beendet sich. Wenn
+`last_used.elapsed() ≥ idle_timeout` → Prozess wird gedroppt
+(`kill_on_drop` schickt SIGKILL und reap't), Lifecycle auf `Stopped`
+gesetzt. Single-Request-MVP: die Runtime-Mutex serialisiert Spawn,
+Readiness und Completion — keine stillen Mehrfachinstanzen, keine
+verschränkten Requests.
+
+**Lifecycle** (`providers::text::LlamafileLifecycle`): alle acht
+Zustände sind heute erreichbar:
+
+| Zustand            | Bedeutung                                                                                                                                                      |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `disabled`         | Feature-Flag aus. Provider inert, `run()` → Refusal mit Klasse `disabled`.                                                                                     |
+| `not_configured`   | Enabled, aber Pfad leer. `run()` → Refusal mit Klasse `not_configured`.                                                                                        |
+| `configured`       | Enabled + Pfad gesetzt, Prozess noch nicht gestartet. Nächster `run()` triggert den Spawn.                                                                     |
+| `starting`         | Prozess ist gespawnt, Readiness-Poll läuft. Übergang nach `Ready` (bei 200 OK auf `/health`) oder `Failed` (bei `startup_timeout` / `process_exit_early`).     |
+| `ready`            | Prozess läuft und ist idle. Nächster `run()` nimmt ihn direkt als `Busy`.                                                                                      |
+| `busy`             | Prozess bearbeitet gerade einen Request. Nach Antwort zurück auf `Ready`.                                                                                      |
+| `failed`           | Letzter Start oder Request ist gescheitert, Prozess gedroppt. Nächster `run()` versucht einen frischen Spawn.                                                  |
+| `stopped`          | Watchdog hat den Prozess nach `idle_timeout_seconds` beendet. Nächster `run()` spawnt neu.                                                                     |
 
 **Resolver-Integration.** `llamafile_local` darf heute in Chains wie
 `abrain,llamafile_local` oder `llamafile_local,abrain` stehen. Der
-Resolver instanziiert den Stub **immer**, auch wenn er disabled /
-nicht konfiguriert ist — das macht Fehlerklasse und Fallback-Pfad
-(`availability=fallback_active`) auch in der Vorbereitungsstufe
-überprüfbar. Kein stiller Drop, keine Auto-Discovery, kein implizites
-Enablen.
+Resolver instanziiert den Provider **immer**, auch wenn er disabled /
+nicht konfiguriert ist — das hält Fehlerklasse und Fallback-Pfad
+(`availability=fallback_active`) konsistent überprüfbar. Kein stiller
+Drop, keine Auto-Discovery, kein implizites Enablen.
 
-**Nicht Teil des Prep-PRs:** Prozess-Spawn, HTTP-Client,
-Modell-Download, Binary-Bundling, Secret-Handling, Settings-UI.
-Diese sind für den **Runtime-PR** reserviert, der die Kriterien aus
-§7 und die zugehörigen Tests mitbringt.
+**Fehlerklassen** (Tags in `text_provider_last_error`): `disabled`,
+`not_configured`, `process_missing` (Spawn-Fehlschlag),
+`process_exit_early` (Prozess stirbt während Readiness),
+`startup_timeout`, `timeout` (HTTP-Lese-/Schreib-Timeout bzw.
+Request-Timeout), `http_connect_failed`, `http_error` (non-200-Status),
+`empty_response`, `invalid_response` (UTF-8 / JSON-Parse). Die Tags
+sind absichtlich kurz und stabil; spätere UI-Arbeit kann sie 1:1
+abbilden, ohne neue Nachrichtenfamilie einzuführen.
+
+**Bewusst nicht Teil von PR 2b:**
+
+- Kein Modell-Download, kein Repo-Bundling großer Artefakte — der
+  Operator liefert das llamafile-Binary/-Modell selbst.
+- Kein Streaming-Pfad (`stream: false` ist fest gesetzt).
+- Keine GPU-/Thread-/Advanced-Tuning-Oberfläche.
+- Kein echter `standby`-Modus; der Wert wird geparst und beim Spawn
+  geloggt, die Runtime verhält sich identisch zu `on_demand`.
+- Keine Exposition des Lifecycle-Feldes über IPC-StatusPayload. Das
+  bestehende `text_provider_availability`/`text_provider_last_error`-
+  Vokabular trägt die sichtbare Seite ehrlich; eine zusätzliche
+  Lifecycle-Sichtbarkeit landet erst dann im Protokoll, wenn eine
+  konkrete Settings-UI (PR 3/4) sie braucht.
+- Keine Secrets-Oberfläche; llamafile läuft unprivilegiert und lokal.
+- Kein Auto-Restart bei Crash; ein gestorbener Prozess wird bei
+  nächsten `run()`-Aufruf neu gespawnt.
 
 ### 4.2 STT
 
@@ -466,16 +547,30 @@ bleibt.
   und Fehlerklasse des bestehenden Vokabulars reichen ehrlich. Die
   eigentliche Prozess- und HTTP-Orchestrierung ist **Runtime-PR**
   (siehe PR 2b).
-- **PR 2b — Llamafile Runtime (noch offen).** Prozess-Spawn,
-  HTTP-Dispatch, Idle-Timeout-Scheduling, `Starting` / `Ready` /
-  `Busy` / `Failed` / `Stopped`-Transitions, Healthcheck, ggf.
-  additive StatusPayload-Erweiterung um Lifecycle-Sichtbarkeit. Setzt
-  PR 2a voraus, bekommt eigene Review-Checkliste (Prozess-Lifecycle,
-  Crash-Semantik, Log-Filterung für Modell-Output).
+- **PR 2b — Llamafile Runtime (Ist).** Realer `on_demand`-Runtime für
+  `llamafile_local`. Prozess-Spawn via `tokio::process::Command` mit
+  `kill_on_drop(true)`, Readiness-Poll gegen `GET /health`, Completion
+  via `POST /completion` mit `stream: false`. Kleiner eigener HTTP/1.1-
+  Client auf `tokio::net::TcpStream` (keine SDK-Abhängigkeit). Watchdog-
+  Task hält `Weak`-Referenz, schließt den Prozess nach
+  `idle_timeout_seconds` Ruhe. Alle acht Lifecycle-Zustände werden
+  real durchlaufen. Drei neue Env-Vars (`SMOLIT_LLAMAFILE_PORT`,
+  `SMOLIT_LLAMAFILE_STARTUP_TIMEOUT_SECONDS`,
+  `SMOLIT_LLAMAFILE_REQUEST_TIMEOUT_SECONDS`). Acht neue Fehler-
+  klassen im Klassifikator (`process_missing`, `process_exit_early`,
+  `startup_timeout`, `timeout`, `http_connect_failed`, `http_error`,
+  `empty_response`, `invalid_response`). `standby`-Mode bleibt
+  reserviert (verhält sich heute wie `on_demand`). IPC-StatusPayload-
+  Surface unverändert — Lifecycle-Sichtbarkeit bleibt für PR 3/4
+  offen, weil das bestehende `availability`/`last_error`-Vokabular
+  den Failure-Pfad ehrlich trägt. Kein Modell-Download, kein Bundling,
+  keine Secrets, keine Settings-UI.
 
-Tests für PR 2 + 2a: 17 neue Resolver-/Lifecycle-Unit-Tests in
-`core/src/providers/text.rs`, 7 Config-Tests in `config.rs`, 3
-IPC-Server-Tests. Gesamtsumme Core-Tests: 120 PASS.
+Tests für PR 2 + 2a + 2b: 26 Resolver-/Lifecycle-/Runtime-Unit-Tests
+in `core/src/providers/text.rs` (darunter drei Integrationstests
+gegen einen lokalen Fake-HTTP-Server plus ein Shell-Skript als
+`/bin/sleep`-Stand-in für den Spawn-Pfad), 7 Config-Tests in
+`config.rs`, 3 IPC-Server-Tests. Gesamtsumme Core-Tests: 129 PASS.
 
 - **PR 3 — Settings-Shell im UI.** Reine UI-Shell für ein
   Settings-Panel im Expanded-Window: Bereiche aus §6 als leere /

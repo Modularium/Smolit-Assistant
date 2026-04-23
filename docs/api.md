@@ -988,15 +988,24 @@ kann die Reihenfolge über die Konfiguration festgelegt werden:
   → Default `["abrain"]`.
 - Heute produktiv implementierte Kinds: **`abrain`** (CLI-Adapter,
   siehe oben).
-- Architektonisch vorbereitet, Runtime folgt: **`llamafile_local`**.
-  Der Stub existiert im Core-Resolver
-  (`TextProviderImpl::LlamafileLocal`), konfigurierbar über
-  `SMOLIT_LLAMAFILE_ENABLED` / `SMOLIT_LLAMAFILE_PATH` /
-  `SMOLIT_LLAMAFILE_MODE` (Whitelist `on_demand` / `standby`) /
-  `SMOLIT_LLAMAFILE_IDLE_TIMEOUT_SECONDS`. Aufrufe liefern heute
-  deterministische Refusal-Klassen (`disabled` / `not_configured` /
-  `not_implemented`) — die eigentliche Prozess-Orchestrierung kommt
-  in einem Folge-PR. Details:
+- Produktiv implementiert (Ist, PR 2b): **`llamafile_local`**.
+  Lokaler Fallback-Provider; der Core startet das konfigurierte
+  llamafile-Binary on-demand beim ersten Request
+  (`--server --host 127.0.0.1 --port <port> --nobrowser`), pollt
+  `GET /health` bis 200 OK, dispatchet Completion via `POST /completion`
+  (`{"prompt": ..., "n_predict": 256, "stream": false}`) und beendet
+  den Prozess nach `idle_timeout_seconds` ohne Aktivität.
+  Konfigurierbar über `SMOLIT_LLAMAFILE_ENABLED` /
+  `SMOLIT_LLAMAFILE_PATH` / `SMOLIT_LLAMAFILE_MODE` (Whitelist
+  `on_demand` / `standby` — `standby` ist reserviert und verhält sich
+  heute wie `on_demand`) / `SMOLIT_LLAMAFILE_IDLE_TIMEOUT_SECONDS` /
+  `SMOLIT_LLAMAFILE_PORT` (Default 8788, Loopback-only, Well-Known-
+  Ports unzulässig) / `SMOLIT_LLAMAFILE_STARTUP_TIMEOUT_SECONDS` /
+  `SMOLIT_LLAMAFILE_REQUEST_TIMEOUT_SECONDS`. Fehlerklassen landen
+  additiv in `text_provider_last_error` (`process_missing`,
+  `process_exit_early`, `startup_timeout`, `timeout`,
+  `http_connect_failed`, `http_error`, `empty_response`,
+  `invalid_response`). Details:
   [`docs/provider_fallback_and_settings_architecture.md` §4.1a](./provider_fallback_and_settings_architecture.md).
 - Weitere Kinds (freier lokaler Command/HTTP, Cloud) folgen in späteren
   PRs und sind **heute nicht implementiert**.
