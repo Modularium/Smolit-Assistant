@@ -85,6 +85,21 @@
 #                   Heard-/Leer-Zustände werden nicht umgedeutet,
 #                   speaking_ended ist ein No-op auf dem Bubble-Pfad).
 #                   Exit 0 = alle PASS.
+#   avatar-expression-smoke
+#                 — Führt scripts/avatar_expression_smoke.gd aus (PR 15).
+#                   Prüft den Behavioral Expression Layer v1:
+#                   `AvatarExpression` als pure Enum-/Multiplier-/
+#                   Tint-/Hold-Spezifikation, `default_for_state`-
+#                   Mapping (thinking→focused, talking→speaking,
+#                   error→error_soft; disconnected→neutral), sowie
+#                   die Verdrahtung in `avatar_controller.gd`
+#                   (Multiplier-Fold in Puls-/Wiggle-/Tint-Pfad,
+#                   Event-Handler für heard/response/speaking_*,
+#                   PR-14-Guard bleibt intakt). Keine Scene-Spawn-
+#                   Ausführung (Headless-`--script` registriert die
+#                   Autoloads nicht); die Laufzeit-Integration wird
+#                   beim regulären Start der Main-Scene geprüft.
+#                   Exit 0 = alle PASS.
 #   avatar-render-polish-smoke
 #                 — Führt scripts/avatar_render_polish_smoke.gd aus.
 #                   Prüft den Phase-3.2-Render-Polish:
@@ -318,6 +333,18 @@ case "${CASE}" in
     # Scene-Ebene.
     exec godot --headless --path "${UI_DIR}" \
       --script "${REPO_ROOT}/scripts/speech_sync_smoke.gd"
+    ;;
+  avatar-expression-smoke)
+    # Spezialfall: Smoke für den Behavioral Expression Layer v1
+    # (PR 15). Prüft pure `AvatarExpression`-Logik (Enum, Namen,
+    # Multiplier in [0.5, 1.5] / [0.0, 2.0], Tint-Shift-Schranken,
+    # Hold-Kategorisierung sticky vs. transient, `default_for_state`
+    # inkl. `connected`-Dominanz) sowie die Verdrahtungs-Punkte in
+    # `avatar_controller.gd` (Multiplier-Fold, Event-Handler,
+    # PR-14-Guard bleibt intakt, Template-Capability-Gates bleiben
+    # bindend). Keine Scene-Spawn-Ausführung.
+    exec godot --headless --path "${UI_DIR}" \
+      --script "${REPO_ROOT}/scripts/avatar_expression_smoke.gd"
     ;;
   avatar-render-polish-smoke)
     # Spezialfall: Smoke für den Phase-3.2-Render-Polish

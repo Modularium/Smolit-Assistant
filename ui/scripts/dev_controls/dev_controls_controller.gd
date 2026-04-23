@@ -38,6 +38,7 @@ extends PanelContainer
 const _AppearanceRef := preload("res://scripts/avatar/avatar_appearance.gd")
 const _IdentityRef := preload("res://scripts/avatar/avatar_identity.gd")
 const _VisualActionModeRef := preload("res://scripts/presence/visual_action_mode.gd")
+const _ExpressionRef := preload("res://scripts/avatar/avatar_expression.gd")
 
 const ENV_ENABLE: String = "SMOLIT_UI_DEV_CONTROLS"
 
@@ -143,6 +144,14 @@ func _build_ui() -> void:
 
 	# Avatar section
 	root.add_child(_build_avatar_section())
+
+	# Separator
+	var sep_expr := HSeparator.new()
+	sep_expr.modulate = Color(1, 1, 1, 0.3)
+	root.add_child(sep_expr)
+
+	# Expression preview section (PR 15).
+	root.add_child(_build_expression_section())
 
 	# Separator
 	var sep := HSeparator.new()
@@ -499,3 +508,53 @@ func _show_visual_action_mode_save_status(text: String, color: Color) -> void:
 		return
 	_visual_action_mode_save_status.text = text
 	_visual_action_mode_save_status.modulate = color
+
+
+# --- PR 15: Behavioral Expression Layer Preview ---------------------------
+#
+# Dev-Only-Vorschau, identisch zur anderen MVP-Hilfschicht: ein Klick
+# setzt die Expression live auf dem Avatar-Controller, kein Auto-Save,
+# keine Persistenz. Nach dem Hold-Timer (für `curious` / `pleased` /
+# `error_soft`) fällt der Cue über `_refresh_expression_from_state()`
+# wieder auf den State-Default zurück — genau wie bei echten Events
+# aus dem EventBus.
+
+
+func _build_expression_section() -> Control:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 4)
+
+	var title := Label.new()
+	title.text = "Avatar expression (preview)"
+	title.add_theme_font_size_override("font_size", 10)
+	title.modulate = Color(1, 1, 1, 0.6)
+	box.add_child(title)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 4)
+	box.add_child(row)
+
+	for kind in _ExpressionRef.all_kinds():
+		var btn := Button.new()
+		btn.text = _ExpressionRef.name_of(kind)
+		btn.tooltip_text = "Preview expression: %s" % _ExpressionRef.name_of(kind)
+		btn.pressed.connect(_on_expression_preview_pressed.bind(kind))
+		row.add_child(btn)
+
+	var hint := Label.new()
+	hint.text = "Preview only; no save. Transient cues fall back after hold."
+	hint.add_theme_font_size_override("font_size", 9)
+	hint.modulate = Color(1, 1, 1, 0.4)
+	box.add_child(hint)
+
+	return box
+
+
+func _on_expression_preview_pressed(kind: int) -> void:
+	if _avatar == null:
+		return
+	if not _avatar.has_method("preview_expression"):
+		# Älterer Build ohne PR 15: lautlos ignorieren, wie wir es bei
+		# den anderen Preview-Hooks auch machen.
+		return
+	_avatar.call("preview_expression", kind)

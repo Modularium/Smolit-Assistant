@@ -38,10 +38,15 @@ const AvatarAppearanceRef := preload("res://scripts/avatar/avatar_appearance.gd"
 const AvatarPreferencesRef := preload("res://scripts/avatar/avatar_preferences.gd")
 const AvatarIdentityRef := preload("res://scripts/avatar/avatar_identity.gd")
 const AvatarTemplateCapsRef := preload("res://scripts/avatar/avatar_template_capabilities.gd")
+const AvatarExpressionRef := preload("res://scripts/avatar/avatar_expression.gd")
 
 signal clicked
 signal toggle_dock
 signal moved(position: Vector2)
+## PR 15 — Behavioral Expression Layer v1. Feuert jedes Mal, wenn sich
+## die aktive Expression ändert. Rein informativ (dev-controls / smoke);
+## kein Business-Kanal, kein State-Ersatz.
+signal expression_changed(kind: int)
 
 ## Optionale Env-Variablen für Avatar Appearance Phase A/B. Sie haben
 ## die höchste Priorität — wer sie setzt, übersteuert gespeicherte
@@ -145,6 +150,16 @@ var _hold_timer: Timer = null
 var _last_target_kind: String = ""
 var _hovered: bool = false
 
+## PR 15 — aktuelle Expression plus Hilfsstatus. `_expression` ist der
+## aktuell gerenderte Ausdruck; `_expression_is_transient` markiert
+## zeitlich begrenzte Cues (`curious` / `pleased` / `error_soft`), die
+## nach Ablauf auf den State-Default zurückfallen. Der Hold-Timer wird
+## in `_ready` erzeugt (guarded-null in den Call-Sites, damit Smokes
+## ohne initialisierten Tree nicht stolpern).
+var _expression: int = AvatarExpressionRef.DEFAULT
+var _expression_is_transient: bool = false
+var _expression_hold_timer: Timer = null
+
 var _pressing: bool = false
 var _dragging: bool = false
 var _drag_offset: Vector2 = Vector2.ZERO
@@ -183,11 +198,23 @@ func _ready() -> void:
 	_wiggle_timer.timeout.connect(_on_wiggle_timeout)
 	add_child(_wiggle_timer)
 
+	# PR 15 — Hold-Timer für transiente Expressions (`curious`,
+	# `pleased`, `error_soft`). Nach Ablauf wird auf den State-Default
+	# zurückgeschaltet.
+	_expression_hold_timer = Timer.new()
+	_expression_hold_timer.one_shot = true
+	_expression_hold_timer.timeout.connect(_on_expression_hold_timeout)
+	add_child(_expression_hold_timer)
+
 	EventBus.ipc_connected.connect(_on_connected)
 	EventBus.ipc_disconnected.connect(_on_disconnected)
 	EventBus.thinking_received.connect(_on_thinking)
 	EventBus.response_received.connect(_on_response)
 	EventBus.error_received.connect(_on_error)
+	# PR 15 — Behavioral Expression Layer: `heard_received` wird bisher
+	# nur von der Utterance-Bubble konsumiert. Hier hängen wir uns für
+	# den Mikro-Cue `curious` zusätzlich rein — rein visuell.
+	EventBus.heard_received.connect(_on_heard)
 
 	EventBus.action_planned_received.connect(_on_action_planned)
 	EventBus.action_started_received.connect(_on_action_started)
@@ -327,6 +354,15 @@ func _set_state(new_state: int) -> void:
 		_apply_state_visuals()
 		return
 	_state = new_state
+	# PR 15: bei einem State-Wechsel fällt ein transienter Expression-
+	# Cue ab, damit z. B. ein frisches `disconnected` nicht mit einem
+	# noch laufenden `pleased`-Cue weiterstrahlt. Sticky Expressions
+	# (`neutral` / `focused` / `speaking`) werden auf den neuen
+	# State-Default gemappt.
+	if _expression_is_transient and _expression_hold_timer != null:
+		_expression_hold_timer.stop()
+	_expression_is_transient = false
+	_refresh_expression_from_state()
 	_apply_state_visuals()
 
 
@@ -434,7 +470,13 @@ func _start_breath_tween(amplitude: Vector2, half_seconds: float) -> void:
 		half_seconds,
 		profile_mult,
 	)
-	var scaled_amp: Vector2 = _scale_around_one(resolved_amp, pulse_mult)
+	# PR 15 — Expression-Layer moduliert den Puls zusätzlich. `neutral`
+	# liefert 1.0 (kein Effekt); `focused`/`error_soft` dämpfen, `speaking`/
+	# `curious`/`pleased` heben dezent an. Template-Multiplier und
+	# Expression-Multiplier multiplizieren sich; eine Figur mit
+	# `state_pulse = NONE` bleibt damit in jeder Expression still.
+	var expression_pulse: float = AvatarExpressionRef.pulse_multiplier(_expression)
+	var scaled_amp: Vector2 = _scale_around_one(resolved_amp, pulse_mult * expression_pulse)
 	_body_scale_tween = create_tween().set_loops()
 	_body_scale_tween.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	_body_scale_tween.tween_property(_body, "scale", scaled_amp, resolved_half)
@@ -535,7 +577,16 @@ func _play_wiggle() -> void:
 	var angle_mult: float = AvatarTemplateCapsRef.multiplier(
 		_identity_id, AvatarTemplateCapsRef.EXPR_WIGGLE,
 	)
-	var angle: float = WIGGLE_ANGLE_RAD * angle_mult
+	# PR 15 — Expression verstärkt oder dämpft den Wiggle-Ausschlag
+	# zusätzlich. `curious` hebt den Cue sichtbar an, `focused`/
+	# `error_soft` dämpfen ihn; `error_soft` = 0.0 lässt den Tween
+	# still (die Rotations-Tween-Kette läuft zwar, bewegt `_body`
+	# aber um 0 — akzeptabler Trade-off, um die bestehende Tween-
+	# Mechanik nicht umbauen zu müssen). Die Kapazitätsgrenze bleibt
+	# bindend: `wiggle = NONE` auf Template-Ebene filtert schon in
+	# `_arm_wiggle_timer`.
+	var expression_wiggle: float = AvatarExpressionRef.wiggle_multiplier(_expression)
+	var angle: float = WIGGLE_ANGLE_RAD * angle_mult * expression_wiggle
 	_wiggle_tween = create_tween()
 	_wiggle_tween.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	_wiggle_tween.tween_property(_body, "rotation", angle, 0.18)
@@ -577,6 +628,14 @@ func _on_thinking() -> void:
 func _on_response(_text: String) -> void:
 	_set_state(AvatarStateRef.State.TALKING)
 	_start_hold(TALK_HOLD_SECONDS)
+	# PR 15: Ein frisches `response` ist immer auch ein Mikro-Erfolg-
+	# Cue, egal ob danach noch gesprochen wird oder nicht. `pleased`
+	# ist transient; kommt `speaking_started` kurz danach, ersetzt es
+	# den Cue sauber durch `speaking` (sticky). Ohne TTS läuft der
+	# `pleased`-Cue ab, der State-Default `speaking` übernimmt während
+	# der TALKING-Phase, und der bestehende `TALK_HOLD`-Timer rollt
+	# state/expression anschließend auf `idle`/`neutral` zurück.
+	_set_expression(AvatarExpressionRef.Kind.PLEASED)
 
 
 func _on_error(_message: String) -> void:
@@ -650,6 +709,11 @@ func _on_speaking_started(_payload: Dictionary) -> void:
 		return
 	_hold_timer.stop()
 	_set_state(AvatarStateRef.State.TALKING)
+	# PR 15: Expression explizit auf SPEAKING (sticky), damit ein
+	# vorhergehender transienter `pleased`-Cue aus `_on_response`
+	# sauber abgelöst wird — sonst würde der Hold-Timer den `pleased`-
+	# Cue einen Tick länger halten, als der Core eigentlich vorgibt.
+	_set_expression(AvatarExpressionRef.Kind.SPEAKING)
 
 
 func _on_speaking_ended(payload: Dictionary) -> void:
@@ -665,10 +729,103 @@ func _on_speaking_ended(payload: Dictionary) -> void:
 	# wir müssen nicht mehr über die Sprechdauer raten.
 	var ok: bool = bool(payload.get("ok", true))
 	if not ok:
+		# PR 15: kurzer `error_soft`-Cue unmittelbar, bevor der
+		# State-Wechsel auf ERROR den `error_soft`-Default ohnehin
+		# übernimmt. Das vermeidet eine Flackerphase (TALKING/speaking
+		# → ERROR/error_soft) und lässt den weichen Fehler deutlicher
+		# stehen.
+		_set_expression(AvatarExpressionRef.Kind.ERROR_SOFT)
 		_set_state(AvatarStateRef.State.ERROR)
 		_start_hold(ERROR_HOLD_SECONDS)
 		return
+	# Erfolg → kurzer `pleased`-Cue, dann fällt die Expression nach dem
+	# Hold automatisch auf den State-Default (NEUTRAL nach Hold-Ablauf,
+	# wenn der State-Hold-Timer uns auf IDLE zurückrollt).
+	_set_expression(AvatarExpressionRef.Kind.PLEASED)
 	_start_hold(TALK_SETTLE_SECONDS)
+
+
+# --- PR 15: Behavioral Expression Layer v1 ------------------------------
+
+
+func _on_heard(_text: String) -> void:
+	# Bewusst kein State-Wechsel: STT-Ergebnisse wechseln heute nicht
+	# Avatar-States (das wäre ein Approval-/Thinking-Entscheid des
+	# Cores). Die Expression allein signalisiert den „Hm, gehört"-
+	# Moment und verschwindet nach `CURIOUS.hold_seconds` wieder.
+	_set_expression(AvatarExpressionRef.Kind.CURIOUS)
+
+
+## Setzt die aktuelle Expression. Transiente Ausdrücke (`curious` /
+## `pleased` / `error_soft`) fahren automatisch den Hold-Timer; sticky
+## Ausdrücke (`neutral` / `focused` / `speaking`) bleiben, bis ein
+## neuer Event eingeht oder ein State-Wechsel den Default ersetzt.
+##
+## Defensiv gegenüber nicht-initialisiertem Timer (Smoke-Pfad ohne
+## voll durchgelaufenes `_ready`): wenn `_expression_hold_timer` null
+## ist, merken wir uns die Expression trotzdem — der Hold entfällt
+## still, statt zu crashen.
+func _set_expression(kind: int) -> void:
+	if not AvatarExpressionRef.is_known(kind):
+		kind = AvatarExpressionRef.DEFAULT
+	var changed: bool = kind != _expression
+	_expression = kind
+	_expression_is_transient = AvatarExpressionRef.is_transient(kind)
+	if _expression_hold_timer != null:
+		if _expression_is_transient:
+			var hold: float = AvatarExpressionRef.hold_seconds(kind)
+			_expression_hold_timer.stop()
+			_expression_hold_timer.wait_time = max(0.05, hold)
+			_expression_hold_timer.start()
+		else:
+			_expression_hold_timer.stop()
+	# Visuals werden beim nächsten State-Apply automatisch neu
+	# aufgebaut; für persistente Expression-Wechsel rendern wir sofort
+	# nach, damit Tint und Puls-Multiplier ohne Delay greifen.
+	if changed:
+		_apply_state_visuals()
+		expression_changed.emit(kind)
+
+
+func _on_expression_hold_timeout() -> void:
+	# Kein aktiver transienter Cue mehr — auf den State-Default
+	# zurückrollen. `default_for_state` liefert NEUTRAL, FOCUSED,
+	# SPEAKING oder ERROR_SOFT je nach State (und ist connected-
+	# abhängig, damit ein Disconnect nicht mit einem `pleased`-Rest
+	# weiterstrahlt).
+	_expression_is_transient = false
+	_refresh_expression_from_state()
+
+
+## Setzt die Expression auf den aktuellen State-Default, falls kein
+## transienter Cue läuft. Wird aus `_set_state` und vom Hold-Timeout
+## aufgerufen — so bleibt „Expression folgt State" ein deterministischer
+## Nebeneffekt, kein Verzweigen im Handler pro Event.
+func _refresh_expression_from_state() -> void:
+	if _expression_is_transient:
+		return
+	var connected: bool = IpcClient.is_connected_to_core()
+	var default_kind: int = AvatarExpressionRef.default_for_state(_state, connected)
+	if default_kind != _expression:
+		_expression = default_kind
+		_apply_state_visuals()
+		expression_changed.emit(default_kind)
+
+
+## Rein lesende API für Smokes und optionale Dev-Controls. Die UI-
+## Schicht oberhalb hat keinen legitimen Grund, das Feld direkt zu
+## mutieren — nur der Controller schaltet Expressions um.
+func current_expression() -> int:
+	return _expression
+
+
+## Dev-/Preview-Hook: ersetzt die aktuelle Expression unmittelbar. Wird
+## nur von der env-gateten Dev-Steuerung benutzt (siehe
+## `ui/scripts/dev_controls/`). Behält die transiente Hold-Semantik
+## bei, damit eine Preview von `pleased` nach ~0.6 s auf den State-
+## Default zurückrollt.
+func preview_expression(kind: int) -> void:
+	_set_expression(kind)
 
 
 # --- Template-Capability-Helfer -----------------------------------------
@@ -721,18 +878,46 @@ func _appearance_tint(base_color: Color) -> Color:
 	var tint_mult: float = AvatarTemplateCapsRef.multiplier(
 		_identity_id, AvatarTemplateCapsRef.EXPR_THEME_TINT,
 	)
+	var resolved: Color
 	if tint_mult >= 0.999:
-		return full_tint
-	# Den Theme-Beitrag lerpen wir in Richtung „nur Override-Tint auf
-	# Basis angewandt" — so bleibt ein identitätsneutraler Fallback
-	# erhalten, ohne den Override-Tint selbst zu beschädigen.
-	var neutral_identity := AvatarAppearanceRef.new_appearance()
-	var overrides: Dictionary = _appearance.get("overrides", {})
-	neutral_identity["overrides"]["primary_tint"] = overrides.get(
-		"primary_tint", Color(1, 1, 1, 1),
+		resolved = full_tint
+	else:
+		# Den Theme-Beitrag lerpen wir in Richtung „nur Override-Tint auf
+		# Basis angewandt" — so bleibt ein identitätsneutraler Fallback
+		# erhalten, ohne den Override-Tint selbst zu beschädigen.
+		var neutral_identity := AvatarAppearanceRef.new_appearance()
+		var overrides: Dictionary = _appearance.get("overrides", {})
+		neutral_identity["overrides"]["primary_tint"] = overrides.get(
+			"primary_tint", Color(1, 1, 1, 1),
+		)
+		var neutral_tint: Color = AvatarAppearanceRef.resolved_tint(neutral_identity, base_color)
+		resolved = neutral_tint.lerp(full_tint, tint_mult)
+	# PR 15 — Expression-Layer legt einen kleinen, farbigen Schimmer auf
+	# das Ergebnis: `pleased` zieht warm, `focused` leicht kühl,
+	# `error_soft` sanft rötlich. Der Effekt ist multiplikativ und wird
+	# pro Template noch einmal mit dem `theme_tint`-Capability-Multiplier
+	# gedämpft — Figuren mit `theme_tint = NONE` sehen den Shift nicht.
+	return _apply_expression_tint(resolved)
+
+
+func _apply_expression_tint(color: Color) -> Color:
+	var shift: Color = AvatarExpressionRef.tint_shift(_expression)
+	if shift == Color(1.0, 1.0, 1.0, 1.0):
+		return color
+	var tint_mult: float = AvatarTemplateCapsRef.multiplier(
+		_identity_id, AvatarTemplateCapsRef.EXPR_THEME_TINT,
 	)
-	var neutral_tint: Color = AvatarAppearanceRef.resolved_tint(neutral_identity, base_color)
-	return neutral_tint.lerp(full_tint, tint_mult)
+	if tint_mult <= 0.0:
+		return color
+	var shifted: Color = Color(
+		color.r * shift.r,
+		color.g * shift.g,
+		color.b * shift.b,
+		color.a * shift.a,
+	)
+	if tint_mult >= 0.999:
+		return shifted
+	return color.lerp(shifted, tint_mult)
 
 
 ## Persistiert Theme / Profile / Intensity des aktuellen Appearance-
