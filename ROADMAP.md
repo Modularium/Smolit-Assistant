@@ -956,6 +956,36 @@ UI-Phasen geführt und noch **nicht** begonnen.
 
 ---
 
+## Phase 8c – Provider Fallback & Settings (parallele Linie, Architektur-Spike)
+
+Parallele Linie zu den Avatar-/Interaction-Strängen. Ziel: Smolit-
+Assistant auch **ohne ABrain** als eigenständiger Assistent nutzbar
+machen — über lokale oder (opt-in, sichtbare) Cloud-Provider für Text,
+STT und TTS. **Kein** Security-Bypass, **keine** Aufweichung der
+Approval-/Interaction-Policy, kein heimlicher Cloud-Zwang.
+
+Grundlage steht als Architektur-Dokument:
+[docs/provider_fallback_and_settings_architecture.md](./docs/provider_fallback_and_settings_architecture.md)
+— Provider-Achsen (Text / STT / TTS), Fallback-Modell,
+Transparenz-/Sicherheitsgrenzen, Status-/Health-Modell, Settings-Scope
+und Nicht-Ziele.
+
+- [x] Architektur + Doku (dieser PR, PR 1 aus §9 der Doku). Kein
+      Code, kein Scene-/IPC-/Core-Eingriff.
+- [ ] PR 2: Core Provider Resolver für Text (Trait-/Enum-Schicht
+      hinter bestehendem ABrain-CLI-Adapter; konservativer Default;
+      Konfig-Kette, auch wenn vorerst einelementig).
+- [ ] PR 3: Settings-Shell im UI (Expanded-Window, read-only
+      Bereiche aus Doku §6; keine Schreibaktionen in den Core).
+- [ ] PR 4: STT-/TTS-Provider-Settings + Status-Anzeige (additive
+      `StatusPayload`-Erweiterung, read-only).
+- [ ] PR 5: Secrets-Handling + Verbindungsprüfung + Testaktionen
+      (maskierte Darstellung, schmaler Secrets-Store, Test-Button
+      pro Provider). Größte Sicherheitsoberfläche; eigene
+      Review-Checkliste.
+
+---
+
 ## Phase 9 – Intelligence Expansion (V0.95)
 
 - [ ] Multi-Agent-Orchestrierung

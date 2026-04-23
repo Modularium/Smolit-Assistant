@@ -5,6 +5,8 @@
 Smolit ist ein persistenter, personalisierter, visueller AI-Assistent im Smolit-Ökosystem.
 Er basiert auf **ABrain** als kognitivem Kern, nutzt einen **leichtgewichtigen Rust-Core** als lokale Laufzeit- und Orchestrierungsschicht und erhält eine eigenständige **Godot-UI** als Avatar- und Interaktionsoberfläche.
 
+Smolit-Assistant soll perspektivisch auch **außerhalb des Smolitux-/ABrain-Ökosystems** eigenständig nutzbar bleiben. ABrain bleibt Referenz-Reasoning-Provider; alternative lokale oder Cloud-Provider für Text / STT / TTS sollen in späteren, kleinen PRs als **explizit konfigurierbare, sichtbare** Ergänzung hinzukommen — niemals als stiller Ersatz und nicht als Security- oder Policy-Aufweichung. Architekturgrundlage und Nicht-Ziele siehe [docs/provider_fallback_and_settings_architecture.md](./provider_fallback_and_settings_architecture.md).
+
 Smolit soll sich nicht wie ein klassischer Chatbot anfühlen, sondern wie ein präsenter, lernfähiger digitaler Begleiter mit eigener visueller Identität, Stimme, Reaktionsverhalten und langfristiger Nutzeranpassung.
 
 ---

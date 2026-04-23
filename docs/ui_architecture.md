@@ -95,6 +95,14 @@ Ausdrücklich **nicht** in der UI:
   kein OCR/Screenshot). Desktop-Interaktion gehört in eine eigene
   Adapterfamilie unterhalb des Cores, nicht in Godot — siehe
   [`docs/presence_desktop_interaction.md`](./presence_desktop_interaction.md).
+- **kein Settings-Universal-Panel im heutigen MVP.** Ein späteres,
+  bewusst eng geschnittenes Settings-UI ist in
+  [`docs/provider_fallback_and_settings_architecture.md`](./provider_fallback_and_settings_architecture.md)
+  §6 als Architekturgrundlage vorbereitet (Bereiche:
+  General / Presence-UI / Text-/STT-/TTS-Provider / Privacy /
+  Connection), ist in diesem MVP aber ausdrücklich nicht implementiert
+  und wird in eigenen, kleinen Folge-PRs angelegt. Die UI bleibt bis
+  dahin Settings-Client, nie Settings-Eigentümer.
 
 ---
 
