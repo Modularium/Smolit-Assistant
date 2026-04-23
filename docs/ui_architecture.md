@@ -1022,6 +1022,147 @@ Laufzeit-Integration läuft beim regulären Start der Main-Scene.
 - **Emission aus dem Core.** Der Core sendet weiterhin keine
   Expressions und nimmt keine entgegen. PR 15 ist UI-only.
 
+### 8.4c Workflow Visibility Overlay v1 (PR 16, Ist-Zustand)
+
+Kleiner, ehrlicher MVP für „Smolit zeigt, was er gerade tut": ein
+read-only Panel neben dem Avatar, das die bestehenden UI-Events in
+eine lineare Kette sichtbarer Workflow-Schritte projiziert. Keine
+neue Protokoll-Ebene, keine Historie, kein Editor.
+
+**Datei-Layout.**
+
+```text
+ui/scripts/workflow/
+├── workflow_visibility_model.gd    # NEU: pure RefCounted-Projektion
+│                                   # (Enums, Snippet-Kürzung, Event-
+│                                   # → Step-Mapping)
+└── workflow_visibility_panel.gd    # NEU: Panel-Controller
+
+ui/scenes/workflow/
+└── workflow_visibility_panel.tscn  # NEU: PanelContainer-Root,
+                                    # default visible=false
+
+ui/scripts/dev_controls/
+└── dev_controls_controller.gd      # Toggle im bestehenden Dev-Panel
+
+scripts/
+└── workflow_visibility_smoke.gd    # NEU: Smoke für Modell + Panel
+```
+
+**Rolle.** Rein rendernd, EventBus-getrieben. Der Panel-Controller
+abonniert `heard_received`, `thinking_received`, `response_received`,
+`action_planned_received`, `action_started_received`,
+`action_step_received`, `action_completed_received`,
+`action_failed_received`, `action_cancelled_received`,
+`speaking_started_received`, `speaking_ended_received` und
+`ipc_disconnected`. Das Modell upserted pro Kategorie genau einen
+Schritt; der Renderer zeichnet die Kette als kurze vertikale
+Kartenliste mit Status-Badge (`·` pending, `▶` active, `✓` done,
+`✕` failed, `—` skipped) und tintedem Kind-Label.
+
+**Acht kuratierte Schritt-Kategorien.**
+
+| Kind        | Quelle / Auslöser                                                        |
+|-------------|--------------------------------------------------------------------------|
+| `heard`     | `heard_received` (STT-Ergebnis, nur im `voice_once`-Flow).               |
+| `thinking`  | `thinking_received` (ABrain-Anfrage läuft).                              |
+| `response`  | `response_received` (ABrain-Text; schließt `thinking` auf `done`).       |
+| `action`    | `action_planned_received` bzw. `action_started_received`.                |
+| `step`      | `action_step_received`; mehrere Events erhöhen `step_count`.             |
+| `speaking`  | `speaking_started_received` / `speaking_ended_received` (PR 14).         |
+| `completed` | `action_completed_received` (Terminal-Zustand, DONE).                    |
+| `failed`    | `action_failed_received` / `action_cancelled_received` (Terminal, FAIL). |
+
+Jede Karte trägt `kind`, `label`, `status`, optional `snippet`,
+optional `action_id` und einen `timestamp_ms`. Snippets werden im
+Modell hart auf `MAX_SNIPPET_CHARS = 60` gekürzt und mit `…`
+abgeschlossen — das Overlay ist keine Transcript-Wand.
+
+**Workflow-Lifecycle.**
+
+- Leerer Start. Ein erstes relevantes Event (`heard`, `thinking`,
+  `response`, `action_planned`, `speaking_started`) beginnt einen
+  Workflow.
+- Nach einem Terminal-Event (`completed` / `failed`) startet das
+  nächste nicht-terminale Event einen **neuen** Workflow — kein
+  Anhäufen von Zuständen.
+- `action_planned` mit abweichender `action_id` resettet die Kette
+  ebenfalls.
+- `ipc_disconnected` kippt offene `active`-Schritte auf `skipped`,
+  setzt `offline=true` und markiert den Workflow **nicht** als
+  terminal — ein Reconnect rendert sofort wieder frische Events.
+
+**Resilienz.**
+
+- Unbekannte Event-Reihenfolgen (z. B. ein `action_step` ohne
+  vorheriges `action_planned`, ein verwaistes `speaking_ended`)
+  werden toleriert; das Modell fügt den Step ein, ohne zu crashen.
+- Fehlende Payload-Felder werden durch neutrale Defaults ersetzt
+  (leeres Snippet, leere `action_id`).
+- Ein älterer Core ohne `speaking_started` / `speaking_ended` bleibt
+  voll lesbar: der Workflow schließt über `response` +
+  `action_completed` sauber ab.
+- Zu lange User-/Response-Texte werden hart gekürzt — das MVP soll
+  Kontext zeigen, nicht Inhalt ausliefern.
+
+**Sichtbarkeit / Toggle.**
+
+- Standardmäßig **hidden**. Opt-in per Env `SMOLIT_WORKFLOW_OVERLAY=1`
+  (gleiches Muster wie `SMOLIT_UI_OVERLAY` / `SMOLIT_UI_DEV_CONTROLS`).
+- Bei aktivem `SMOLIT_UI_DEV_CONTROLS=1` ergänzt das Dev-Panel eine
+  Toggle-Checkbox. Der Toggle ist **session-only** — kein Auto-Save,
+  keine Persistenz.
+- Auch im hidden-Modus laufen die Event-Handler weiter; das Modell
+  bleibt aktuell, damit ein späteres Sichtbar-Machen direkt die
+  laufende Interaktion rendert.
+
+**Bindende Grenzen (Scope-Kuratierung).**
+
+- **Kein neuer IPC-Event, kein Emotion-Kanal.** Der Core sendet und
+  empfängt nichts Neues wegen PR 16.
+- **Kein Editor, kein n8n-Ersatz.** Keine Drag/Drop-Knoten, keine
+  editierbaren Steps, keine Graph-DSL, keine Action-Trigger aus
+  dem Overlay heraus.
+- **Keine Historie, kein Export, kein Speichern.** Nur die aktuelle
+  Interaktion lebt im Modell; ein neuer Workflow überschreibt.
+- **Keine langen Inhalte.** Snippets ≤ 60 Zeichen inklusive Ellipsis;
+  vertrauliche Texte gehören nicht ins Overlay.
+- **Keine Eingabe, kein Klick-Fang.** Panel und sämtliche Labels
+  laufen auf `MOUSE_FILTER_IGNORE` — Avatar und Compact-Input
+  bleiben ungehindert erreichbar.
+- **Kein Desktop-Automation-Pfad, kein Approval-Hook.** Der Layer
+  beeinflusst weder Policy, Interaction noch Provider-Wahl.
+- **Keine zweite State-Wahrheit.** Avatar-State, Bubble-Kind und
+  Action-Event-Stream bleiben autoritativ; das Panel ist
+  Zusatzprojektion.
+
+**Verifikation.** `scripts/workflow_visibility_smoke.gd` (Harness-
+Case `workflow-visibility-smoke`) prüft Enum-Helfer, Snippet-
+Kürzung, happy-path-Kette für Voice- und `speak_text`-Flows,
+`speaking_ended(!ok)` → FAILED, `action_failed` → Terminal,
+Reset bei neuer `action_id`, Disconnect-Pfad (active → skipped),
+Resilienz gegen unbekannte Reihenfolgen, Snippet-Trimming am
+Response-Text, Default-hidden des Panels, Toggle-Roundtrip und
+`reset_for_tests`. Scene-Spawn läuft im Headless-`--script`-Modus
+ohne EventBus-Autoload — die echte EventBus-Integration wird beim
+regulären Start der Main-Scene geprüft.
+
+**Offene Restschuld (nicht Teil von PR 16).**
+
+- **Tieferer Detail-Layer.** Zeitleiste, Dauer-Balken pro Step,
+  Tooltip mit vollem Action-Payload. Das würde das Panel zu einem
+  Debug-Tool ausbauen — bewusst außerhalb MVP.
+- **Parallele Workflows / Warteschlangen.** Das Modell hält genau
+  einen aktuellen Workflow; mehrere parallele Aktionen wären eine
+  eigene Design-Entscheidung.
+- **Export / Persistenz.** Kein Speichern, kein Teilen. Falls das
+  kommen soll, braucht es ein eigenes Produkt-Konzept (welche
+  Daten, welche Vertraulichkeit, welche Speicherform).
+- **Core-Emission von Workflow-Zuständen.** Das Panel projiziert
+  bestehende Events. Ein zukünftiges „workflow_snapshot"-Envelope
+  vom Core wäre eine additive Protokoll-Erweiterung — PR 16 führt
+  bewusst keines ein.
+
 ### 8.5 Visual Action Mode (UI-Staging MVP, Phase 3.3, Ist-Zustand)
 
 Kleine, ehrliche MVP-Umsetzung der Produktachse aus

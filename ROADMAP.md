@@ -462,6 +462,29 @@ Desktop Interaction Layer, die UI projiziert nur.
       Mapping aus ABrain-Responses, antwortabhängige Reaktionen
       (Text-Tonalität → Ausdruck) — das würde ein neues Protokoll
       und/oder einen Streaming-Pfad brauchen und bleibt Phase C.
+- [x] **Workflow Visibility Overlay v1 (UI-only, PR 16)** — read-only
+      Panel neben dem Avatar, das die bestehenden UI-Events in eine
+      kleine lineare Kette sichtbarer Workflow-Schritte projiziert:
+      `heard → thinking → response → action → step → speaking →
+      completed/failed`. Acht kuratierte Step-Kategorien, Snippets
+      hart auf 60 Zeichen gekürzt, Status-Badges (pending / active /
+      done / failed / skipped). Konsumiert ausschließlich bereits
+      existierende EventBus-Signale — keine neuen IPC-Events, kein
+      `emotion`-Feld, kein Core-Hook. PR 14 Speech-Sync
+      (`speaking_started` / `speaking_ended`) und PR 15 Expression
+      Layer bleiben das Fundament; PR 16 nutzt sie nur als Ereignis-
+      Quelle. Standardmäßig hidden; Opt-in per
+      `SMOLIT_WORKFLOW_OVERLAY=1` oder Toggle im Dev-Panel
+      (`SMOLIT_UI_DEV_CONTROLS=1`). Scope-Kuratierung: kein Editor,
+      kein n8n-Ersatz, kein Drag/Drop, kein Speichern, kein Export,
+      keine Approval-/Interaction-/Provider-/Settings-Änderung,
+      keine langen Textinhalte. Verifiziert durch
+      `scripts/workflow_visibility_smoke.gd` (Harness-Case
+      `workflow-visibility-smoke`). Details in
+      [docs/ui_architecture.md §8.4c](./docs/ui_architecture.md).
+      **Offene Restschuld:** Detail-Layer (Zeitleiste, Dauer-Balken),
+      parallele Workflows, Export/Persistenz, optional zukünftige
+      Core-Emission eines `workflow_snapshot`-Envelopes.
 - [ ] Emotion-Mapping Core → UI (setzt Protokollerweiterung um
       `emotion` voraus)
 - [x] Speech-Sync (TTS-Lebenszyklus-Events → Animation) — MVP via
@@ -1591,10 +1614,14 @@ Speech-Sync ist mit PR 14 im MVP angekommen
 [docs/ui_architecture.md §8.4a](./docs/ui_architecture.md));
 PR 15 setzt darauf den **Behavioral Expression Layer v1** auf (sechs
 UI-only Ausdrucksmodi als Multiplier-/Tint-Patch, siehe
-[docs/ui_architecture.md §8.4b](./docs/ui_architecture.md)). Tieferer
-Speech-Sync (Phonem, Audio-Timeline) und Emotion-Mapping aus ABrain
-bleiben in Phase C geparkt — PR 15 ändert ausdrücklich **kein**
-Protokoll.
+[docs/ui_architecture.md §8.4b](./docs/ui_architecture.md));
+PR 16 ergänzt das **Workflow Visibility Overlay v1** — ein read-only
+Panel, das die bestehenden UI-Events als kleine lineare Kette
+sichtbar macht (siehe
+[docs/ui_architecture.md §8.4c](./docs/ui_architecture.md)).
+Tieferer Speech-Sync (Phonem, Audio-Timeline) und Emotion-Mapping
+aus ABrain bleiben in Phase C geparkt — weder PR 15 noch PR 16
+ändern ein Protokoll.
 
 Für den Desktop Interaction Layer läuft jetzt ein konkreter
 **Approval / Confirmation Flow MVP**: freigabepflichtige Aktionen

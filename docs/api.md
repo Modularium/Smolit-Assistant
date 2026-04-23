@@ -1612,10 +1612,10 @@ Payload-Felder (identisch in `started` / `ended`, `ended` ergänzt
 - `ok` (bool, `speaking_ended` Pflicht) — `true` bei erfolgreichem
   Sprechen (auch über Fallback), `false` bei Fehler.
 - `error_class` (string, optional, nur bei `ok=false`) — kuratierte
-  Klasse aus demselben Vokabular wie
-  [`SettingsProbeResult`](#210-settings-schreib--probe-pfad-ist-zustand-pr-5--pr-7--pr-8--pr-9--pr-10--pr-11--pr-12--pr-13):
-  `empty_chain` / `timeout` / `process_missing` / `stdin_write_failed`
-  / `exit_nonzero` / `not_configured` / `disabled` / `unknown`.
+  Klasse aus demselben Vokabular wie `SettingsProbeResult` (siehe
+  §2.10): `empty_chain` / `timeout` / `process_missing` /
+  `stdin_write_failed` / `exit_nonzero` / `not_configured` /
+  `disabled` / `unknown`.
 
 Ordnungs- und Pairing-Regeln:
 
@@ -1873,6 +1873,13 @@ optionale Felder:
   Patches oberhalb der bestehenden Avatar-States — **ohne** neues
   IPC-Feld. Der Core sendet weiterhin keine Expressions und nimmt
   keine entgegen; das Protokoll bleibt unverändert.
+  Ebenso bringt das **Workflow Visibility Overlay v1** (PR 16,
+  siehe [`ui_architecture.md` §8.4c](./ui_architecture.md)) eine
+  lineare UI-Projektion bestehender Events (`heard` → `thinking` →
+  `response` → `action_*` → `speaking_*` → `completed` / `failed`)
+  **ohne** neue IPC-Envelopes. Es ist ein reiner Renderer über den
+  bereits existierenden Ausgangskanälen — `workflow_snapshot` oder
+  ähnliches ist ausdrücklich **nicht** Teil des Protokolls.
 - `tool_call` / `tool_result` — wenn Tool-Orchestrierung einzieht.
 - `session_reset` — explizites Beenden/Zurücksetzen einer Session.
 - Vision-/Sensor-Modalitäten — erst nach Klärung von Datenschutz und
