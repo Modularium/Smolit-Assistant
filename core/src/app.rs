@@ -83,11 +83,13 @@ pub struct App {
     /// heraus und hält das Lock **nicht** über den `await`-Punkt
     /// (kein Deadlock, kein Lock-Halten während Provider-Aufrufen).
     text_provider: RwLock<Arc<TextProviderResolver>>,
-    /// Kanonische Chain-Items — unverändert seit Startup. Wird bei einem
-    /// Rebuild des Resolvers (PR 5) mit einer aktualisierten Llamafile-
-    /// Config neu instanziiert; die Chain selbst bleibt Read-only in
-    /// dieser Stufe (keine UI-Editieroberfläche für Chain-Reihenfolge).
-    text_provider_chain: Vec<TextProviderChainItem>,
+    /// Laufende Text-Provider-Kette. Startet aus der Startup-Config
+    /// (bereits mit dem persistierten Override aus dem Settings-Store
+    /// verschmolzen, siehe `App::new`) und wird durch
+    /// `settings_set_text_provider_chain` (PR 9) live ersetzt. Die
+    /// Struktur bleibt `TextProviderChainItem`, damit Resolver-Builder
+    /// und Status-Projektion unverändert bleiben.
+    live_text_chain: Mutex<Vec<TextProviderChainItem>>,
     /// ABrain-CLI-Kommando, wird beim Resolver-Rebuild wiederverwendet.
     abrain_cmd: String,
     /// Laufender editierbarer Stand der Llamafile-Config (PR 5). Startet
@@ -323,6 +325,18 @@ pub struct SettingsLocalHttpUpdate {
     pub request_timeout_seconds: Option<u64>,
 }
 
+/// Eingabe-Payload für `settings_set_text_provider_chain` (PR 9).
+/// Trägt die gewünschte Reihenfolge der Text-Provider-Kinds. Der Core
+/// validiert gegen [`crate::providers::text::KNOWN_TEXT_KINDS`],
+/// lehnt Duplikate und leere Ketten ab und persistiert erst nach
+/// erfolgreicher Validierung.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SettingsTextProviderChainUpdate {
+    /// Geordnete Liste der Provider-Kind-Namen. Leerer Vec → Fehler
+    /// (Reset-Pfad läuft separat über `settings_reset_text_provider_chain`).
+    pub chain: Vec<String>,
+}
+
 /// Eingabe-Payload für `settings_set_stt_config` (PR 7). `enabled` ist
 /// Pflicht; `command` ist optional — `None` lässt den bisherigen Wert
 /// stehen, `Some("")` / nur Whitespace löscht ihn, `Some("whisper …")`
@@ -388,9 +402,19 @@ impl App {
         let interaction = InteractionExecutor::new(backend, policy);
         let (events_tx, _) = broadcast::channel(EVENTS_CHANNEL_CAPACITY);
 
-        let chain: Vec<TextProviderChainItem> = config
-            .text_provider
-            .chain
+        // PR 9: persistierte Text-Chain aus dem Settings-Store über die
+        // Startup-Chain legen. Unbekannte Kinds im Override werden hier
+        // NICHT validiert — der Resolver-Baupfad in
+        // `TextProviderResolver::from_chain` filtert sie weiterhin mit
+        // einem sichtbaren `warn!` heraus. Eine leere persistierte
+        // Kette wird als "kein Override" behandelt, damit ein
+        // beschädigtes Override-File den Start nicht blockiert.
+        let text_chain_override = settings_store::load_text_chain_override();
+        let chain_names: Vec<String> = match text_chain_override.chain {
+            Some(c) if !c.is_empty() => c,
+            _ => config.text_provider.chain.clone(),
+        };
+        let chain: Vec<TextProviderChainItem> = chain_names
             .iter()
             .map(|k| TextProviderChainItem { kind: k.clone() })
             .collect();
@@ -432,7 +456,7 @@ impl App {
             selected_target: Mutex::new(None),
             events_tx,
             text_provider: RwLock::new(text_provider),
-            text_provider_chain: chain,
+            live_text_chain: Mutex::new(chain),
             abrain_cmd,
             live_llamafile: Mutex::new(live_llamafile),
             live_audio: Mutex::new(live_audio_initial),
@@ -477,6 +501,16 @@ impl App {
         self.text_provider
             .read()
             .expect("text provider lock poisoned")
+            .clone()
+    }
+
+    /// Clone des aktuellen Chain-Stands (PR 9). Wird vom Resolver-
+    /// Rebuild-Pfad verwendet — der Mutex wird nur kurz gehalten, der
+    /// Vec geklont, dann freigegeben.
+    fn current_text_chain(&self) -> Vec<TextProviderChainItem> {
+        self.live_text_chain
+            .lock()
+            .expect("live text chain mutex poisoned")
             .clone()
     }
 
@@ -1154,7 +1188,7 @@ impl App {
                 .expect("live local_http mutex poisoned"),
         );
         let new_resolver = Arc::new(TextProviderResolver::from_chain(
-            &self.text_provider_chain,
+            &self.current_text_chain(),
             &self.abrain_cmd,
             &new_view,
             &local_http_view,
@@ -1485,7 +1519,7 @@ impl App {
         );
         let new_local_http_view = local_http_view_from(&merged);
         let new_resolver = Arc::new(TextProviderResolver::from_chain(
-            &self.text_provider_chain,
+            &self.current_text_chain(),
             &self.abrain_cmd,
             &llamafile_view,
             &new_local_http_view,
@@ -1505,6 +1539,110 @@ impl App {
             *guard = merged;
         }
         Ok(())
+    }
+
+    /// Aktualisiert die Text-Provider-Kette (PR 9). Ablauf:
+    ///
+    ///   1. `validate_text_chain` (Whitelist, Duplikat-Ablehnung,
+    ///      Empty-Reject) — bei Fehler ehrliche `Err(...)`-Meldung.
+    ///   2. Persistiert die validierte Kette in
+    ///      [`crate::settings_store::save_text_chain_override`].
+    ///      Persist-Fehler werden geloggt, nicht propagiert — der
+    ///      In-Memory-Stand bleibt für die laufende Session
+    ///      autoritativ.
+    ///   3. Baut einen **neuen** `TextProviderResolver` mit der neuen
+    ///      Kette und den aktuellen Provider-Views (Llamafile +
+    ///      LocalHttp) und tauscht ihn atomar.
+    ///   4. Nächster `handle_text_query` / `build_status_payload`
+    ///      sieht die neue Reihenfolge.
+    pub fn update_text_provider_chain(
+        &self,
+        update: SettingsTextProviderChainUpdate,
+    ) -> Result<(), String> {
+        use crate::providers::text::{validate_text_chain, TextChainValidationError};
+        let normalized = match validate_text_chain(&update.chain) {
+            Ok(v) => v,
+            Err(TextChainValidationError::Empty) => {
+                return Err(
+                    "text provider chain is empty (use reset to restore default)".to_string(),
+                );
+            }
+            Err(err) => return Err(format!("{err}")),
+        };
+
+        let new_chain_items: Vec<TextProviderChainItem> = normalized
+            .iter()
+            .map(|k| TextProviderChainItem { kind: k.clone() })
+            .collect();
+
+        if let Err(err) = settings_store::save_text_chain_override(&normalized) {
+            warn!(error = %err, "failed to persist text provider chain override");
+        } else {
+            info!(
+                chain = ?normalized,
+                "text provider chain override persisted",
+            );
+        }
+
+        // Resolver rebuilden — Views kommen aus dem aktuellen live-
+        // Stand, damit wir nicht versehentlich eine ältere Llamafile-/
+        // Local-HTTP-Config einfrieren.
+        let llamafile_view = llamafile_view_from(
+            &self
+                .live_llamafile
+                .lock()
+                .expect("live llamafile mutex poisoned"),
+        );
+        let local_http_view = local_http_view_from(
+            &self
+                .live_local_http
+                .lock()
+                .expect("live local_http mutex poisoned"),
+        );
+        let new_resolver = Arc::new(TextProviderResolver::from_chain(
+            &new_chain_items,
+            &self.abrain_cmd,
+            &llamafile_view,
+            &local_http_view,
+        ));
+        {
+            let mut guard = self
+                .text_provider
+                .write()
+                .expect("text provider lock poisoned");
+            *guard = new_resolver;
+        }
+        {
+            let mut guard = self
+                .live_text_chain
+                .lock()
+                .expect("live text chain mutex poisoned");
+            *guard = new_chain_items;
+        }
+        Ok(())
+    }
+
+    /// Reset der Text-Provider-Kette auf den Compile-Zeit-Default
+    /// (PR 9). Löscht den persistierten Override im Settings-Store und
+    /// rebuildet den Resolver. Der Ziel-Zustand ist `["abrain"]` —
+    /// symmetrisch zum Verhalten eines frischen Starts ohne
+    /// `SMOLIT_TEXT_PROVIDER_CHAIN`-Env.
+    pub fn reset_text_provider_chain(&self) -> Result<(), String> {
+        use crate::providers::text::DEFAULT_TEXT_PROVIDER_CHAIN;
+        if let Err(err) = settings_store::clear_text_chain_override() {
+            warn!(error = %err, "failed to clear text provider chain override");
+        } else {
+            info!("text provider chain override cleared");
+        }
+        let default_chain: Vec<String> = DEFAULT_TEXT_PROVIDER_CHAIN
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        // Reset geht durch den regulären Update-Pfad, damit Validator
+        // und Resolver-Rebuild einheitlich behandelt werden.
+        self.update_text_provider_chain(SettingsTextProviderChainUpdate {
+            chain: default_chain,
+        })
     }
 
     /// Probe für den Local-HTTP-Provider (PR 8). Kein Completion-

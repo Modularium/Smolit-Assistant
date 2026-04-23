@@ -99,17 +99,38 @@ var _local_http_probe_button: Button = null
 var _local_http_apply_status_label: Label = null
 var _local_http_probe_status_label: Label = null
 
+## PR 9 — Text-Provider-Chain-Editor. Bewusst klein: eine Liste der
+## bekannten Kinds mit Enable-CheckBox + Up/Down-Buttons, Apply-Knopf
+## und kleiner Reset-Knopf. Die UI hält keinen zweiten
+## Wahrheitsanker — beim nächsten `apply_status`-Tick werden die
+## Widgets aus `status.text_provider_chain` resynchronisiert.
+var _text_chain_rows_vbox: VBoxContainer = null
+var _text_chain_apply_button: Button = null
+var _text_chain_reset_button: Button = null
+var _text_chain_apply_status_label: Label = null
+## Mirror der Widget-Reihenfolge. Jeder Eintrag ist ein Dictionary
+## `{"kind": String, "in_chain": bool, "row_index": int}`; der Array-
+## Index ist die aktuelle Position (wenn `in_chain=true`).
+var _text_chain_state: Array = []
+
 ## Verhindert, dass Sync-Writes der Editor-Widgets beim Rendering eine
 ## Cascade aus Change-Handlern auslösen.
 var _syncing_llamafile_widgets: bool = false
 var _syncing_stt_widgets: bool = false
 var _syncing_tts_widgets: bool = false
 var _syncing_local_http_widgets: bool = false
+var _syncing_text_chain_widgets: bool = false
 
 const _LLAMAFILE_MODE_OPTIONS: Array = [
 	{"id": 0, "value": "on_demand", "label": "On demand"},
 	{"id": 1, "value": "standby", "label": "Standby"},
 ]
+
+## Whitelist der bekannten Text-Provider-Kinds. Muss mit
+## [`crate::providers::text::KNOWN_TEXT_KINDS`] übereinstimmen; eine
+## Abweichung wird im Core im `settings_set_text_provider_chain`-Pfad
+## sichtbar (unknown kind) und beschädigt keine Persistenz.
+const _KNOWN_TEXT_KINDS: Array[String] = ["abrain", "llamafile_local", "local_http"]
 
 ## Tag-basierte Farbgebung der Probe-Ergebnisse. Nur kuratierte Tags —
 ## unbekannte Klassen landen in `_neutral`.
@@ -361,6 +382,11 @@ func _render_sections() -> void:
 	_local_http_probe_button = null
 	_local_http_apply_status_label = null
 	_local_http_probe_status_label = null
+	_text_chain_rows_vbox = null
+	_text_chain_apply_button = null
+	_text_chain_reset_button = null
+	_text_chain_apply_status_label = null
+	_text_chain_state = []
 
 	for section in _SectionsRef.all_sections():
 		_content_vbox.add_child(_build_section(section))
@@ -372,6 +398,10 @@ func _render_sections() -> void:
 		# **nach** dem Llamafile-Editor, weil beide unter Text Provider
 		# leben.
 		if section == _SectionsRef.SectionId.TEXT_PROVIDER:
+			# PR 9: Chain-Editor zuerst, weil er die sichtbare
+			# Reihenfolge kontrolliert; anschließend die Per-Kind-
+			# Editoren (llamafile/local_http) in gewohnter Reihenfolge.
+			_content_vbox.add_child(_build_text_chain_editor_block())
 			_content_vbox.add_child(_build_llamafile_editor_block())
 			_content_vbox.add_child(_build_local_http_editor_block())
 		elif section == _SectionsRef.SectionId.STT:
@@ -1273,3 +1303,243 @@ func local_http_editor_snapshot() -> Dictionary:
 		"apply_status": _local_http_apply_status_label.text if _local_http_apply_status_label != null else "",
 		"probe_status": _local_http_probe_status_label.text if _local_http_probe_status_label != null else "",
 	}
+
+
+# --- Text-Provider-Chain-Editor (PR 9) ----------------------------------
+
+
+## Baut den Chain-Editor direkt über dem Llamafile-Editor. Zeigt eine
+## geordnete Liste der bekannten Text-Provider-Kinds; pro Zeile:
+## Enable-Checkbox + Up/Down-Buttons. Darunter Apply/Reset + kleines
+## Statuslabel. Bewusst klein: kein Drag-and-Drop, keine freie
+## Namenseingabe.
+func _build_text_chain_editor_block() -> Control:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 4)
+
+	var title := Label.new()
+	title.text = "text provider chain · Edit"
+	title.add_theme_font_size_override("font_size", 11)
+	title.modulate = Color(1, 1, 1, 0.85)
+	box.add_child(title)
+
+	var note := Label.new()
+	note.text = "Reihenfolge der Text-Provider-Fallback-Kette. Aktiviere/Deaktiviere Kinds; Up/Down ordnen die aktiven Einträge. Nur bekannte Kinds."
+	note.modulate = Color(1, 1, 1, 0.45)
+	note.add_theme_font_size_override("font_size", 10)
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(note)
+
+	_text_chain_rows_vbox = VBoxContainer.new()
+	_text_chain_rows_vbox.add_theme_constant_override("separation", 2)
+	box.add_child(_text_chain_rows_vbox)
+
+	var actions_row := HBoxContainer.new()
+	actions_row.add_theme_constant_override("separation", 6)
+	box.add_child(actions_row)
+	_text_chain_apply_button = Button.new()
+	_text_chain_apply_button.text = "Apply"
+	_text_chain_apply_button.tooltip_text = "Sendet die aktuelle Reihenfolge als settings_set_text_provider_chain an den Core."
+	_text_chain_apply_button.pressed.connect(_on_text_chain_apply_pressed)
+	actions_row.add_child(_text_chain_apply_button)
+	_text_chain_reset_button = Button.new()
+	_text_chain_reset_button.text = "Reset"
+	_text_chain_reset_button.tooltip_text = "Setzt die Kette auf den Default [\"abrain\"] zurück und löscht den persistierten Override."
+	_text_chain_reset_button.pressed.connect(_on_text_chain_reset_pressed)
+	actions_row.add_child(_text_chain_reset_button)
+	_text_chain_apply_status_label = Label.new()
+	_text_chain_apply_status_label.text = ""
+	_text_chain_apply_status_label.modulate = Color(1, 1, 1, 0.6)
+	_text_chain_apply_status_label.add_theme_font_size_override("font_size", 10)
+	actions_row.add_child(_text_chain_apply_status_label)
+
+	var sep := HSeparator.new()
+	sep.modulate = Color(1, 1, 1, 0.2)
+	box.add_child(sep)
+
+	_sync_text_chain_widgets_from_status()
+	return box
+
+
+## Baut aus dem zuletzt bekannten Status `text_provider_chain` das
+## lokale `_text_chain_state`-Modell und rendert die Rows. In-Chain-
+## Kinds stehen oben in der Status-Reihenfolge, nicht-in-Chain-Kinds
+## folgen darunter (disabled). Damit bleibt die visuelle Reihenfolge
+## 1:1 die Chain-Reihenfolge.
+func _sync_text_chain_widgets_from_status() -> void:
+	if _text_chain_rows_vbox == null:
+		return
+	_syncing_text_chain_widgets = true
+	_text_chain_state = []
+	# 1) Kinds aus dem Status in ihrer Reihenfolge aufnehmen.
+	var chain_raw: Variant = _last_status.get("text_provider_chain", null)
+	var chain_kinds: Array[String] = []
+	if typeof(chain_raw) == TYPE_ARRAY:
+		for entry in chain_raw:
+			var e := String(entry)
+			if e in _KNOWN_TEXT_KINDS and not (e in chain_kinds):
+				chain_kinds.append(e)
+	# 2) Restliche bekannte Kinds anhängen (als nicht-in-Chain).
+	for kind in _KNOWN_TEXT_KINDS:
+		if not (kind in chain_kinds):
+			_text_chain_state.append({"kind": kind, "in_chain": false})
+	# Status-Reihenfolge zuerst in den State hineinziehen.
+	var front: Array = []
+	for kind in chain_kinds:
+		front.append({"kind": kind, "in_chain": true})
+	_text_chain_state = front + _text_chain_state
+	_render_text_chain_rows()
+	_syncing_text_chain_widgets = false
+
+
+func _render_text_chain_rows() -> void:
+	if _text_chain_rows_vbox == null:
+		return
+	for child in _text_chain_rows_vbox.get_children():
+		child.queue_free()
+	for i in range(_text_chain_state.size()):
+		var entry: Dictionary = _text_chain_state[i]
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 6)
+		_text_chain_rows_vbox.add_child(row)
+
+		var enabled_check := CheckBox.new()
+		enabled_check.text = String(entry.get("kind", "?"))
+		enabled_check.button_pressed = bool(entry.get("in_chain", false))
+		enabled_check.tooltip_text = "Provider in der Fallback-Kette aktiv."
+		enabled_check.toggled.connect(_on_text_chain_row_toggled.bind(i))
+		enabled_check.custom_minimum_size = Vector2(220, 0)
+		row.add_child(enabled_check)
+
+		var up_button := Button.new()
+		up_button.text = "↑"
+		up_button.disabled = i == 0 or not bool(entry.get("in_chain", false))
+		up_button.tooltip_text = "Ein Slot nach oben."
+		up_button.pressed.connect(_on_text_chain_row_move.bind(i, -1))
+		row.add_child(up_button)
+
+		var down_button := Button.new()
+		down_button.text = "↓"
+		# Down-Button darf nur klicken, wenn es unter diesem Eintrag
+		# noch einen in-Chain-Eintrag gibt (sonst sinnlos).
+		var has_in_chain_below := false
+		for j in range(i + 1, _text_chain_state.size()):
+			var next_entry: Dictionary = _text_chain_state[j]
+			if bool(next_entry.get("in_chain", false)):
+				has_in_chain_below = true
+				break
+		down_button.disabled = not has_in_chain_below or not bool(entry.get("in_chain", false))
+		down_button.tooltip_text = "Ein Slot nach unten."
+		down_button.pressed.connect(_on_text_chain_row_move.bind(i, 1))
+		row.add_child(down_button)
+
+
+func _on_text_chain_row_toggled(pressed: bool, row_index: int) -> void:
+	if _syncing_text_chain_widgets:
+		return
+	if row_index < 0 or row_index >= _text_chain_state.size():
+		return
+	var entry: Dictionary = _text_chain_state[row_index]
+	entry["in_chain"] = pressed
+	_text_chain_state[row_index] = entry
+	# Sortieren: in-Chain nach oben, disabled nach unten — ohne die
+	# relative Reihenfolge innerhalb jeder Gruppe zu ändern.
+	var enabled_rows: Array = []
+	var disabled_rows: Array = []
+	for e in _text_chain_state:
+		if bool(e.get("in_chain", false)):
+			enabled_rows.append(e)
+		else:
+			disabled_rows.append(e)
+	_text_chain_state = enabled_rows + disabled_rows
+	if _text_chain_apply_status_label != null:
+		_text_chain_apply_status_label.text = ""
+	_render_text_chain_rows()
+
+
+func _on_text_chain_row_move(row_index: int, direction: int) -> void:
+	if _syncing_text_chain_widgets:
+		return
+	var target := row_index + direction
+	if row_index < 0 or row_index >= _text_chain_state.size():
+		return
+	if target < 0 or target >= _text_chain_state.size():
+		return
+	var tmp: Dictionary = _text_chain_state[row_index]
+	_text_chain_state[row_index] = _text_chain_state[target]
+	_text_chain_state[target] = tmp
+	if _text_chain_apply_status_label != null:
+		_text_chain_apply_status_label.text = ""
+	_render_text_chain_rows()
+
+
+func _on_text_chain_apply_pressed() -> void:
+	if _text_chain_rows_vbox == null:
+		return
+	# UI-seitige First-Line-of-Defense: leere Ketten gar nicht erst
+	# an den Core schicken. Der Core-Validator bleibt trotzdem aktiv
+	# (Second-Line-of-Defense, siehe `validate_text_chain`).
+	var chain: Array[String] = []
+	for entry in _text_chain_state:
+		if bool(entry.get("in_chain", false)):
+			chain.append(String(entry.get("kind", "")))
+	if chain.is_empty():
+		if _text_chain_apply_status_label != null:
+			_text_chain_apply_status_label.text = "chain empty — enable at least one provider"
+			_text_chain_apply_status_label.modulate = Color(0.9, 0.5, 0.5, 0.9)
+		return
+	var client: Node = get_node_or_null("/root/IpcClient")
+	if client == null or not client.has_method("is_connected_to_core") \
+			or not client.is_connected_to_core():
+		if _text_chain_apply_status_label != null:
+			_text_chain_apply_status_label.text = "offline"
+			_text_chain_apply_status_label.modulate = Color(0.9, 0.5, 0.5, 0.9)
+		return
+	if client.has_method("settings_set_text_provider_chain"):
+		client.call("settings_set_text_provider_chain", chain)
+	if _text_chain_apply_status_label != null:
+		_text_chain_apply_status_label.text = "sent"
+		_text_chain_apply_status_label.modulate = Color(1, 1, 1, 0.55)
+
+
+func _on_text_chain_reset_pressed() -> void:
+	var client: Node = get_node_or_null("/root/IpcClient")
+	if client == null or not client.has_method("is_connected_to_core") \
+			or not client.is_connected_to_core():
+		if _text_chain_apply_status_label != null:
+			_text_chain_apply_status_label.text = "offline"
+			_text_chain_apply_status_label.modulate = Color(0.9, 0.5, 0.5, 0.9)
+		return
+	if client.has_method("settings_reset_text_provider_chain"):
+		client.call("settings_reset_text_provider_chain")
+	if _text_chain_apply_status_label != null:
+		_text_chain_apply_status_label.text = "reset sent"
+		_text_chain_apply_status_label.modulate = Color(1, 1, 1, 0.55)
+
+
+## Snapshot des Chain-Editors für Smoke-Tests. Spiegelt die aktuelle
+## Widget-Reihenfolge + Enable-States.
+func text_chain_editor_snapshot() -> Dictionary:
+	var built := _text_chain_rows_vbox != null
+	if not built:
+		return {"built": false, "rows": [], "apply_status": ""}
+	var rows: Array = []
+	for entry in _text_chain_state:
+		rows.append({
+			"kind": String(entry.get("kind", "")),
+			"in_chain": bool(entry.get("in_chain", false)),
+		})
+	return {
+		"built": true,
+		"rows": rows,
+		"apply_status": _text_chain_apply_status_label.text if _text_chain_apply_status_label != null else "",
+	}
+
+
+## Test-Hook: triggert Widget-Events ohne Scene-Tree-Interaktion.
+func simulate_text_chain_toggle_for_test(row_index: int, pressed: bool) -> void:
+	_on_text_chain_row_toggled(pressed, row_index)
+
+
+func simulate_text_chain_move_for_test(row_index: int, direction: int) -> void:
+	_on_text_chain_row_move(row_index, direction)

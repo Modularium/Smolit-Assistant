@@ -80,6 +80,11 @@ const TTS_OVERRIDE_FILENAME: &str = "tts.json";
 /// env-/Startup-gesteuert, damit ein späterer Provider-Wechsel nicht
 /// an einem alten Override-File hängen bleibt.
 const LOCAL_HTTP_OVERRIDE_FILENAME: &str = "local_http.json";
+/// Text-Provider-Chain-Override-Datei (PR 9). Persistiert die vom Nutzer
+/// in der Settings-Shell gewählte Reihenfolge der Text-Provider-Kinds;
+/// eine leere Datei / keine Datei = kein Override, Core fällt auf die
+/// Startup-Chain (Env / Default) zurück.
+const TEXT_CHAIN_OVERRIDE_FILENAME: &str = "text_chain.json";
 /// Env-Var für den Settings-Verzeichnis-Override (Tests, explizite
 /// Konfiguration). Akzeptiert einen absoluten Pfad.
 const ENV_SETTINGS_DIR: &str = "SMOLIT_SETTINGS_DIR";
@@ -454,6 +459,77 @@ pub fn save_local_http_override(cfg: &LocalHttpConfig) -> Result<()> {
     write_override_atomic(&path, &body, "local_http")
 }
 
+// -----------------------------------------------------------------------
+// PR 9 — Text-Provider-Chain-Override.
+//
+// Persistiert die vom Nutzer in der Settings-Shell editierte Text-
+// Provider-Reihenfolge. Bewusst schmal: ein Feld `chain`
+// (Vec<String>); fehlt die Datei oder das Feld, fällt der Core auf
+// die Startup-Chain (Env / Default) zurück — die UI muss explizit
+// einen Reset-Pfad auslösen, um den Default zurückzuholen.
+// -----------------------------------------------------------------------
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TextChainOverrideFile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chain: Option<Vec<String>>,
+}
+
+pub fn resolve_text_chain_override_path() -> Option<PathBuf> {
+    resolve_settings_dir().map(|dir| dir.join(TEXT_CHAIN_OVERRIDE_FILENAME))
+}
+
+pub fn load_text_chain_override() -> TextChainOverrideFile {
+    let Some(path) = resolve_text_chain_override_path() else {
+        return TextChainOverrideFile::default();
+    };
+    let Ok(raw) = fs::read_to_string(&path) else {
+        return TextChainOverrideFile::default();
+    };
+    match serde_json::from_str::<TextChainOverrideFile>(&raw) {
+        Ok(file) => file,
+        Err(err) => {
+            tracing::warn!(
+                error = %err,
+                "settings_store: text_chain override file is not valid JSON; ignoring",
+            );
+            TextChainOverrideFile::default()
+        }
+    }
+}
+
+/// Persistiert eine bereits **validierte** Chain (`validate_text_chain`
+/// hat Duplikate und unbekannte Kinds bereits ausgeschlossen). Der
+/// Store führt keine zusätzliche Validierung durch, er schreibt nur
+/// atomar. Bei einem leeren Vec-Input wird explizit gescheitert — das
+/// sollte im App-Schreibpfad bereits abgefangen sein, ist hier aber
+/// eine zweite Sicherheitsschleife.
+pub fn save_text_chain_override(chain: &[String]) -> Result<()> {
+    if chain.is_empty() {
+        bail!("refusing to persist empty text provider chain");
+    }
+    let Some(path) = resolve_text_chain_override_path() else {
+        bail!("no writable settings dir (neither SMOLIT_SETTINGS_DIR nor $XDG_CONFIG_HOME nor $HOME)")
+    };
+    let body = TextChainOverrideFile {
+        chain: Some(chain.to_vec()),
+    };
+    write_override_atomic(&path, &body, "text_chain")
+}
+
+/// Löscht einen persistierten Chain-Override (Reset-Pfad). Eine
+/// fehlende Datei wird nicht als Fehler gewertet.
+pub fn clear_text_chain_override() -> Result<()> {
+    let Some(path) = resolve_text_chain_override_path() else {
+        return Ok(());
+    };
+    match fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err).context("failed to delete text chain override file"),
+    }
+}
+
 fn write_override_atomic<T: Serialize>(path: &std::path::Path, body: &T, label: &str) -> Result<()> {
     let dir = path
         .parent()
@@ -824,5 +900,71 @@ mod tests {
         assert!(merged.auto_speak);
         // STT bleibt unberührt.
         assert!(!merged.stt_enabled);
+    }
+
+    // PR 9 — Text-Chain-Override-Tests.
+
+    #[test]
+    fn text_chain_save_then_load_roundtrip() {
+        let dir = fresh_env_dir("tc-save-load");
+        unsafe {
+            std::env::set_var(ENV_SETTINGS_DIR, dir.as_os_str());
+        }
+        save_text_chain_override(&[
+            "llamafile_local".into(),
+            "local_http".into(),
+            "abrain".into(),
+        ])
+        .unwrap();
+        let loaded = load_text_chain_override();
+        let chain = loaded.chain.expect("chain present");
+        assert_eq!(chain, vec!["llamafile_local", "local_http", "abrain"]);
+        unsafe {
+            std::env::remove_var(ENV_SETTINGS_DIR);
+        }
+    }
+
+    #[test]
+    fn text_chain_save_rejects_empty_chain() {
+        let dir = fresh_env_dir("tc-empty");
+        unsafe {
+            std::env::set_var(ENV_SETTINGS_DIR, dir.as_os_str());
+        }
+        assert!(save_text_chain_override(&[]).is_err());
+        unsafe {
+            std::env::remove_var(ENV_SETTINGS_DIR);
+        }
+    }
+
+    #[test]
+    fn text_chain_clear_removes_file_if_present_and_is_idempotent() {
+        let dir = fresh_env_dir("tc-clear");
+        unsafe {
+            std::env::set_var(ENV_SETTINGS_DIR, dir.as_os_str());
+        }
+        // Idempotent wenn noch keine Datei existiert.
+        clear_text_chain_override().unwrap();
+        // Nach einem Save entfernt clear die Datei.
+        save_text_chain_override(&["abrain".into()]).unwrap();
+        let path = resolve_text_chain_override_path().unwrap();
+        assert!(path.exists());
+        clear_text_chain_override().unwrap();
+        assert!(!path.exists());
+        unsafe {
+            std::env::remove_var(ENV_SETTINGS_DIR);
+        }
+    }
+
+    #[test]
+    fn text_chain_load_without_file_returns_none() {
+        let dir = fresh_env_dir("tc-missing");
+        unsafe {
+            std::env::set_var(ENV_SETTINGS_DIR, dir.as_os_str());
+        }
+        let loaded = load_text_chain_override();
+        assert!(loaded.chain.is_none());
+        unsafe {
+            std::env::remove_var(ENV_SETTINGS_DIR);
+        }
     }
 }

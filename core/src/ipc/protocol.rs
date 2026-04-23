@@ -6,7 +6,7 @@ use crate::actions::{
 };
 use crate::app::{
     SettingsLlamafileUpdate, SettingsLocalHttpUpdate, SettingsProbeResultPayload,
-    SettingsSttUpdate, SettingsTtsUpdate, StatusPayload,
+    SettingsSttUpdate, SettingsTextProviderChainUpdate, SettingsTtsUpdate, StatusPayload,
 };
 use crate::approvals::{ApprovalRequest, ApprovalResolvedPayload, IncomingApprovalDecision};
 use crate::interaction::{AccessibilityDiscovery, AccessibilityProbe, SelectedTarget};
@@ -89,6 +89,16 @@ pub enum IncomingMessage {
     /// keine Prompt-Daten. Antwort: `settings_probe_result` mit
     /// `axis="local_http"`.
     SettingsProbeLocalHttp,
+    /// PR 9 — Text-Provider-Chain-Editor. Der Core validiert
+    /// (Whitelist, Duplikate, Empty-Reject) und ersetzt den
+    /// `TextProviderResolver` atomar bei Erfolg. Validation-Fehler
+    /// kommen als `error`-Envelope zurück; bei Erfolg sendet der
+    /// Core einen frischen `status`-Envelope.
+    SettingsSetTextProviderChain(SettingsTextProviderChainUpdate),
+    /// PR 9 — Reset auf den Compile-Zeit-Default `["abrain"]`. Löscht
+    /// den persistierten Override im Settings-Store und rebuildet den
+    /// Resolver. Antwort: `status` bei Erfolg.
+    SettingsResetTextProviderChain,
 }
 
 /// Target shape accepted by the `interaction_focus_window` IPC request.
@@ -415,6 +425,47 @@ mod tests {
         assert!(matches!(
             parse_incoming(r#"{"type":"settings_probe_local_http"}"#).unwrap(),
             IncomingMessage::SettingsProbeLocalHttp
+        ));
+    }
+
+    // PR 9 — Parser-Abdeckung für den Text-Provider-Chain-Editor.
+
+    #[test]
+    fn parses_settings_set_text_provider_chain_full_payload() {
+        let raw = r#"{"type":"settings_set_text_provider_chain","chain":["llamafile_local","local_http","abrain"]}"#;
+        let msg = parse_incoming(raw).unwrap();
+        match msg {
+            IncomingMessage::SettingsSetTextProviderChain(update) => {
+                assert_eq!(
+                    update.chain,
+                    vec!["llamafile_local", "local_http", "abrain"],
+                );
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn parses_settings_set_text_provider_chain_empty_chain_parses_to_empty_vec() {
+        // Leere Kette wird geparst — abgelehnt wird sie erst vom
+        // Core-Validator. So bleibt der Schreibpfad ehrlich:
+        // Protokoll akzeptiert das Feld, Semantik wird im Core
+        // geprüft.
+        let raw = r#"{"type":"settings_set_text_provider_chain","chain":[]}"#;
+        let msg = parse_incoming(raw).unwrap();
+        match msg {
+            IncomingMessage::SettingsSetTextProviderChain(update) => {
+                assert!(update.chain.is_empty());
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn parses_settings_reset_text_provider_chain() {
+        assert!(matches!(
+            parse_incoming(r#"{"type":"settings_reset_text_provider_chain"}"#).unwrap(),
+            IncomingMessage::SettingsResetTextProviderChain
         ));
     }
 

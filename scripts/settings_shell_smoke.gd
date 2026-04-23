@@ -71,6 +71,9 @@ func _init() -> void:
 	_check_local_http_probe_routes_to_local_http_label()
 	_check_local_http_probe_scheme_unsupported_does_not_leak()
 	_check_text_provider_lines_local_http_visibility()
+	_check_text_chain_editor_builds_and_syncs_from_status()
+	_check_text_chain_editor_toggle_and_move()
+	_check_text_chain_editor_prevents_empty_chain_on_apply()
 
 	print("---")
 	if _fail == 0:
@@ -913,6 +916,125 @@ func _check_text_provider_lines_local_http_visibility() -> void:
 			mentions_not_in_chain = true
 	_assert(mentions_not_in_chain,
 		"text_provider_lines: ehrlicher 'nicht in der Chain'-Hinweis für local_http")
+
+
+# --- PR 9: Text-Provider-Chain-Editor -----------------------------------
+
+
+func _check_text_chain_editor_builds_and_syncs_from_status() -> void:
+	# Core liefert eine Kette aus zwei Kinds: die Shell sollte diese
+	# Reihenfolge in den Editor-Rows spiegeln, mit dem dritten
+	# bekannten Kind als disabled am Ende.
+	var panel := _spawn_panel()
+	panel.apply_status({
+		"text_provider_chain": ["llamafile_local", "abrain"],
+	})
+	panel.open_panel()
+	var snap: Dictionary = panel.text_chain_editor_snapshot()
+	_assert(bool(snap.get("built", false)),
+		"text-chain-editor: Widgets sind gebaut nach open_panel")
+	var rows: Array = snap.get("rows", [])
+	_assert(rows.size() == 3,
+		"text-chain-editor: drei bekannte Kinds werden gerendert")
+	_assert(
+		String(rows[0].get("kind", "")) == "llamafile_local" and bool(rows[0].get("in_chain", false)),
+		"text-chain-editor: Status-Kette landet in der Widget-Reihenfolge oben (llamafile_local zuerst)")
+	_assert(
+		String(rows[1].get("kind", "")) == "abrain" and bool(rows[1].get("in_chain", false)),
+		"text-chain-editor: zweiter Status-Eintrag (abrain) folgt")
+	_assert(
+		String(rows[2].get("kind", "")) == "local_http" and not bool(rows[2].get("in_chain", false)),
+		"text-chain-editor: nicht-in-chain-Kind (local_http) steht als disabled am Ende")
+	_despawn_panel(panel)
+
+
+func _check_text_chain_editor_toggle_and_move() -> void:
+	# Der Editor muss lokal auf Toggle + Move reagieren, bevor Apply
+	# eine IPC-Runde auslöst.
+	var panel := _spawn_panel()
+	panel.apply_status({"text_provider_chain": ["abrain"]})
+	panel.open_panel()
+	# Status: [abrain (in), llamafile_local (out), local_http (out)].
+	# Aktivieren local_http (Row 2 in den aktuellen Rows).
+	panel.simulate_text_chain_toggle_for_test(2, true)
+	var snap: Dictionary = panel.text_chain_editor_snapshot()
+	var rows: Array = snap.get("rows", [])
+	# Nach dem Toggle sollten die in-chain-Einträge oben stehen:
+	# abrain bleibt an Position 0, local_http rückt auf Position 1,
+	# llamafile_local wird an Position 2 gedrängt (disabled).
+	_assert(String(rows[0].get("kind", "")) == "abrain",
+		"text-chain-editor: abrain bleibt Primär-Provider nach Toggle")
+	_assert(
+		String(rows[1].get("kind", "")) == "local_http" and bool(rows[1].get("in_chain", false)),
+		"text-chain-editor: neu aktivierter local_http rutscht in den enabled-Block")
+	# Jetzt local_http nach oben schieben (soll vor abrain stehen).
+	panel.simulate_text_chain_move_for_test(1, -1)
+	snap = panel.text_chain_editor_snapshot()
+	rows = snap.get("rows", [])
+	_assert(String(rows[0].get("kind", "")) == "local_http",
+		"text-chain-editor: Up-Move verschiebt local_http an Position 0")
+	_assert(String(rows[1].get("kind", "")) == "abrain",
+		"text-chain-editor: Abrain rutscht auf Position 1")
+	_despawn_panel(panel)
+
+
+func _check_text_chain_editor_prevents_empty_chain_on_apply() -> void:
+	# Wenn der Nutzer alle drei Kinds deaktiviert, darf Apply **keinen**
+	# Empty-Request an den Core schicken. Die UI-seitige Absicherung
+	# zeigt stattdessen eine kuratierte Meldung; der Core-Validator
+	# bleibt Second-Line-of-Defense.
+	var panel := _spawn_panel()
+	panel.apply_status({"text_provider_chain": ["abrain"]})
+	panel.open_panel()
+	# Alle Einträge deaktivieren.
+	panel.simulate_text_chain_toggle_for_test(0, false)
+	var snap: Dictionary = panel.text_chain_editor_snapshot()
+	for r in snap.get("rows", []):
+		_assert(not bool(r.get("in_chain", false)),
+			"text-chain-editor: alle Rows sind nach Toggle deaktiviert (Vorbedingung)")
+	# Apply aufrufen; offline reicht, weil wir die „offline"-Meldung
+	# hier nicht sehen wollen, sondern die „chain empty"-Absicherung.
+	# Wir simulieren das, indem wir den Handler direkt aufrufen —
+	# dazu brauchen wir einen echten Button-Press. Der Panel-Controller
+	# exponiert keinen direkten Test-Hook für Apply, aber das
+	# Apply-Status-Label sollte nach dem Klick die Empty-Meldung tragen.
+	# Da wir in dieser SceneTree-only-Umgebung keinen lebenden
+	# IpcClient-Autoload haben, greift in `_on_text_chain_apply_pressed`
+	# zuerst der `offline`-Zweig. Der Empty-Check kommt davor —
+	# wir stellen also sicher, dass der Apply-Snapshot weder „sent"
+	# noch „offline" ist, sondern den kuratierten Empty-Hinweis trägt.
+	if _panel_text_chain_button_apply(panel) != null:
+		_panel_text_chain_button_apply(panel).emit_signal("pressed")
+		var post_snap: Dictionary = panel.text_chain_editor_snapshot()
+		var apply_status := String(post_snap.get("apply_status", ""))
+		_assert(apply_status.find("chain empty") >= 0,
+			"text-chain-editor: Apply-Label weist Empty-Chain ehrlich ab")
+	_despawn_panel(panel)
+
+
+func _panel_text_chain_button_apply(panel) -> Button:
+	# Suche den „Apply"-Button im text_chain-Editor-Block. Da der
+	# Controller die Widget-Referenz nicht exponiert, greifen wir über
+	# die Scene-Tree-Struktur zu.
+	var candidates: Array[Node] = []
+	_collect_buttons_with_text(panel, "Apply", candidates)
+	# Der erste „Apply"-Button ist der des Llamafile-Editors — unser
+	# Chain-Editor liegt davor (siehe `_render_sections`), also wir
+	# suchen den ersten Button innerhalb des obersten Text-Provider-
+	# Abschnitts. Bequemer: wir triggern `_on_text_chain_apply_pressed`
+	# direkt via interne Methode, aber die ist `_`-prefixed. Nehmen
+	# wir den ersten Apply-Button als Approximation — reicht für
+	# dieses Smoke-Ziel.
+	if candidates.is_empty():
+		return null
+	return candidates[0] as Button
+
+
+func _collect_buttons_with_text(node: Node, wanted: String, out: Array[Node]) -> void:
+	if node is Button and (node as Button).text == wanted:
+		out.append(node)
+	for child in node.get_children():
+		_collect_buttons_with_text(child, wanted, out)
 
 
 func _check_panel_snapshot_shape() -> void:

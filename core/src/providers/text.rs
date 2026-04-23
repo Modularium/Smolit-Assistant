@@ -60,6 +60,94 @@ pub const PROVIDER_NAME_LLAMAFILE_LOCAL: &str = "llamafile_local";
 /// Cloud-SDK, ohne Secrets, ohne Streaming.
 pub const PROVIDER_NAME_LOCAL_HTTP: &str = "local_http";
 
+/// Whitelist aller heute produktiven Text-Provider-Kinds. Wird beim
+/// Chain-Editor (PR 9) für die UI-Liste **und** die Server-seitige
+/// Validierung genutzt — es gibt keine freie Provider-Namensemantik
+/// in der Settings-Shell, der Core lehnt unbekannte Kinds im
+/// Schreibpfad explizit ab.
+pub const KNOWN_TEXT_KINDS: &[&str] = &[
+    PROVIDER_NAME_ABRAIN,
+    PROVIDER_NAME_LLAMAFILE_LOCAL,
+    PROVIDER_NAME_LOCAL_HTTP,
+];
+
+/// Default-Kette für den Text-Provider. Wird vom Chain-Editor-
+/// Reset-Pfad und vom Startup als Fallback genutzt.
+pub const DEFAULT_TEXT_PROVIDER_CHAIN: &[&str] = &[PROVIDER_NAME_ABRAIN];
+
+/// Fehlerklassen für die Chain-Validierung (PR 9). Bewusst klein und
+/// stabil — jede Variante wird direkt in eine kuratierte, deutsche
+/// Fehlermeldung im IPC-Schreibpfad gespiegelt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TextChainValidationError {
+    /// Chain ist leer — keine stille Akzeptanz, kein impliziter
+    /// Fallback auf den Default. Die UI ruft explizit den Reset-
+    /// Pfad auf, wenn der Default zurückgeholt werden soll.
+    Empty,
+    /// Ein Kind-Name ist nicht in `KNOWN_TEXT_KINDS` enthalten. Trägt
+    /// den ablehnten Rohwert (nach trim, lowercase), damit der
+    /// Fehlertext ehrlich zeigt, was nicht verstanden wurde.
+    UnknownKind(String),
+    /// Ein Kind erscheint mehrfach in der Kette. Duplikate werden
+    /// bewusst nicht still bereinigt, weil das vom Nutzer ungewollt
+    /// sein kann (doppelter Klick, Copy-Paste-Fehler).
+    Duplicate(String),
+}
+
+impl std::fmt::Display for TextChainValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Empty => write!(
+                f,
+                "text provider chain is empty (use reset to restore default)",
+            ),
+            Self::UnknownKind(k) => write!(
+                f,
+                "unknown text provider kind `{k}` (known: {})",
+                KNOWN_TEXT_KINDS.join(", "),
+            ),
+            Self::Duplicate(k) => write!(
+                f,
+                "duplicate text provider kind `{k}` in chain",
+            ),
+        }
+    }
+}
+
+impl std::error::Error for TextChainValidationError {}
+
+/// Validiert und normalisiert eine Chain-Eingabe für den Text-
+/// Provider (PR 9). Regeln:
+///
+///   1. Leere Eingabe → `Empty`-Fehler.
+///   2. Jedes Element wird trim'd und lowercased.
+///   3. Leere Tokens nach Trim werden als unbekannt abgelehnt
+///      (keine stille Filterung, weil der Nutzer das nicht gewollt
+///      haben kann).
+///   4. Unbekannte Kinds → `UnknownKind`.
+///   5. Duplikate → `Duplicate`.
+///
+/// Bei Erfolg wird eine frische, normalisierte `Vec<String>`
+/// zurückgegeben, die direkt in `TextProviderChainItem` umgesetzt
+/// werden kann.
+pub fn validate_text_chain(raw: &[String]) -> Result<Vec<String>, TextChainValidationError> {
+    if raw.is_empty() {
+        return Err(TextChainValidationError::Empty);
+    }
+    let mut out: Vec<String> = Vec::with_capacity(raw.len());
+    for item in raw {
+        let normalized = item.trim().to_ascii_lowercase();
+        if normalized.is_empty() || !KNOWN_TEXT_KINDS.iter().any(|k| *k == normalized) {
+            return Err(TextChainValidationError::UnknownKind(normalized));
+        }
+        if out.iter().any(|existing| existing == &normalized) {
+            return Err(TextChainValidationError::Duplicate(normalized));
+        }
+        out.push(normalized);
+    }
+    Ok(out)
+}
+
 const ABRAIN_DEFAULT_TIMEOUT_SECS: u64 = 30;
 
 /// Fehlerklassen, die der Resolver intern trackt. Die Strings sind
@@ -1957,6 +2045,78 @@ mod tests {
         assert_eq!(status.active, "");
         assert_eq!(status.availability, "unavailable");
         assert_eq!(status.last_error.as_deref(), Some("empty_chain"));
+    }
+
+    // --- Chain-Validator (PR 9) ---------------------------------------
+
+    #[test]
+    fn validate_text_chain_accepts_known_kinds_in_order() {
+        let input = vec![
+            "llamafile_local".to_string(),
+            "local_http".to_string(),
+            "abrain".to_string(),
+        ];
+        let normalized = validate_text_chain(&input).expect("valid chain");
+        assert_eq!(
+            normalized,
+            vec!["llamafile_local", "local_http", "abrain"],
+        );
+    }
+
+    #[test]
+    fn validate_text_chain_normalizes_case_and_whitespace() {
+        let input = vec![
+            "  ABrain ".to_string(),
+            "LLAMAFILE_LOCAL".to_string(),
+        ];
+        let normalized = validate_text_chain(&input).expect("valid chain");
+        assert_eq!(normalized, vec!["abrain", "llamafile_local"]);
+    }
+
+    #[test]
+    fn validate_text_chain_rejects_empty() {
+        let err = validate_text_chain(&[]).unwrap_err();
+        assert_eq!(err, TextChainValidationError::Empty);
+    }
+
+    #[test]
+    fn validate_text_chain_rejects_unknown_kind() {
+        let input = vec!["abrain".into(), "cloud_mystery".into()];
+        let err = validate_text_chain(&input).unwrap_err();
+        match err {
+            TextChainValidationError::UnknownKind(k) => assert_eq!(k, "cloud_mystery"),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_text_chain_rejects_empty_token() {
+        let input = vec!["abrain".into(), "   ".into()];
+        // Leerer Token ist kein Known-Kind → wird als UnknownKind("")
+        // abgelehnt. Die UI sendet daher niemals leere Zeichen.
+        let err = validate_text_chain(&input).unwrap_err();
+        assert!(matches!(err, TextChainValidationError::UnknownKind(_)));
+    }
+
+    #[test]
+    fn validate_text_chain_rejects_duplicates() {
+        let input = vec!["abrain".into(), "llamafile_local".into(), "abrain".into()];
+        let err = validate_text_chain(&input).unwrap_err();
+        match err {
+            TextChainValidationError::Duplicate(k) => assert_eq!(k, "abrain"),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn known_text_kinds_stable_set() {
+        // Frozen list: jede Änderung an KNOWN_TEXT_KINDS muss bewusst
+        // durch einen neuen PR laufen (Breaking Change für UI/Docs).
+        assert_eq!(
+            KNOWN_TEXT_KINDS,
+            &["abrain", "llamafile_local", "local_http"],
+        );
+        assert_eq!(DEFAULT_TEXT_PROVIDER_CHAIN, &["abrain"]);
     }
 
     // --- Local-HTTP-Provider (PR 8) ----------------------------------

@@ -1889,11 +1889,67 @@ Sicherheitsgrenzen erweitert um:
   `https://` hart ab, weil PR 8 keine TLS-/Trust-Infrastruktur
   mitbringt.
 
+### 8d.5d Text-Provider-Chain-Editor (PR 9, Ist-Zustand)
+
+PR 9 gibt der Settings-Shell einen eigenen kleinen Chain-Editor
+**direkt über** den beiden Per-Kind-Editoren (llamafile,
+local_http). Bewusst klein: kein Drag-and-Drop, keine freie
+Namenseingabe, keine Multi-Achsen-Matrix. Nur die bereits
+bekannten Text-Provider-Kinds (`abrain` / `llamafile_local` /
+`local_http`) stehen als Zeilen zur Verfügung.
+
+Pro Row:
+
+- **Enable-CheckBox** mit dem Kind-Namen — toggelt
+  In-Chain-Mitgliedschaft.
+- **↑-Button** — verschiebt die Zeile einen Slot nach oben.
+  Deaktiviert, wenn die Row bereits oben steht **oder** der
+  Eintrag nicht in der Kette ist.
+- **↓-Button** — symmetrisch. Deaktiviert, wenn unterhalb kein
+  weiterer in-Chain-Eintrag mehr kommt.
+
+Unter der Row-Liste: **Apply / Reset / Statuslabel**.
+
+- **Apply** — sammelt alle aktiven Zeilen in der aktuellen
+  Reihenfolge und sendet `settings_set_text_provider_chain`. Der
+  Controller hat einen UI-seitigen Empty-Guard (wenn der Nutzer
+  alle Checkboxes deaktiviert, wird **kein** Request geschickt
+  sondern `"chain empty — enable at least one provider"`
+  gerendert); der Core-Validator ist Second-Line-of-Defense.
+- **Reset** — sendet `settings_reset_text_provider_chain`. Der
+  Core löscht den Override und fällt auf `["abrain"]` zurück; die
+  Shell synchronisiert sich beim nächsten `apply_status`-Tick.
+
+Defensive Regeln:
+
+- **Single Source of Truth.** Nach Apply wird die Widget-
+  Reihenfolge **nicht** lokal gefeiert — sie wird erst beim
+  eintreffenden `status`-Envelope aus dem Core wieder aufgebaut
+  (`_sync_text_chain_widgets_from_status`). So sieht die UI nie
+  einen anderen Zustand als der Core.
+- **Nur bekannte Kinds.** Das Widget-Modell ist fest an
+  `_KNOWN_TEXT_KINDS` gebunden. Eine Abweichung zwischen UI und
+  `crate::providers::text::KNOWN_TEXT_KINDS` wird im Core als
+  `unknown text provider kind` sichtbar — beschädigt aber nie die
+  Persistenz.
+- **Keine freie Texteingabe.** Es gibt kein LineEdit für
+  Provider-Namen.
+
+EventBus-/IPC-Erweiterungen (additiv, PR 9):
+
+- Neue Client-Methoden in
+  [`ui/autoload/ipc_client.gd`](../ui/autoload/ipc_client.gd):
+  `settings_set_text_provider_chain(chain: Array)` und
+  `settings_reset_text_provider_chain()`.
+- `StatusPayload.text_provider_chain` bleibt der einzige
+  Readout-Kanal; keine neuen Felder.
+
 ### 8d.6 Verifikation
 
-- `scripts/settings_shell_smoke.gd` (154 Assertions, alle PASS —
-  +18 gegenüber PR 7, +36 gegenüber PR 6, +51 gegenüber PR 5,
-  +66 gegenüber PR 4, +84 gegenüber PR 3): Section-Reihenfolge,
+- `scripts/settings_shell_smoke.gd` (seit PR 9 um drei Blöcke
+  für den Text-Chain-Editor erweitert — Build/Sync,
+  Toggle+Move-Verhalten und UI-seitige Empty-Guard; zusammen +9
+  Assertions, also 163 PASS, alle grün): Section-Reihenfolge,
   Slug-Eindeutigkeit, defensive `*_lines`-Renderer für leere /
   partielle / vollständige StatusPayloads inklusive PR-4-Felder
   (`text_provider_chain`, `llamafile_in_chain`, `llamafile_lifecycle`,

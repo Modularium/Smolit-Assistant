@@ -189,6 +189,27 @@ func settings_probe_local_http() -> void:
 	_send({"type": "settings_probe_local_http"})
 
 
+## PR 9 — Text-Provider-Chain-Editor. `chain` ist eine geordnete Liste
+## bekannter Kind-Namen (`abrain` / `llamafile_local` / `local_http`).
+## Der Core validiert (Whitelist, Duplikate, Empty-Reject) und
+## antwortet mit `status` bei Erfolg bzw. `error` bei Validation-
+## Fehlern.
+func settings_set_text_provider_chain(chain: Array) -> void:
+	var normalized: Array[String] = []
+	for entry in chain:
+		normalized.append(String(entry))
+	_send({
+		"type": "settings_set_text_provider_chain",
+		"chain": normalized,
+	})
+
+
+## PR 9 — Reset auf den Default `["abrain"]`. Löscht den
+## persistierten Override im Core.
+func settings_reset_text_provider_chain() -> void:
+	_send({"type": "settings_reset_text_provider_chain"})
+
+
 func _load_config() -> void:
 	var cfg := ConfigFile.new()
 	var err := cfg.load(_CONFIG_PATH)

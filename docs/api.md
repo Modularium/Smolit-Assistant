@@ -107,6 +107,15 @@ PR 7 erweitert):
   Diagnose-Probe: TCP-Connect auf den geparsten Endpoint, **kein**
   Completion-Request, **kein** Prompt-Daten-Leak. Antwort:
   `settings_probe_result` mit `axis: "local_http"`.
+- `settings_set_text_provider_chain` (PR 9) — editiert die
+  geordnete Text-Provider-Fallback-Kette. Pflichtfeld `chain:
+  string[]`. Der Core validiert: nur bekannte Kinds
+  (`abrain` / `llamafile_local` / `local_http`), keine Duplikate,
+  nicht leer. Bei Erfolg antwortet der Core mit einem frischen
+  `status`-Envelope; bei Validation-Fehlern mit `error`.
+- `settings_reset_text_provider_chain` (PR 9) — setzt die Kette
+  auf den Compile-Zeit-Default `["abrain"]` zurück und löscht den
+  persistierten Override im Settings-Store. Antwort: `status`.
 
 Beispiele:
 
@@ -129,6 +138,8 @@ Beispiele:
 {"type":"settings_probe_tts"}
 {"type":"settings_set_local_http_config","enabled":true,"endpoint":"http://127.0.0.1:8080/completion","request_timeout_seconds":60}
 {"type":"settings_probe_local_http"}
+{"type":"settings_set_text_provider_chain","chain":["llamafile_local","local_http","abrain"]}
+{"type":"settings_reset_text_provider_chain"}
 ```
 
 ### 2.2 Ausgehend (Core → UI)
@@ -278,6 +289,9 @@ die diese Felder nicht kennen, behandeln sie ignorant — das bestehende
   d. h. unbekannte Kinds aus der Config sind hier bereits verworfen.
   Fallback auf `["abrain"]`, wenn die Kette nach dem Filtern leer
   wäre. Beispiele: `["abrain"]`, `["llamafile_local", "abrain"]`.
+  Seit PR 9 editierbar über `settings_set_text_provider_chain`
+  (siehe §2.10c); ein Reset-Pfad stellt den Default `["abrain"]`
+  wieder her.
 - `llamafile_in_chain`: Boolesch. `true` genau dann, wenn
   `"llamafile_local"` in `text_provider_chain` enthalten ist. Wenn
   `false`, sind die folgenden vier `llamafile_*`-Felder semantisch
@@ -1113,14 +1127,15 @@ Die UI muss Auswahl-Zustand in mindestens diesen Fällen aktiv verwerfen:
   hier, Execution läuft weiterhin über das bestehende Interaction-
   Backend inkl. Approval.
 
-### 2.10 Settings-Schreib-/Probe-Pfad (Ist-Zustand, PR 5 + PR 7 + PR 8)
+### 2.10 Settings-Schreib-/Probe-Pfad (Ist-Zustand, PR 5 + PR 7 + PR 8 + PR 9)
 
 Kleine, kuratierte Schreib-/Diagnose-Oberfläche für die Settings-
 Shell. Additiv zum bestehenden Protokoll, keine neue
 Nachrichtenfamilie. Der heutige Scope umfasst `llamafile_local`-Felder
-(PR 5), STT-/TTS-Command-Provider (PR 7) und den lokalen HTTP-
-Text-Provider `local_http` (PR 8). Cloud-Provider und Secrets
-bleiben außerhalb dieses PR-Blocks.
+(PR 5), STT-/TTS-Command-Provider (PR 7), den lokalen HTTP-
+Text-Provider `local_http` (PR 8) und die Text-Provider-Fallback-
+Kette (PR 9). Cloud-Provider und Secrets bleiben außerhalb dieses
+PR-Blocks.
 
 **Eingang:** `settings_set_llamafile_config`.
 
@@ -1296,6 +1311,54 @@ Timeout von höchstens 30 s) und liefert eine kuratierte Klasse:
 Antwort: `settings_probe_result` mit `axis="local_http"`,
 `lifecycle=null`. Der konfigurierte Endpoint taucht **nicht** im
 Response-Body auf; `message` bleibt kuratiert.
+
+#### 2.10c Text-Provider-Chain-Editor (PR 9)
+
+`settings_set_text_provider_chain` editiert die geordnete Text-
+Provider-Fallback-Kette. Scope bewusst klein: nur **bekannte** Kinds
+(`abrain` / `llamafile_local` / `local_http`); keine freie
+Namens-eingabe, keine STT-/TTS-Chain-Editoren, keine Cloud-Kinds.
+
+```json
+{"type":"settings_set_text_provider_chain","chain":["llamafile_local","local_http","abrain"]}
+```
+
+- `chain` (string[], Pflicht) — geordnete Liste. Elemente werden
+  vor der Validierung **lowercased** und **getrimmt**.
+
+Validierungsregeln (siehe
+[`crate::providers::text::validate_text_chain`](../core/src/providers/text.rs)):
+
+1. **Leere Kette** → Fehler `text provider chain is empty (use reset
+   to restore default)`. Kein stiller Fallback auf den Default, damit
+   die UI den Nutzer zu einer bewussten Entscheidung zwingt
+   (Reset-Knopf → `settings_reset_text_provider_chain`).
+2. **Unbekannter Kind** → Fehler
+   `unknown text provider kind \`KIND\` (known: abrain, llamafile_local, local_http)`
+   (Platzhalter `KIND` steht für den abgelehnten Rohwert).
+3. **Duplikat** → Fehler
+   `duplicate text provider kind \`KIND\` in chain`.
+
+Erfolg → der Core persistiert die normalisierte Kette in
+`text_chain.json` (gleiche Verzeichnisauflösung und
+0600-Permissions wie bei den anderen Override-Files), rebuildet den
+`TextProviderResolver` atomar (mit den aktuellen Llamafile-/
+Local-HTTP-Views aus `live_llamafile` / `live_local_http`) und
+antwortet mit einem frischen `status`-Envelope. `text_provider_chain`
+spiegelt sofort die neue Reihenfolge, `llamafile_in_chain` /
+`local_http_in_chain` werden entsprechend aktualisiert.
+
+**Eingang:** `settings_reset_text_provider_chain`.
+
+```json
+{"type":"settings_reset_text_provider_chain"}
+```
+
+Setzt die Kette auf den Compile-Zeit-Default `["abrain"]` zurück
+und löscht das persistierte `text_chain.json`. Geht durch denselben
+Update-Pfad wie `settings_set_text_provider_chain`, damit der
+Validator-Run und der Resolver-Rebuild einheitlich behandelt
+werden. Antwort: `status`.
 
 **Sicherheitsgrenzen dieser Fläche.**
 

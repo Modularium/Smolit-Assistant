@@ -179,6 +179,12 @@ async fn dispatch(app: &Arc<App>, raw: &str) -> Vec<OutgoingMessage> {
             handle_settings_set_local_http_config(app, update)
         }
         IncomingMessage::SettingsProbeLocalHttp => handle_settings_probe_local_http(app).await,
+        IncomingMessage::SettingsSetTextProviderChain(update) => {
+            handle_settings_set_text_provider_chain(app, update)
+        }
+        IncomingMessage::SettingsResetTextProviderChain => {
+            handle_settings_reset_text_provider_chain(app)
+        }
     }
 }
 
@@ -273,6 +279,32 @@ async fn handle_settings_probe_local_http(app: &Arc<App>) -> Vec<OutgoingMessage
     vec![OutgoingMessage::SettingsProbeResult {
         payload: app.probe_local_http().await,
     }]
+}
+
+/// PR 9 — Text-Provider-Chain-Schreibpfad. Geometrie wie die anderen
+/// `settings_set_*`-Pfade: Validation-Fehler → `error`-Envelope
+/// (Meldung vom Chain-Validator), Erfolg → frischer `status`-Envelope.
+fn handle_settings_set_text_provider_chain(
+    app: &Arc<App>,
+    update: crate::app::SettingsTextProviderChainUpdate,
+) -> Vec<OutgoingMessage> {
+    match app.update_text_provider_chain(update) {
+        Ok(()) => vec![OutgoingMessage::Status {
+            payload: app.build_status_payload(),
+        }],
+        Err(message) => vec![OutgoingMessage::Error { message }],
+    }
+}
+
+/// PR 9 — Reset der Text-Provider-Kette auf `["abrain"]`. Geht durch
+/// denselben Update-Pfad; Persist-Fehler werden nicht hart propagiert.
+fn handle_settings_reset_text_provider_chain(app: &Arc<App>) -> Vec<OutgoingMessage> {
+    match app.reset_text_provider_chain() {
+        Ok(()) => vec![OutgoingMessage::Status {
+            payload: app.build_status_payload(),
+        }],
+        Err(message) => vec![OutgoingMessage::Error { message }],
+    }
 }
 
 fn handle_approval_response(
@@ -1642,6 +1674,183 @@ mod tests {
             "expected http_connect_failed or timeout; got: {resp}",
         );
         assert!(resp.contains(r#""ok":false"#));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // -------------------------------------------------------------------
+    // PR 9 — Text-Provider-Chain-Editor + Reset + Validator-Fehlerpfade.
+    // -------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn settings_set_text_provider_chain_applies_and_echoes_status() {
+        let dir = scoped_settings_dir("tc-apply-echo");
+        let app = build_local_http_chain_app(&dir);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+
+        // Vorher: `build_local_http_chain_app` startet mit
+        // ["local_http", "abrain"].
+        ws.send(Message::Text(r#"{"type":"get_status"}"#.into()))
+            .await
+            .unwrap();
+        let pre = recv_text(&mut ws).await;
+        assert!(pre.contains(r#""text_provider_chain":["local_http","abrain"]"#));
+
+        // Schreibpfad: Kette umordnen + llamafile_local einreihen.
+        ws.send(Message::Text(
+            r#"{"type":"settings_set_text_provider_chain","chain":["llamafile_local","local_http","abrain"]}"#
+                .into(),
+        ))
+        .await
+        .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.contains(r#""type":"status""#));
+        assert!(resp.contains(
+            r#""text_provider_chain":["llamafile_local","local_http","abrain"]"#,
+        ));
+        assert!(resp.contains(r#""llamafile_in_chain":true"#));
+        assert!(resp.contains(r#""local_http_in_chain":true"#));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn settings_set_text_provider_chain_rejects_unknown_kind() {
+        let dir = scoped_settings_dir("tc-reject-unknown");
+        let app = build_local_http_chain_app(&dir);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"settings_set_text_provider_chain","chain":["abrain","sekrit_cloud"]}"#
+                .into(),
+        ))
+        .await
+        .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.starts_with(r#"{"type":"error""#));
+        assert!(resp.contains("unknown text provider kind"));
+        assert!(resp.contains("sekrit_cloud"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn settings_set_text_provider_chain_rejects_duplicates() {
+        let dir = scoped_settings_dir("tc-reject-dup");
+        let app = build_local_http_chain_app(&dir);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"settings_set_text_provider_chain","chain":["abrain","abrain"]}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.starts_with(r#"{"type":"error""#));
+        assert!(resp.contains("duplicate"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn settings_set_text_provider_chain_rejects_empty() {
+        let dir = scoped_settings_dir("tc-reject-empty");
+        let app = build_local_http_chain_app(&dir);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"settings_set_text_provider_chain","chain":[]}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.starts_with(r#"{"type":"error""#));
+        assert!(resp.contains("empty"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn settings_reset_text_provider_chain_returns_to_abrain_default() {
+        let dir = scoped_settings_dir("tc-reset");
+        let app = build_local_http_chain_app(&dir);
+        // Vorher auf eine Dreier-Kette gehen.
+        app.update_text_provider_chain(crate::app::SettingsTextProviderChainUpdate {
+            chain: vec![
+                "llamafile_local".into(),
+                "local_http".into(),
+                "abrain".into(),
+            ],
+        })
+        .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"settings_reset_text_provider_chain"}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.contains(r#""type":"status""#));
+        assert!(resp.contains(r#""text_provider_chain":["abrain"]"#));
+        assert!(resp.contains(r#""llamafile_in_chain":false"#));
+        assert!(resp.contains(r#""local_http_in_chain":false"#));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn settings_set_text_provider_chain_normalizes_case_and_whitespace() {
+        let dir = scoped_settings_dir("tc-normalize");
+        let app = build_local_http_chain_app(&dir);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"settings_set_text_provider_chain","chain":["  ABrain ","LLAMAFILE_LOCAL"]}"#
+                .into(),
+        ))
+        .await
+        .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.contains(r#""type":"status""#));
+        assert!(resp.contains(r#""text_provider_chain":["abrain","llamafile_local"]"#));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -1240,6 +1240,52 @@ und Nicht-Ziele.
       Routing, Scheme-unsupported ohne Leak,
       `text_provider_lines`-Visibility-Pfad). Alle übrigen UI-
       Smokes grün; Headless-Boot sauber.
+- [x] PR 9: Text-Provider-Chain-Editor in der Settings-Shell —
+      erstmals kann der Nutzer die **Text-Provider-Fallback-
+      Reihenfolge** über die UI editieren. Scope konservativ:
+      nur bekannte Kinds (`abrain` / `llamafile_local` /
+      `local_http`), keine freie Namenseingabe, kein Drag-and-
+      Drop, kein STT-/TTS-Chain-Editor in diesem PR.
+      [`providers/text.rs`](./core/src/providers/text.rs) bekommt
+      eine `KNOWN_TEXT_KINDS`-Whitelist,
+      `DEFAULT_TEXT_PROVIDER_CHAIN` und einen
+      `validate_text_chain`-Helper (Whitelist-Check,
+      Duplikat-Ablehnung, Empty-Reject, Case-/Whitespace-
+      Normalisierung). `App.text_provider_chain` wird zu
+      `App.live_text_chain: Mutex<Vec<…>>`; neue Methoden
+      `App::update_text_provider_chain` und
+      `App::reset_text_provider_chain` führen Validierung +
+      Persistenz + Resolver-Rebuild atomar durch.
+      [`settings_store`](./core/src/settings_store.rs) bekommt
+      eine fünfte Override-Datei `text_chain.json` (gleiche
+      Verzeichnisauflösung, 0600-Permissions, atomarer Write)
+      plus `clear_text_chain_override`-Pfad für den Reset.
+      Neue IPC-Messages `settings_set_text_provider_chain` /
+      `settings_reset_text_provider_chain`; Response bei Erfolg
+      ist der reguläre `status`-Envelope, bei Validation-Fehlern
+      ein kuratiertes `error`-Envelope mit dem konkreten
+      Ablehnungsgrund.
+      [`StatusPayload.text_provider_chain`](./docs/api.md) bleibt
+      der einzige Readout-Kanal — keine neuen Status-Felder.
+      Settings-Shell: neuer „text provider chain · Edit"-Block
+      direkt über den Per-Kind-Editoren mit einer Zeile pro
+      bekanntem Kind (Enable-CheckBox + Up/Down-Buttons) und
+      Apply/Reset; UI-seitige Empty-Guard verhindert den Versand
+      leerer Ketten, der Core-Validator ist
+      Second-Line-of-Defense. **Bewusst nicht Teil von PR 9:**
+      keine STT-/TTS-Chain-Editoren, kein Cloud-Provider, keine
+      Drag-and-Drop-UX, keine Secrets-/API-Key-Eingabe, kein
+      Timeout-Editor für die Chain. Details in
+      [docs/provider_fallback_and_settings_architecture.md §9 + §11](./docs/provider_fallback_and_settings_architecture.md),
+      [docs/api.md §2.10 (inkl. 2.10c)](./docs/api.md),
+      [docs/ui_architecture.md §8d.5d](./docs/ui_architecture.md).
+      Tests: Core 230 PASS (+20 vs. PR 8 — sieben
+      Validator-Unit-Tests, vier `settings_store`-Unit-Tests,
+      drei Protocol-Parser-Tests, sechs IPC-Ende-zu-Ende-Tests
+      inkl. Reject-Pfade und Reset-To-Default); UI
+      `settings-shell-smoke` um drei Blöcke erweitert (+9
+      Assertions). Alle übrigen UI-Smokes grün; Headless-Boot
+      sauber.
 
 ---
 

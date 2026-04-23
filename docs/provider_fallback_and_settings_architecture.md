@@ -891,6 +891,42 @@ gegen einen lokalen Fake-HTTP-Server plus ein Shell-Skript als
   fünf neue IPC-Ende-zu-Ende-Tests, vier neue UI-Smoke-Blöcke.
   Gesamttests: Core 210 PASS (+25 vs. PR 7);
   UI-`settings-shell-smoke` auf 154 Assertions erweitert (+18).
+- **PR 9 — Text-Provider-Chain-Editor in der Settings-Shell (Ist).**
+  Erstmals kann der Nutzer die **Text-Provider-Fallback-Reihenfolge**
+  über die Shell editieren — klein, kuratiert, ohne freie Namens-
+  eingabe. `providers::text` bekommt eine
+  [`KNOWN_TEXT_KINDS`](../core/src/providers/text.rs)-Whitelist
+  (`abrain` / `llamafile_local` / `local_http`), eine
+  `DEFAULT_TEXT_PROVIDER_CHAIN`-Konstante und einen
+  `validate_text_chain`-Helper (Whitelist + Duplikat-Ablehnung +
+  Empty-Reject). `App.text_provider_chain` wird zu
+  `App.live_text_chain: Mutex<Vec<TextProviderChainItem>>`; ein
+  neuer `App::update_text_provider_chain` führt die Validierung aus,
+  persistiert über den Settings-Store (neues `text_chain.json`,
+  gleiche Verzeichnisauflösung / 0600-Permissions / temp+rename wie
+  die anderen Override-Files, siehe §11) und rebuildet den
+  `TextProviderResolver` atomar. Ein zusätzlicher
+  `App::reset_text_provider_chain`-Pfad löscht den Override und
+  fällt auf `["abrain"]` zurück. Neue IPC-Messages
+  `settings_set_text_provider_chain` /
+  `settings_reset_text_provider_chain` (alle additiv); Response bei
+  Erfolg ist der reguläre `status`-Envelope, bei
+  Validation-Fehlern ein kuratiertes `error`-Envelope. UI-Seite: ein
+  kleiner „text provider chain · Edit"-Block direkt über dem
+  Llamafile-Editor mit einer Row pro bekanntem Kind
+  (Enable-Checkbox + Up/Down-Buttons), plus Apply/Reset. Bewusst
+  klein gehalten: kein Drag-and-Drop, keine freie Namenseingabe,
+  kein STT-/TTS-Chain-Editor in diesem PR. Tests: sieben neue
+  Core-Unit-Tests (Validator: Happy-Path, Normalisierung, Empty,
+  Unknown, Empty-Token, Duplicate, Known-Kinds-Frozen-Set), vier
+  neue `settings_store`-Unit-Tests (Roundtrip, Reject-Empty,
+  Clear-Idempotenz, Missing-File-Is-None), drei neue Protocol-
+  Parser-Tests, sechs neue IPC-Ende-zu-Ende-Tests (Apply,
+  Reject-Unknown, Reject-Duplicate, Reject-Empty, Reset-To-Default,
+  Case-/Whitespace-Normalisierung), drei neue UI-Smoke-Blöcke
+  (Build + Sync, Toggle/Move, UI-Seiten-Empty-Guard). Gesamttests:
+  Core 230 PASS (+20 vs. PR 8); UI-`settings-shell-smoke` auf
+  erweitert (+9 Assertions).
 
 Zwischenprinzipien:
 
@@ -938,14 +974,16 @@ aufgehoben werden.
 
 ---
 
-## 11. Secrets- und Sensitive-Config-Kategorien (Ist, PR 5 + PR 7 + PR 8)
+## 11. Secrets- und Sensitive-Config-Kategorien (Ist, PR 5 + PR 7 + PR 8 + PR 9)
 
 Ab PR 5 existiert in
 [`core/src/settings_store.rs`](../core/src/settings_store.rs) ein
 kleiner persistenter Store für die editierbaren Teile der
 Llamafile-Config; PR 7 ergänzt dort die STT-/TTS-Overrides; PR 8
-bringt den `local_http`-Override dazu. Dieser Abschnitt legt die
-Trennlinien fest, die jede künftige Schreibfläche einhalten muss.
+bringt den `local_http`-Override dazu; PR 9 ergänzt einen
+`text_chain.json`-Override für die Text-Provider-Fallback-
+Reihenfolge. Dieser Abschnitt legt die Trennlinien fest, die jede
+künftige Schreibfläche einhalten muss.
 
 **Kategorien.**
 
@@ -977,10 +1015,11 @@ aber wie eine sensitive-lite-Ressource behandelt:
 
 **Schreib-/Persistenz-Pfade.**
 
-- **Editierbare Operational-Werte.** Vier kleine Override-Dateien
+- **Editierbare Operational-Werte.** Fünf kleine Override-Dateien
   im Settings-Verzeichnis:
   `llamafile_local.json` (PR 5), `stt.json` (PR 7), `tts.json`
-  (PR 7), `local_http.json` (PR 8). Auflösungsreihenfolge:
+  (PR 7), `local_http.json` (PR 8), `text_chain.json` (PR 9).
+  Auflösungsreihenfolge:
   `SMOLIT_SETTINGS_DIR` → `$XDG_CONFIG_HOME/smolit-assistant/` →
   `$HOME/.config/smolit-assistant/`. Atomarer Write
   (temp + rename). Unix-Permissions 0600, damit die Oberfläche
@@ -989,9 +1028,11 @@ aber wie eine sensitive-lite-Ressource behandelt:
   Felder (`enabled`, `command`, TTS zusätzlich `auto_speak`);
   `local_http`-Override persistiert nur `enabled`, `endpoint` und
   `request_timeout_seconds` — Prompt-/Response-Feldnamen bleiben
-  env-/Startup-gesteuert. Timeouts der `llamafile_local`-Runtime
-  und sämtliche Provider-Chains bleiben env-gesteuert, damit ein
-  altes Override-File eine zukünftige Cloud-Kette nicht überstimmt.
+  env-/Startup-gesteuert. `text_chain.json` persistiert eine
+  bereits validierte Reihenfolge bekannter Kinds (Validator läuft
+  im App-Schreibpfad, nicht im Store). STT-/TTS-Provider-Chains
+  bleiben weiterhin env-gesteuert, damit ein altes Override-File
+  eine zukünftige Cloud-Kette nicht überstimmt.
 - **Sensitive-Werte.** Noch kein Store. Wenn einer entsteht,
   separates File (z. B. `secrets.json`), **nie** gemeinsam mit
   operational-Werten serialisiert, und nie aus dem Core in Richtung
