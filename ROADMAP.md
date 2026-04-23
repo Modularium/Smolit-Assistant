@@ -150,7 +150,11 @@ Subeinheit 3.4 unten sowie
 ### Offen (Phase 2)
 
 - [ ] Server-seitige Reconnect-/Keepalive-Politik ausbauen
-- [ ] Event-Erweiterungen (TTS-Start/-Ende)
+- [x] Event-Erweiterungen (TTS-Start/-Ende) — PR 14, MVP:
+      `speaking_started` / `speaking_ended` additiv im bestehenden
+      `OutgoingMessage`-Enum; Pairing und Error-Klassen siehe
+      [`docs/api.md` §2.11](docs/api.md). **Nicht enthalten:**
+      Streaming-Audio, Phonem-/Lip-Sync, Audio-Timeline.
 - [ ] Streaming-Support
 - [ ] aktive Emission von `action_progress` / `action_verification` /
       `action_cancelled` (Typen sind bereits vorgesehen)
@@ -216,8 +220,27 @@ Subeinheit 3.4 unten sowie
       Smoke `scripts/utterance_bubble_smoke.gd` (Harness-Case
       `utterance-bubble-smoke`). Details in
       [docs/ui_architecture.md §8.4](./docs/ui_architecture.md).
-- [ ] Speech-Sync via TTS-Lebenszyklus-Events (setzt Protokollerweiterung
-      `speaking_started` / `speaking_ended` voraus)
+- [x] Speech-Sync via TTS-Lebenszyklus-Events — PR 14, konservativer
+      MVP. Core emittiert `speaking_started` / `speaking_ended`
+      genau dann, wenn TTS wirklich läuft (sowohl `speak_text` als
+      auch `auto_speak`), mit stabilem Pairing und kuratierten
+      Error-Klassen im Fehlerfall. UI spiegelt das in zwei minimalen
+      Hooks: Avatar nimmt den Core-Lifecycle als Taktgeber statt des
+      alten fixen `TALK_HOLD_SECONDS`-Timers (`TALK_SETTLE_SECONDS =
+      0.35` bei `ok`, bestehender ERROR-Pfad bei `!ok`) und die
+      Utterance-Bubble verlängert den Display-Timer einer aktiven
+      `response`-Bubble einmal, damit die Antwort nicht ausfadet,
+      während Smolit noch spricht. Verifiziert durch neue
+      Core-Tests in `core/src/ipc/server.rs` /
+      `core/src/ipc/protocol.rs` sowie den 19-Assertions-Smoke
+      `scripts/speech_sync_smoke.gd` (Harness-Case
+      `speech-sync-smoke`). **Bewusste Restschuld:** kein
+      Streaming-Audio, kein Phonem-/Lip-Sync, keine Audio-Timeline,
+      keine Stage-C-Ausdrucksstufen — diese Pfade bleiben in
+      [docs/ui_architecture.md §7 „Phase C"](./docs/ui_architecture.md)
+      geparkt. Details in
+      [docs/api.md §2.11](./docs/api.md) und
+      [docs/ui_architecture.md §8.4a](./docs/ui_architecture.md).
 - [x] Avatar-State-Mapping auf Action Events (neuer `acting`-State,
       `action_started` / `action_step` / `action_completed` /
       `action_failed` / `action_cancelled` respektieren bestehende
@@ -421,7 +444,9 @@ Desktop Interaction Layer, die UI projiziert nur.
 - [ ] Feinere Animationszustände (`curious`, `focused`, `alert`, …)
 - [ ] Emotion-Mapping Core → UI (setzt Protokollerweiterung um
       `emotion` voraus)
-- [ ] Speech-Sync (TTS-Lebenszyklus-Events → Animation)
+- [x] Speech-Sync (TTS-Lebenszyklus-Events → Animation) — MVP via
+      PR 14, siehe Subeinheit 3.2. Tiefer gehender Sync (Phonem,
+      Audio-Timeline) bleibt offen.
 - [ ] Antwortabhängige Reaktionen
 - [ ] erste echte Persönlichkeits-Cues über rein visuelle Mikro-Cues
       hinaus
@@ -1536,8 +1561,13 @@ optional click-through-fähiges Fenster) auf Basis der neuen Linux-
 Window-/Overlay-Architektur (Phase 3b, siehe
 [docs/linux_window_overlay_architecture.md](./docs/linux_window_overlay_architecture.md))
 und die strukturierten Targets aus einer Desktop-Interaction-Schicht
-(Phase 8b). Avatar-seitig bleiben echte Charakteranimation und
-Speech-Sync offene Folgearbeiten.
+(Phase 8b). Avatar-seitig bleibt echte Charakteranimation offen.
+Speech-Sync ist mit PR 14 im MVP angekommen
+(`speaking_started` / `speaking_ended` + UI-Projektion, siehe
+[docs/api.md §2.11](./docs/api.md) und
+[docs/ui_architecture.md §8.4a](./docs/ui_architecture.md));
+tieferer Sync (Phonem, Audio-Timeline, Ausdrucksstufen) bleibt in
+Phase C geparkt.
 
 Für den Desktop Interaction Layer läuft jetzt ein konkreter
 **Approval / Confirmation Flow MVP**: freigabepflichtige Aktionen

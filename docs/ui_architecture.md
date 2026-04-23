@@ -420,9 +420,11 @@ Harte Grenzen dieses Schritts, bindend für spätere PRs in dieser Linie:
   (`IDLE` / `THINKING` / `TALKING` / `ACTING` / `DISCONNECTED` /
   `ERROR`) bleiben unverändert; keine neuen Phasen, kein neues
   Ausdrucks-Feld im Protokoll.
-- **Kein TTS-/Speech-Sync.** TTS-Lebenszyklus-Events sind weiterhin
-  offen (siehe Phase C und ROADMAP Phase 3.2); der Polish reagiert
-  rein auf den Avatar-State.
+- **Kein TTS-/Speech-Sync an diesem Polish-Schritt.** Der Polish
+  reagiert rein auf den Avatar-State. Der tatsächliche Speech-Sync
+  via `speaking_started` / `speaking_ended` ist in PR 14 gelandet
+  (siehe §8.5) und ändert nicht den Polish-Pfad — er füttert nur
+  den bestehenden State.
 - **Default-Smolit und Fallback-Verhalten bleiben geschützt.**
   Unbekannte Identity-IDs werden weiterhin auf Smolit geklemmt
   (`avatar_identity.gd::identity_from_string`); unbekannte States am
@@ -439,8 +441,10 @@ Identities (inkl. unbekannter ID clamp) ab. Harness-Case
 ### Phase C – Erweiterter Ausdruck (Ziel > 3.x)
 
 - Feinere Zustände (z. B. `curious`, `focused`, `alert`).
-- Speech-Sync mit TTS-Lebenszyklus (setzt TTS-Events im Protokoll voraus —
-  aktuell nicht vorhanden).
+- Speech-Sync mit TTS-Lebenszyklus — **MVP gelandet (PR 14).** Der
+  Core meldet `speaking_started` / `speaking_ended` (siehe §8.5);
+  tieferer Sync (Phonem-/Lip-Sync, Audio-Timeline) bleibt bewusst
+  offen.
 - Optional höher aufgelöste 2.5D/3D-Darstellung.
 
 Jede Phase nach A ist additiv zum vorherigen Stand und erfordert entweder
@@ -636,9 +640,11 @@ kill-and-replace behandelt (keine Mehrfach-Timer, keine Tween-Leichen).
 - **Stummer Fallback.** Leerer Text und Whitespace-only-Text blenden
   die Bubble aus und setzen den internen Zustand auf `Kind.NONE` —
   kein Crash, keine halbsichtbare Leertafel.
-- **Kein TTS-Sync, kein Speech-Lebenszyklus.** TTS-Start/-Ende bleibt
-  bewusst einer späteren Phase vorbehalten. Dieser MVP hört nur auf
-  `heard`/`response` (und räumt auf `ipc_disconnected` sofort auf).
+- **Weicher TTS-Sync seit PR 14.** Der Kernpfad bleibt
+  `heard`/`response` + `ipc_disconnected`. Zusätzlich verlängert ein
+  eintreffendes `speaking_started` den Anzeige-Timer einmalig, wenn
+  aktuell eine `response`-Bubble sichtbar ist (siehe §8.4a). Kein
+  Phonem-/Lip-Sync, kein Audio-Stream-Pfad.
 - **Keine Stage-C-/Appearance-Kopplung.** Die Bubble kennt weder
   Identity noch Theme; die Presence-Personalisierung aus §8b bleibt
   davon unberührt.
@@ -667,8 +673,8 @@ kurze Standzeit schnell wieder still.
 
 **Scope-Grenzen (nicht Teil dieses MVPs).** Kein Chat-Transcript,
 kein Markdown-/BBCode-Renderer, keine Sprecherrollen-Konversation,
-keine Dateianhänge, keine Bubble-Actions, keine TTS-Sync-Animation,
-keine Audio-Lebenszyklus-Events, keine Presence-Mode-abhängige
+keine Dateianhänge, keine Bubble-Actions, keine Phonem-/Lip-Sync-
+Animation, keine Audio-Timeline, keine Presence-Mode-abhängige
 Zweitgröße. Das Event-Log (`RichTextLabel` im `DockPanel`) bleibt
 unverändert als Entwickler-/Debug-Anzeige.
 
@@ -680,6 +686,99 @@ Controllers (`set_utterance`, `clear_utterance`, leere und
 whitespace-only Eingaben, Response-ersetzt-Heard, wiederholte Updates
 ohne Tween- oder Timer-Leichen, Long-Text-Ellipsis). Harness-Case:
 `scripts/run_overlay_verification.sh utterance-bubble-smoke`.
+
+### 8.4a Speech-Sync via TTS-Lebenszyklus-Events (PR 14, Ist-Zustand)
+
+Konservativer MVP für den in der ROADMAP offenen Punkt
+„Speech-Sync via TTS-Lebenszyklus-Events". Der Core meldet ab PR 14
+`speaking_started` / `speaking_ended` (siehe
+[`api.md` §2.11](./api.md)); die UI spiegelt diese Events an zwei
+Stellen, ohne die bestehende State-Maschine umzubauen.
+
+**Datei-Layout (Diff zu §8.4).**
+
+```text
+ui/autoload/
+├── event_bus.gd        # zwei neue Signale: speaking_started_received /
+│                       # speaking_ended_received
+└── ipc_client.gd       # Routing `speaking_started` / `speaking_ended`
+                        # → EventBus
+
+ui/scripts/avatar/
+└── avatar_controller.gd     # _on_speaking_started / _on_speaking_ended;
+                             # neue TALK_SETTLE_SECONDS-Konstante
+
+ui/scripts/utterance/
+└── utterance_bubble_controller.gd  # weicher Sync: speaking_started
+                                    # verlängert den Anzeige-Timer einer
+                                    # aktiven `response`-Bubble
+```
+
+**Rolle des Avatars.** Der Avatar-Controller behandelt den Core-Pfad
+jetzt als Taktgeber. Bisher war `response` → `TALKING` + fester
+`TALK_HOLD_SECONDS`-Timer (1.8 s) der einzige Signalweg. PR 14 schaltet
+zwei additive Übergänge daneben:
+
+- `speaking_started` → `TALKING` und `_hold_timer.stop()`. Der
+  Fallback-Timer läuft nicht mehr; der Avatar bleibt talking, solange
+  der Core spricht. Wichtig: aus `ACTING` oder `ERROR` wird **nicht**
+  hart in `TALKING` gewechselt — späte/verzögerte Lifecycle-Events
+  überschreiben keinen laufenden Desktop-/Fehler-Cue.
+- `speaking_ended` mit `ok=true` → kurzes `TALK_SETTLE_SECONDS`-Hold
+  (0.35 s) und anschließend der normale Zurückfall auf `IDLE` bzw.
+  `DISCONNECTED`. Mit `ok=false` geht der Controller über den
+  bestehenden `ERROR`-Pfad (`ERROR_HOLD_SECONDS`).
+
+Damit bleibt auch der Fallback tragfähig: schickt der Core keine
+Lifecycle-Events (ältere Version, TTS-Kette leer), greift weiterhin
+der alte `TALK_HOLD_SECONDS`-Pfad aus `_on_response`. Dieser Pfad
+wird bewusst **nicht** entfernt — er ist die Resilienz gegen fehlende
+Events (z. B. Verbindungsabbruch zwischen `started` und `ended`).
+
+**Rolle der Utterance-Bubble.** Ein einziger weicher Sync-Hook:
+kommt `speaking_started`, während gerade eine `response`-Bubble
+sichtbar ist, wird der Hide-Timer einmal zurückgesetzt
+(`DISPLAY_SECONDS_RESPONSE`). Der Nutzer liest die Antwort also
+nicht weg, während Smolit sie noch spricht. Für `heard`-Bubbles und
+einen leeren Zustand ist der Handler ein No-op —
+`heard`-Bubbles markieren den STT-Moment, nicht die Sprechdauer, und
+ein leerer Zustand darf nicht durch vagabundierende Events sichtbar
+werden. `speaking_ended` ist auf dem Bubble-Pfad bewusst ein No-op:
+der normale Display-Timer läuft zu Ende, damit das Sprechende
+nicht hart abgeschnitten wird.
+
+**Bindende Grenzen (konservative Schnittwahl).**
+
+- **Kein Streaming-Audio, kein Lip-Sync.** Die Events sagen „jetzt
+  läuft TTS" bzw. „TTS ist fertig" — nichts über den Audio-Puffer.
+- **Keine neue globale State-Maschine.** Avatar-States und
+  Bubble-Kinds bleiben identisch; die Lifecycle-Events sind nur
+  zusätzliche Trigger.
+- **Keine Stage-C-/Appearance-/Avatar-Asset-Arbeit.** Der Polish aus
+  §8b.10 ist unverändert; der Sync füttert nur den bestehenden
+  State-Pfad.
+- **Keine Approval-/Interaction-/Desktop-Automation-Änderung.** PR 14
+  berührt weder die Action-Event-Klammer noch den Approval-Flow.
+- **Core bleibt Source of Truth.** Die UI entscheidet nicht, „ich tue
+  mal so, als werde gesprochen". Wer die Events nicht sieht, zeigt
+  keinen erzwungenen Talking-Avatar — der Fallback-Pfad greift
+  konservativ.
+
+**Verifikation.** Core-seitig prüfen die neuen Tests in
+`core/src/ipc/server.rs` (vier `speak_text_*` / `auto_speak_*`-Tests)
+und `core/src/ipc/protocol.rs` (Encoder-Roundtrips) das
+Pairing-/Payload-Verhalten. UI-seitig prüft
+`scripts/speech_sync_smoke.gd` (19 Assertions, alle PASS) die
+EventBus-Signale, das `IpcClient`-Routing, die
+Avatar-Controller-Handler auf Quelltext-Ebene sowie den weichen
+Bubble-Sync auf Scene-Ebene. Harness-Case:
+`scripts/run_overlay_verification.sh speech-sync-smoke`.
+
+**Offene Restschuld.** Phonem-/Lip-Sync, Audio-Timeline und feinere
+Ausdrucksstufen (`curious`, `focused`, …) sind weiterhin in Phase C
+(§7) geparkt. Der jetzt gelandete Lifecycle ist ausdrücklich das
+MVP — keine Audio-Pipeline, keine halbe Lip-Sync-Engine, kein
+globales Speech-Event-Register.
 
 ### 8.5 Visual Action Mode (UI-Staging MVP, Phase 3.3, Ist-Zustand)
 
@@ -2485,8 +2584,11 @@ Einordnung und Testfälle:
 - **Natives Overlay** (Folge zu 3.3) — Always-on-top, Transparenz,
   Click-through, Snap-to-Edge. Presence-Logik ist bereits in-window
   fertig; das Desktop-Overlay hängt nur noch am Fenstermodus.
-- **TTS-Lebenszyklus-Events** — aktuell gibt es kein `speaking_started` /
-  `speaking_ended` im Protokoll; Animation-Sync hängt davon ab.
+- **Tieferer Speech-Sync** — der MVP-Lifecycle `speaking_started` /
+  `speaking_ended` ist in PR 14 gelandet (siehe §8.4a). Offen bleiben
+  Phonem-/Lip-Sync, Audio-Timeline und feinere Ausdrucksstufen
+  (Phase C); der heutige Pfad transportiert nur „TTS läuft / TTS ist
+  fertig".
 - **Emotion-Feld** — heute transportiert das Protokoll keine Emotion in
   `response`-Payloads. Sobald ABrain Emotionen liefert, wird das Feld in
   [`docs/api.md`](./api.md) additiv ergänzt.

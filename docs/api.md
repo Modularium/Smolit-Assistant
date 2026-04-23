@@ -182,6 +182,8 @@ Beispiele:
 | `accessibility_probe_result`     | `payload: AccessibilityProbe`     | Ergebnis einer `interaction_probe_accessibility`-Anfrage (2.8).    |
 | `accessibility_discovery_result` | `payload: AccessibilityDiscovery` | Ergebnis einer `interaction_discover_accessibility`-Anfrage (2.8). |
 | `settings_probe_result`          | `payload: SettingsProbeResult`    | Antwort auf `settings_probe_{llamafile,stt,tts}` (2.10).           |
+| `speaking_started`               | `payload: SpeakingStarted`        | PR 14 — TTS-Lebenszyklus, Start. Siehe 2.11.                       |
+| `speaking_ended`                 | `payload: SpeakingEnded`          | PR 14 — TTS-Lebenszyklus, Ende. Siehe 2.11.                        |
 
 Zusätzlich emittiert der Core **Action Events** (Action Event Model v1).
 Sie sind additiv; ältere UIs, die sie nicht kennen, dürfen sie
@@ -1572,6 +1574,89 @@ entsteht analog zum Cloud-HTTP-Secret-Pfad eine eigene
   zusätzlicher `type`-Wert im bestehenden `OutgoingMessage`-Enum,
   nicht ein paralleler Kanal.
 
+### 2.11 TTS-Lebenszyklus (PR 14)
+
+Der Core meldet einen kleinen, ehrlichen TTS-Lebenszyklus: genau dann,
+wenn ein TTS-Provider tatsächlich anläuft, kommen zwei additive
+Envelopes auf die Leitung. Ist die Kette nicht einsatzbereit, wird
+**gar nichts** emittiert — die UI darf also aus „speaking_started"
+immer ableiten: „jetzt läuft wirklich TTS".
+
+```json
+{"type":"speaking_started","payload":{"source":"speak_text","provider":"command","action_id":"act_000012"}}
+{"type":"speaking_ended","payload":{"source":"speak_text","provider":"command","ok":true,"action_id":"act_000012"}}
+
+{"type":"speaking_started","payload":{"source":"auto_speak","provider":"command"}}
+{"type":"speaking_ended","payload":{"source":"auto_speak","provider":"command","ok":false,"error_class":"exit_nonzero"}}
+```
+
+Payload-Felder (identisch in `started` / `ended`, `ended` ergänzt
+`ok` / `error_class`):
+
+- `source` (string, Pflicht) — `"speak_text"` (IPC-Nachricht
+  `speak_text`) oder `"auto_speak"` (stille Wiedergabe einer
+  `response`, wenn `auto_speak=true` ist). Die UI darf darauf
+  unterschiedlich reagieren, muss aber nicht.
+- `provider` (string, Pflicht) — Kind-Name des tatsächlich
+  angesprochenen TTS-Providers. In `speaking_started` ist das der
+  primäre Kind-Name aus der TTS-Kette; in `speaking_ended` der
+  tatsächlich aktive Kind-Name (bei Fallback zeigt das den
+  sprechenden Provider). Heute nur `"command"`. **Kein** Binary-Pfad,
+  **kein** Command-String — nur der kuratierte Kind-Name aus
+  [`crate::providers::tts::KNOWN_TTS_KINDS`](../core/src/providers/tts.rs).
+- `action_id` (string, optional) — gesetzt, wenn der Lifecycle aus
+  einem Action-Event-Flow stammt (`speak_text` → Action-Kind
+  `speech`). Beim `auto_speak`-Pfad bleibt das Feld weg, weil der
+  Event dort **nach** der `action_completed`-Klammer der
+  auslösenden Query kommt und nicht zu ihr gehört.
+- `ok` (bool, `speaking_ended` Pflicht) — `true` bei erfolgreichem
+  Sprechen (auch über Fallback), `false` bei Fehler.
+- `error_class` (string, optional, nur bei `ok=false`) — kuratierte
+  Klasse aus demselben Vokabular wie
+  [`SettingsProbeResult`](#210-settings-schreib--probe-pfad-ist-zustand-pr-5--pr-7--pr-8--pr-9--pr-10--pr-11--pr-12--pr-13):
+  `empty_chain` / `timeout` / `process_missing` / `stdin_write_failed`
+  / `exit_nonzero` / `not_configured` / `disabled` / `unknown`.
+
+Ordnungs- und Pairing-Regeln:
+
+- **Pairing.** Zu jedem `speaking_started` kommt genau ein
+  `speaking_ended`. Der Core emittiert nie zwei aufeinander folgende
+  `speaking_started` ohne dazwischen liegendes `speaking_ended`.
+- **`speak_text`-Flow.** Die Events sind Teil der Action-Klammer:
+  `action_planned` / `action_started` / `action_step` →
+  `speaking_started` → `speaking_ended` → `action_completed`
+  (oder `action_failed` bei `ok=false`). Alle Frames fließen auf
+  derselben Wire-Reihenfolge zurück, die der Handler aufgebaut hat.
+- **`auto_speak`-Flow.** Die Events erscheinen **nach** der
+  vollständigen Action-Klammer der auslösenden Query:
+  `response` → `action_completed` → `speaking_started` →
+  `speaking_ended`. Sie gehören nicht zur Query-Action — deshalb auch
+  kein `action_id`.
+- **Kein Event, wenn kein TTS läuft.** Ist die Kette leer /
+  `enabled=false` / `command` fehlt, bleibt der Pfad still. Der
+  bestehende `error`-Envelope („TTS is not available") für
+  `speak_text` bleibt unverändert; `auto_speak` schweigt wie bisher.
+- **Abbruch-/Fehlerfall.** Scheitert die Kette (z. B.
+  `exit_nonzero`), kommt trotzdem genau ein `speaking_ended` mit
+  `ok=false` — ein „hängender" TTS-Zustand auf der UI-Seite ist
+  strukturell ausgeschlossen.
+
+Bewusste Nicht-Ziele:
+
+- **Kein Audio-Streaming.** Die Events sagen „Smolit spricht jetzt"
+  bzw. „Smolit ist fertig" — nicht „wo genau in der Phrase wir sind".
+- **Kein Phonem-/Lip-Sync-Kanal.** Diese Ebene ist weiterhin dem
+  Avatar-Asset-Pfad vorbehalten (nicht Teil von PR 14).
+- **Kein Text im Event.** Der gesprochene Text wird nicht dupliziert
+  — er kam bereits als `response` oder als Argument zu `speak_text`
+  und bleibt dort die Wahrheit.
+- **Keine Audio-Bytes, keine Timeline.** Die UI renderiert „talking"
+  als State-Wechsel, nicht als Synchronisation gegen einen Audio-
+  Puffer.
+
+Für die UI-Projektion (Avatar, Utterance-Bubble) siehe
+[`ui_architecture.md` §8.4a](./ui_architecture.md).
+
 ---
 
 ## 3. Core ↔ ABrain: CLI-Adapter (Ist-Zustand)
@@ -1780,8 +1865,6 @@ Die folgenden Erweiterungen sind vorgesehen, aber **noch nicht
 implementiert**; sie kommen additiv über neue `type`-Werte oder
 optionale Felder:
 
-- `speaking_started` / `speaking_ended` — TTS-Lebenszyklus für
-  Animations-Sync in der UI.
 - `response.payload.emotion` — optionales Feld, sobald ABrain Emotion
   liefert.
 - `tool_call` / `tool_result` — wenn Tool-Orchestrierung einzieht.
