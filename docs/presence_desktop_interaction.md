@@ -285,9 +285,16 @@ Wichtig — **ohne jede Ausnahme**:
   keine Trust-Entscheidungen, keine Approval-Flows, keine
   Permission-Grenzen.
 
-Status: **vollständig Ziel-Zustand**, heute nicht implementiert.
-Default bleibt Smolit Salamander; Alternativen kommen additiv
-hinzu und ersetzen den Default nicht.
+Status: **Phase A implementiert, Phase B als kuratierter Spike
+aktiv, Rest Ziel-Zustand.** Default bleibt Smolit Salamander;
+Alternativen kommen additiv hinzu und ersetzen den Default nicht.
+
+Der aktuelle Phase-B-Spike (siehe
+[`ui_architecture.md` §8b.8](./ui_architecture.md)) ergänzt genau
+zwei zusätzliche, fest kuratierte Identity-IDs (`robot_head`,
+`orb`) — rein prozedural gerendert, ohne Asset-Pipeline, ohne
+User-Uploads. Unbekannte Eingaben fallen in allen Schichten auf
+Smolit zurück.
 
 #### Klarstellung: Avatar ≠ Assistentenlogik
 

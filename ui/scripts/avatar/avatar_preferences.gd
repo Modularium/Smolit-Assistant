@@ -35,12 +35,18 @@ extends RefCounted
 class_name SmolitAvatarPreferences
 
 const _AppearanceRef := preload("res://scripts/avatar/avatar_appearance.gd")
+const _IdentityRef := preload("res://scripts/avatar/avatar_identity.gd")
 
 const DEFAULT_PATH: String = "user://smolit_ui.cfg"
 const SECTION: String = "avatar_appearance"
 const KEY_THEME: String = "theme"
 const KEY_PROFILE: String = "profile"
 const KEY_INTENSITY: String = "intensity"
+## Phase-B-Feld: kuratierte Identity-Auswahl
+## (`smolit_salamander` / `robot_head` / `orb`). Unbekannte Strings
+## werden beim Laden verworfen; der Aufrufer fällt dann auf Env /
+## Default zurück.
+const KEY_IDENTITY: String = "identity"
 
 
 ## Lädt die gespeicherten Appearance-Preferences. Gibt ein (ggf.
@@ -107,15 +113,35 @@ static func load_preferences(path: String = DEFAULT_PATH) -> Dictionary:
 		else:
 			push_warning("avatar_preferences: intensity is not a number in %s — ignored." % path)
 
+	if cfg.has_section_key(SECTION, KEY_IDENTITY):
+		var raw_id: Variant = cfg.get_value(SECTION, KEY_IDENTITY)
+		if typeof(raw_id) == TYPE_STRING:
+			var as_str_id := String(raw_id)
+			if _is_known_identity_name(as_str_id):
+				result[KEY_IDENTITY] = _IdentityRef.identity_from_string(as_str_id)
+			else:
+				push_warning("avatar_preferences: unknown identity '%s' in %s — ignored." % [as_str_id, path])
+		else:
+			push_warning("avatar_preferences: identity is not a string in %s — ignored." % path)
+
 	return result
 
 
-## Schreibt theme / profile / intensity in den Appearance-Abschnitt.
-## Bestehende andere Sektionen (`[avatar]` mit x/y) bleiben erhalten,
-## weil wir die Datei vor dem Schreiben laden. Gibt den `ConfigFile.save`-
-## Statuscode zurück (OK bei Erfolg).
+## Schreibt theme / profile / intensity / identity in den
+## Appearance-Abschnitt. Bestehende andere Sektionen (`[avatar]` mit
+## x/y) bleiben erhalten, weil wir die Datei vor dem Schreiben laden.
+## Gibt den `ConfigFile.save`-Statuscode zurück (OK bei Erfolg).
+##
+## Der `identity`-Parameter ist bewusst positional und am Ende, damit
+## bestehende Aufrufer ohne Explicit-Identity weiter funktionieren
+## (Default = Smolit). Für Phase-A-Clients ist der Call damit
+## kompatibel; Phase-B-Clients reichen die aktuelle Identity durch.
 static func save_preferences(
-	theme: int, profile: int, intensity: float, path: String = DEFAULT_PATH,
+	theme: int,
+	profile: int,
+	intensity: float,
+	identity: int = _IdentityRef.DEFAULT,
+	path: String = DEFAULT_PATH,
 ) -> int:
 	var cfg := ConfigFile.new()
 	# Vorhandene Datei laden, damit `[avatar] x=…/y=…` nicht verloren
@@ -131,10 +157,14 @@ static func save_preferences(
 	var clean_intensity := clampf(
 		intensity, _AppearanceRef.INTENSITY_MIN, _AppearanceRef.INTENSITY_MAX,
 	)
+	# Unbekannte Identity-IDs fallen auf Smolit zurück — wir geben
+	# sie weder weiter noch speichern sie.
+	var clean_identity: int = identity if _IdentityRef.is_known(identity) else _IdentityRef.DEFAULT
 
 	cfg.set_value(SECTION, KEY_THEME, _AppearanceRef.theme_name(clean_theme))
 	cfg.set_value(SECTION, KEY_PROFILE, _AppearanceRef.profile_name(clean_profile))
 	cfg.set_value(SECTION, KEY_INTENSITY, clean_intensity)
+	cfg.set_value(SECTION, KEY_IDENTITY, _IdentityRef.identity_name(clean_identity))
 
 	return cfg.save(path)
 
@@ -170,3 +200,15 @@ static func _is_known_profile_name(value: String) -> bool:
 			return true
 		_:
 			return false
+
+
+static func _is_known_identity_name(value: String) -> bool:
+	# Parser im Identity-Modul akzeptiert mehrere Aliasse pro Figur,
+	# aber als gespeicherter Wert sollen nur die kanonischen Namen
+	# landen (Smolit / Robot-Head / Orb). Unbekannte / aliasfreie
+	# Strings schicken wir deshalb durch denselben Parser und
+	# vergleichen, ob das Ergebnis den kanonischen Namen zurückgibt —
+	# das verhindert, dass eine alte Alias-Datei unbemerkt als
+	# Referenz durchschlägt.
+	var parsed: int = _IdentityRef.identity_from_string(value)
+	return _IdentityRef.identity_name(parsed).to_lower() == value.strip_edges().to_lower()

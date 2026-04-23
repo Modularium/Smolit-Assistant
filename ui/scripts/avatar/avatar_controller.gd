@@ -36,12 +36,13 @@ extends Control
 const AvatarStateRef := preload("res://scripts/avatar/avatar_state.gd")
 const AvatarAppearanceRef := preload("res://scripts/avatar/avatar_appearance.gd")
 const AvatarPreferencesRef := preload("res://scripts/avatar/avatar_preferences.gd")
+const AvatarIdentityRef := preload("res://scripts/avatar/avatar_identity.gd")
 
 signal clicked
 signal toggle_dock
 signal moved(position: Vector2)
 
-## Optionale Env-Variablen für Avatar Appearance Phase A. Sie haben
+## Optionale Env-Variablen für Avatar Appearance Phase A/B. Sie haben
 ## die höchste Priorität — wer sie setzt, übersteuert gespeicherte
 ## Preferences und harten Default. Unbekannte / leere Werte werden
 ## behandelt, als wären sie nicht gesetzt (der nächste Schritt in der
@@ -49,6 +50,9 @@ signal moved(position: Vector2)
 const ENV_APPEARANCE_THEME: String = "SMOLIT_AVATAR_THEME"
 const ENV_APPEARANCE_PROFILE: String = "SMOLIT_AVATAR_PROFILE"
 const ENV_APPEARANCE_INTENSITY: String = "SMOLIT_AVATAR_INTENSITY"
+## Phase B: kuratierte Identity-Auswahl. Ohne Env bleibt Smolit
+## Default (oder der gespeicherte Preference-Wert, falls vorhanden).
+const ENV_APPEARANCE_IDENTITY: String = "SMOLIT_AVATAR_IDENTITY"
 
 const TALK_HOLD_SECONDS: float = 1.8
 const ERROR_HOLD_SECONDS: float = 1.2
@@ -110,6 +114,12 @@ const ACTING_TINT_BY_TARGET: Dictionary = {
 }
 
 @onready var _body: TextureRect = $Body
+## Prozeduraler Zweitrenderer für kuratierte Phase-B-Identities
+## (Robot-Head, Orb). Bleibt für Smolit unsichtbar und tut gar nichts.
+## Wenn aktiv, spiegelt der Controller jeden Frame `_body.modulate`,
+## `_body.scale` und `_body.rotation` auf diesen Node — so bleibt die
+## bestehende Tween-Logik byte-identisch zu Phase A.
+@onready var _identity_shape: Control = $IdentityShape
 
 var _state: int = AvatarStateRef.State.DISCONNECTED
 var _thinking_tween: Tween = null       # _body.modulate:a loop (keeps MVP feel)
@@ -127,16 +137,24 @@ var _dragging: bool = false
 var _drag_offset: Vector2 = Vector2.ZERO
 var _press_global: Vector2 = Vector2.ZERO
 
-## Appearance-Konfiguration (Phase A, Smolit Salamander only). Das
+## Appearance-Konfiguration (Phase A + Phase-B-Identity-Spike). Das
 ## Dict ist ein reines UI-Render-Modul — Identity, Theme, Behavior
-## Profile und Overrides. Wird in `_ready()` aus den Env-Variablen
-## gebaut und danach nicht mehr verändert. Identitätsgarantie:
-## DEFAULT + CALM + Unity-Overrides reproduzieren das vor-PR-Verhalten.
+## Profile und Overrides. Wird in `_ready()` aus Env/Preferences
+## gebaut und kann per `set_appearance()` zur Laufzeit ersetzt werden.
+## Identitätsgarantie gilt weiterhin: Default-Smolit + DEFAULT +
+## CALM + Unity-Overrides reproduziert das vor-PR-Verhalten.
 var _appearance: Dictionary = AvatarAppearanceRef.new_appearance()
+
+## Aufgelöste Identity-ID aus `_appearance["identity"]`. Wird im
+## `_ready()` einmalig berechnet und nach jedem `set_appearance`
+## aktualisiert. Bestimmt, welcher Visual-Pfad aktiv ist
+## (Smolit-TextureRect vs. prozeduraler Identity-Shape).
+var _identity_id: int = AvatarIdentityRef.DEFAULT
 
 
 func _ready() -> void:
 	_load_appearance()
+	_apply_identity_visual_config()
 	# Root-Scale einmalig auf den Appearance-Scale setzen. Hover-Pops
 	# und State-Pulse bauen darauf auf (siehe `_apply_hover_visual`
 	# und `_start_breath_tween`).
@@ -535,6 +553,7 @@ func save_current_preferences() -> int:
 		int(_appearance.get("theme", AvatarAppearanceRef.DEFAULT_THEME)),
 		int(_appearance.get("profile", AvatarAppearanceRef.DEFAULT_PROFILE)),
 		float(overrides.get("intensity", 1.0)),
+		_identity_id,
 	)
 
 
@@ -555,20 +574,29 @@ func get_appearance() -> Dictionary:
 ## Animationen sofort sichtbar werden. Kein Speichern, keine
 ## Persistenz — die Änderung gilt nur für die laufende Session.
 ##
+## Phase B erlaubt explizit einen Identity-Wechsel innerhalb der
+## kuratierten Liste (Smolit / Robot-Head / Orb). Unbekannte
+## `identity`-Einträge fallen still auf Smolit zurück — damit eine
+## kaputte Caller-Konfiguration die Figur nicht unsichtbar machen
+## kann.
+##
 ## Nicht-Ziele:
 ##   * Keine Core-/IPC-Kommunikation.
-##   * Keine Identity-Änderung — `new_appearance["identity"]` muss
-##     weiterhin `smolit_salamander` sein; Phase A bleibt brand-safe.
+##   * Keine User-supplied Identities — nur Einträge aus
+##     `avatar_identity.gd` sind gültig.
 ##   * Keine Auswirkung auf die Avatar-State-Maschine, auf Events,
 ##     auf Presence oder auf Approval/Action-Banner.
 func set_appearance(new_appearance: Dictionary) -> void:
 	if new_appearance.is_empty():
 		return
-	# Identity ist in Phase A implizit fix. Falls Aufrufer ein
-	# abweichendes Feld mitschickt, ignorieren wir es still — keine
-	# alternative Figur im MVP.
-	new_appearance["identity"] = "smolit_salamander"
+	# Identity durch den kuratierten Parser schicken: unbekannte oder
+	# fehlende Werte werden sauber auf Smolit geklemmt.
+	var requested: String = String(new_appearance.get("identity", "smolit_salamander"))
+	var resolved_id: int = AvatarIdentityRef.identity_from_string(requested)
+	new_appearance["identity"] = AvatarIdentityRef.identity_name(resolved_id)
 	_appearance = new_appearance
+	_identity_id = resolved_id
+	_apply_identity_visual_config()
 	# Root-Scale sofort an den Override anpassen (Hover-Tween bleibt
 	# relativer Puff auf dem neuen Ausgangspunkt).
 	scale = AvatarAppearanceRef.resolved_scale(_appearance, BASE_SCALE)
@@ -593,6 +621,7 @@ func _load_appearance() -> void:
 	var theme_env := OS.get_environment(ENV_APPEARANCE_THEME).strip_edges()
 	var profile_env := OS.get_environment(ENV_APPEARANCE_PROFILE).strip_edges()
 	var intensity_env := OS.get_environment(ENV_APPEARANCE_INTENSITY).strip_edges()
+	var identity_env := OS.get_environment(ENV_APPEARANCE_IDENTITY).strip_edges()
 
 	var prefs: Dictionary = AvatarPreferencesRef.load_preferences()
 
@@ -629,19 +658,34 @@ func _load_appearance() -> void:
 		intensity = float(prefs[AvatarPreferencesRef.KEY_INTENSITY])
 		intensity_source = "prefs"
 
+	# Identity (Phase B) — gleiche Prioritätskette. Unbekannte Werte
+	# fallen im Parser / `load_preferences` still auf Smolit zurück.
+	var identity_id: int = AvatarIdentityRef.DEFAULT
+	var identity_source := "default"
+	if identity_env != "":
+		identity_id = AvatarIdentityRef.identity_from_string(identity_env)
+		identity_source = "env"
+	elif prefs.has(AvatarPreferencesRef.KEY_IDENTITY):
+		identity_id = int(prefs[AvatarPreferencesRef.KEY_IDENTITY])
+		identity_source = "prefs"
+
 	_appearance = AvatarAppearanceRef.make_appearance(
 		theme, profile, Color(1, 1, 1, 1), intensity, 1.0,
 	)
+	_appearance["identity"] = AvatarIdentityRef.identity_name(identity_id)
+	_identity_id = identity_id
 
 	# Nur loggen, wenn irgendetwas aktiv gesetzt wurde — der pure
 	# Default-Start bleibt byte-kompatibel stumm.
 	var touched: bool = theme_source != "default" \
 		or profile_source != "default" \
-		or intensity_source != "default"
+		or intensity_source != "default" \
+		or identity_source != "default"
 	if touched:
 		var overrides: Dictionary = _appearance["overrides"]
-		print("[avatar-appearance] identity=%s theme=%s(%s) profile=%s(%s) intensity=%.2f(%s) scale=%.2f" % [
-			str(_appearance.get("identity", "smolit_salamander")),
+		print("[avatar-appearance] identity=%s(%s) theme=%s(%s) profile=%s(%s) intensity=%.2f(%s) scale=%.2f" % [
+			AvatarIdentityRef.identity_name(_identity_id),
+			identity_source,
 			AvatarAppearanceRef.theme_name(int(_appearance["theme"])),
 			theme_source,
 			AvatarAppearanceRef.profile_name(int(_appearance["profile"])),
@@ -650,3 +694,45 @@ func _load_appearance() -> void:
 			intensity_source,
 			float(overrides["scale"]),
 		])
+
+
+## Setzt Sichtbarkeit und Content der beiden Visual-Pfade entsprechend
+## der aktuellen `_identity_id`:
+##
+##   * Smolit → `_body` sichtbar (TextureRect mit Circle-Mask-Shader),
+##     `_identity_shape` unsichtbar. Verhalten byte-identisch zu Phase A.
+##   * Kuratierte Alternative → `_body` unsichtbar (Tween-Targets und
+##     `_body.modulate:a` laufen trotzdem, aber rendern nichts),
+##     `_identity_shape` sichtbar und zeichnet die Grundform. Der
+##     `_process`-Hook spiegelt jeden Frame die Transform-/Modulate-
+##     Werte vom `_body` auf den Shape, damit alle State-Tweens ohne
+##     Umbau weiter greifen.
+func _apply_identity_visual_config() -> void:
+	if _body == null or _identity_shape == null:
+		return
+	var is_smolit := AvatarIdentityRef.is_smolit(_identity_id)
+	_body.visible = is_smolit
+	_identity_shape.visible = not is_smolit
+	if _identity_shape.has_method("set_identity"):
+		_identity_shape.call("set_identity", _identity_id)
+	if is_smolit:
+		# Sicherheitsreset — für den Fall, dass die Identity vorher eine
+		# kuratierte Alternative war, soll Smolit nicht mit verschleppten
+		# Scale/Rotate-Werten zurückkommen.
+		_identity_shape.scale = Vector2.ONE
+		_identity_shape.rotation = 0.0
+		_identity_shape.modulate = NORMAL_MODULATE
+
+
+func _process(_delta: float) -> void:
+	# Mirror-Only-Pfad: wenn eine kuratierte Identity aktiv ist,
+	# spiegelt dieser Tick `_body`'s Transform-/Modulate-Werte auf den
+	# Identity-Shape. Für Smolit (`_body` sichtbar, `_identity_shape`
+	# hidden) macht der Block nichts — insbesondere greift das
+	# `visible`-Gate, damit wir keine unnötigen Writes auf ein
+	# Node pro Frame erzeugen.
+	if _identity_shape == null or not _identity_shape.visible:
+		return
+	_identity_shape.scale = _body.scale
+	_identity_shape.rotation = _body.rotation
+	_identity_shape.modulate = _body.modulate

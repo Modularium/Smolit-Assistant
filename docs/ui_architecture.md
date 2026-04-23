@@ -657,7 +657,7 @@ laufenden Core die sinnvollste End-to-End-Verifikation.
 
 ---
 
-## 8b. Avatar Appearance System (Phase A Ist, sonst Ziel-Zustand)
+## 8b. Avatar Appearance System (Phase A Ist, Phase B Spike, sonst Ziel-Zustand)
 
 Dieser Abschnitt beschreibt die geplante Erweiterung des Avatar-
 Renderings um ein strukturiertes **Appearance-System** als rein
@@ -918,6 +918,117 @@ Theme-Effekten ab (insgesamt 32 Assertions, alle PASS unter
   Input oder das Overlay-/Click-through-/AOT-/Runtime-Report-
   System.
 
+### 8b.8 Phase B (kuratierter Spike, Ist-Zustand)
+
+Phase B öffnet den Identity-Punkt aus §8b.2 ausdrücklich **klein und
+kuratiert**: genau drei Identity-IDs sind Teil des MVPs —
+`smolit_salamander` (Default), `robot_head` und `orb`. Das ist kein
+Template-Marktplatz und kein User-Upload-Pfad; Stufe C aus §8b.4
+bleibt Ziel-Zustand.
+
+**Datei-Layout (erweitert):**
+
+```text
+ui/scripts/avatar/
+├── avatar_state.gd              # (unverändert)
+├── avatar_controller.gd         # Env > Prefs > Default, Identity-Switch
+├── avatar_appearance.gd         # Themes / Profile / Overrides
+├── avatar_preferences.gd        # lokale UI-Persistenz (inkl. identity)
+├── avatar_identity.gd           # NEU: kuratierter Identity-Katalog
+└── avatar_identity_visual.gd    # NEU: prozeduraler Zweitrenderer
+
+ui/scenes/avatar/
+└── avatar_root.tscn             # + IdentityShape (Sibling zu Body)
+```
+
+**Render-Strategie.**
+
+- Smolit bleibt **Render-Kind `TEXTURE`**: `Body: TextureRect` mit
+  `smolit_idle.png` / `smolit_active.png` und dem Circle-Mask-Shader
+  aus `avatar_root.tscn`. Genau dieses Verhalten ist Phase A und
+  bleibt in Phase B byte-identisch für den Default.
+- `robot_head` und `orb` sind **Render-Kind `PROCEDURAL`**. Der
+  Avatar-Controller versteckt dann `Body` und zeigt stattdessen
+  `IdentityShape: Control` (Script `avatar_identity_visual.gd`),
+  die ihre Grundform per `_draw()` rendert:
+  - `robot_head` → Rounded-Rect-Körper + zwei Augen + Antennen-Dot,
+  - `orb` → drei konzentrische Kreise (Halo / Körper / Highlight).
+  Keine Binärassets, keine Import-Pipeline.
+
+**Zustands-Ausdruck bei kuratierten Alternativen.** Um die
+bestehende Tween-Logik nicht zu verzweigen, zielt sie weiterhin auf
+`_body`. Der Controller spiegelt pro Frame im `_process`-Tick die
+drei relevanten Felder (`scale`, `rotation`, `modulate`) auf
+`IdentityShape`. Dadurch:
+
+- State-Tints (NORMAL / THINKING / DISCONNECTED / ERROR /
+  ACTING-by-target) greifen genauso wie bei Smolit — nur dass sie
+  jetzt auf der prozeduralen Form landen.
+- Idle/Thinking/Acting/Talking-Breath und Error-Startle-Pulse
+  laufen weiter auf `_body.scale` und werden gespiegelt.
+- Curious-Wiggle (Idle-Rotations-Cue) läuft weiter und wird
+  gespiegelt.
+- Thinking-Alpha-Breath (`modulate:a`) läuft weiter und wird
+  gespiegelt.
+
+Der einzige Ausdruckspfad, den kuratierte Alternativen **nicht**
+nutzen, ist der `IDLE_TEXTURE` ↔ `ACTIVE_TEXTURE`-Swap; das
+Capability-Flag `supports_texture_swap` im Identity-Katalog
+dokumentiert das ehrlich. In der Praxis ist das unkritisch, weil
+`_body.texture =` auf ein verstecktes TextureRect geschrieben wird
+und die Alternativen keinen eigenen Frame-Wechsel brauchen — ihr
+State-Feedback kommt vollständig aus Tint + Pulse.
+
+**Eingabepfade für die Identity** (gleiche Prioritätskette wie die
+Phase-A-Felder):
+
+1. `SMOLIT_AVATAR_IDENTITY` — `smolit_salamander` / `robot_head` /
+   `orb`, plus Convenience-Aliasse (`smolit`, `salamander`,
+   `robot`). Unbekannte Werte → Smolit.
+2. Gespeicherte UI-Preferences (`user://smolit_ui.cfg`, Key
+   `identity` in Sektion `[avatar_appearance]`). Es werden nur
+   kanonische Namen als gültig akzeptiert; Aliasse in der
+   Config-Datei fallen durch (bewusst, siehe `avatar_preferences.gd`).
+3. Harter Default: Smolit Salamander.
+
+Ein gesetzter Identity-Wert aktiviert die Diagnose-Log-Zeile des
+Appearance-Controllers genauso wie Theme/Profile/Intensity — der
+Default-Lauf bleibt stumm und byte-kompatibel.
+
+**Fallback-Garantien.**
+
+- Unbekannter Identity-String → Smolit. Nie auf Robot oder Orb.
+- Unbekannter Identity-Int (z. B. zukünftiger Enum-Wert, der in
+  einer alten Preferences-Datei landen sollte) → Smolit.
+- `set_appearance()` akzeptiert jetzt Identity-Namen, klemmt aber
+  unbekannte Werte ebenfalls auf Smolit (`avatar_identity.gd::
+  identity_from_string`).
+- Wird der Identity-Shape sichtbar, aber das Script verliert
+  später eine Ziel-ID, zeichnet `_draw()` via `Shape.NONE` gar
+  nichts — der Node bleibt leer, aber der Controller crasht nicht.
+
+**Verifikation.** `scripts/avatar_identity_smoke.gd` (36 Assertions,
+alle PASS): Default-Garantie, kanonische + Alias-Parser, Fallback-
+auf-Smolit, Render-Kind/Shape/Capability-Lookups, Name-Round-Trips,
+`all_ids`-Reihenfolge. Der Harness-Case `avatar-identity-smoke`
+läuft den Test. Zusätzlich deckt die erweiterte
+`avatar_preferences_smoke.gd` den Identity-Round-Trip, Alias-
+Rejection und invalide identity-Einträge ab.
+
+**Was Phase B ausdrücklich nicht tut:**
+
+- Keine User-Uploads, kein Template-Marktplatz, kein Content-
+  Pipeline.
+- Keine Asset-Imports (PNG, SVG, GLB, …) — Alternativen sind
+  prozedural.
+- Keine alternative Logik, keine alternative Security-/Policy-
+  Semantik — Identity ≠ Behavior ≠ Personality ≠ Policy, unverändert
+  aus §8b.3.
+- Keine Presence-Mode-Änderung, keine Workflow-Overlay-Interaktion,
+  keine Window-Behavior-Änderung, keine neue IPC.
+- Kein Default-Austausch. Smolit bleibt Referenz und erste Option
+  im Picker.
+
 ---
 
 ## 8c. Dev-/MVP-Steuerung für Workflow-Overlay und Avatar-Appearance
@@ -956,13 +1067,14 @@ nicht verdeckt.
 
 **Was die Steuerung kann.** Zwei klar getrennte Bereiche.
 
-1. **Avatar-Appearance (Phase A).** Theme-OptionButton (4 Optionen),
+1. **Avatar-Appearance (Phase A + Phase-B-Identity-Picker).**
+   Identity-OptionButton (3 Optionen, Phase-B-kuratiert: Smolit /
+   Robot-Head / Orb), Theme-OptionButton (4 Optionen),
    Profile-OptionButton (3 Optionen), Intensity-Slider (0.5 .. 1.5).
    Änderungen rufen `avatar_controller.set_appearance()` auf, das
    das Appearance-Dict ersetzt, die Root-Scale aktualisiert und
-   `_apply_state_visuals()` neu startet. Kein Identity-Wechsel (der
-   Avatar bleibt Smolit Salamander — `set_appearance` erzwingt das
-   intern). Ein kleiner **„Save as default"**-Button persistiert
+   `_apply_state_visuals()` neu startet. Unbekannte Identity-Werte
+   werden vom Avatar-Controller auf Smolit zurückgeklemmt (§8b.8). Ein kleiner **„Save as default"**-Button persistiert
    die aktuellen drei Werte via
    `avatar_controller.save_current_preferences()` in
    `user://smolit_ui.cfg` (Sektion `[avatar_appearance]`); jede

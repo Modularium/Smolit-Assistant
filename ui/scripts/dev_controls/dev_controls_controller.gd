@@ -36,8 +36,18 @@ extends PanelContainer
 ##   * Kein Speichern / Laden auf Disk.
 
 const _AppearanceRef := preload("res://scripts/avatar/avatar_appearance.gd")
+const _IdentityRef := preload("res://scripts/avatar/avatar_identity.gd")
 
 const ENV_ENABLE: String = "SMOLIT_UI_DEV_CONTROLS"
+
+## Kleiner kuratierter Identity-Selector (Phase-B-Spike). Reihenfolge
+## folgt `avatar_identity.gd::all_ids` — Smolit bleibt als erste
+## Option sichtbarer Default, alternative Figuren kommen danach.
+const _IDENTITY_OPTIONS: Array = [
+	{"id": _IdentityRef.Identity.SMOLIT_SALAMANDER, "label": "Smolit Salamander"},
+	{"id": _IdentityRef.Identity.ROBOT_HEAD,        "label": "Robot Head"},
+	{"id": _IdentityRef.Identity.ORB,               "label": "Orb"},
+]
 
 const _THEME_OPTIONS: Array = [
 	{"id": _AppearanceRef.ThemePreset.DEFAULT, "label": "Default"},
@@ -65,6 +75,7 @@ const _PHASE_PREVIEWS: Array = [
 var _avatar: Node = null
 var _workflow_overlay: Node = null
 
+var _identity_picker: OptionButton = null
 var _theme_picker: OptionButton = null
 var _profile_picker: OptionButton = null
 var _intensity_slider: HSlider = null
@@ -131,6 +142,22 @@ func _build_avatar_section() -> Control:
 	title.add_theme_font_size_override("font_size", 10)
 	title.modulate = Color(1, 1, 1, 0.6)
 	box.add_child(title)
+
+	# Identity-Row (Phase B). Kleiner kuratierter Selector, bewusst als
+	# erste Zeile der Avatar-Sektion, weil Identity den gröbsten Effekt
+	# hat — Theme/Profile/Intensity sind Feinjustierung darüber.
+	var identity_row := HBoxContainer.new()
+	identity_row.add_theme_constant_override("separation", 6)
+	box.add_child(identity_row)
+	var identity_label := Label.new()
+	identity_label.text = "Identity"
+	identity_label.custom_minimum_size = Vector2(64, 0)
+	identity_row.add_child(identity_label)
+	_identity_picker = OptionButton.new()
+	for option in _IDENTITY_OPTIONS:
+		_identity_picker.add_item(str(option["label"]), int(option["id"]))
+	_identity_picker.item_selected.connect(_on_identity_selected)
+	identity_row.add_child(_identity_picker)
 
 	var theme_row := HBoxContainer.new()
 	theme_row.add_theme_constant_override("separation", 6)
@@ -243,7 +270,11 @@ func _sync_from_live_appearance() -> void:
 	var profile := int(current.get("profile", _AppearanceRef.DEFAULT_PROFILE))
 	var overrides: Dictionary = current.get("overrides", {})
 	var intensity := float(overrides.get("intensity", 1.0))
+	var identity_id: int = _IdentityRef.identity_from_string(
+		String(current.get("identity", "smolit_salamander")),
+	)
 
+	_select_by_id(_identity_picker, identity_id)
 	_select_by_id(_theme_picker, theme)
 	_select_by_id(_profile_picker, profile)
 	if _intensity_slider != null:
@@ -262,6 +293,11 @@ static func _select_by_id(picker: OptionButton, id: int) -> void:
 
 
 # --- Handlers -----------------------------------------------------------
+
+
+func _on_identity_selected(_index: int) -> void:
+	_clear_save_status()
+	_apply_current_appearance()
 
 
 func _on_theme_selected(_index: int) -> void:
@@ -290,6 +326,7 @@ func _clear_save_status() -> void:
 func _apply_current_appearance() -> void:
 	if _avatar == null or not _avatar.has_method("set_appearance"):
 		return
+	var identity_id := _identity_picker.get_selected_id() if _identity_picker != null else int(_IdentityRef.DEFAULT)
 	var theme_id := _theme_picker.get_selected_id() if _theme_picker != null else int(_AppearanceRef.DEFAULT_THEME)
 	var profile_id := _profile_picker.get_selected_id() if _profile_picker != null else int(_AppearanceRef.DEFAULT_PROFILE)
 	var intensity := float(_intensity_slider.value) if _intensity_slider != null else 1.0
@@ -299,8 +336,12 @@ func _apply_current_appearance() -> void:
 	var appearance := _AppearanceRef.make_appearance(
 		theme_id, profile_id, Color(1, 1, 1, 1), intensity, 1.0,
 	)
+	# Identity wird im set_appearance-Hook des Avatar-Controllers
+	# kuratiert und bei Unbekanntem auf Smolit geklemmt.
+	appearance["identity"] = _IdentityRef.identity_name(identity_id)
 	_avatar.set_appearance(appearance)
-	print("[dev-controls] avatar: theme=%s profile=%s intensity=%.2f" % [
+	print("[dev-controls] avatar: identity=%s theme=%s profile=%s intensity=%.2f" % [
+		_IdentityRef.identity_name(identity_id),
 		_AppearanceRef.theme_name(theme_id),
 		_AppearanceRef.profile_name(profile_id),
 		intensity,

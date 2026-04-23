@@ -23,6 +23,7 @@ extends SceneTree
 
 const _PrefsRef := preload("res://scripts/avatar/avatar_preferences.gd")
 const _AppearanceRef := preload("res://scripts/avatar/avatar_appearance.gd")
+const _IdentityRef := preload("res://scripts/avatar/avatar_identity.gd")
 
 var _fail: int = 0
 var _path: String = "user://smolit_preferences_smoke.cfg"
@@ -39,6 +40,8 @@ func _init() -> void:
 	_check_save_preserves_foreign_section()
 	_check_clear_preferences()
 	_check_intensity_clamp_on_save()
+	_check_identity_invalid_values_ignored()
+	_check_identity_alias_not_accepted_as_stored()
 
 	_reset_file()
 
@@ -80,6 +83,7 @@ func _check_round_trip() -> void:
 		_AppearanceRef.ThemePreset.TECH,
 		_AppearanceRef.BehaviorProfile.LIVELY,
 		1.3,
+		_IdentityRef.Identity.ROBOT_HEAD,
 		_path,
 	)
 	_assert(err == OK, "save_preferences returns OK")
@@ -91,6 +95,8 @@ func _check_round_trip() -> void:
 		"round-trip: profile LIVELY")
 	_assert(abs(float(prefs.get("intensity", -1.0)) - 1.3) < 0.001,
 		"round-trip: intensity 1.3")
+	_assert(int(prefs.get("identity", -1)) == _IdentityRef.Identity.ROBOT_HEAD,
+		"round-trip: identity ROBOT_HEAD")
 
 
 func _check_invalid_values_ignored() -> void:
@@ -133,7 +139,7 @@ func _check_partial_file() -> void:
 func _check_save_sanitizes_enums() -> void:
 	_reset_file()
 	# Unbekannter Theme-Int (z. B. aus zukünftigem Build) → Default.
-	var err: int = _PrefsRef.save_preferences(99, 99, 1.0, _path)
+	var err: int = _PrefsRef.save_preferences(99, 99, 1.0, 99, _path)
 	_assert(err == OK, "save_preferences with unknown ints: OK")
 
 	var prefs := _PrefsRef.load_preferences(_path)
@@ -141,6 +147,8 @@ func _check_save_sanitizes_enums() -> void:
 		"save sanitizes unknown theme int → DEFAULT")
 	_assert(int(prefs.get("profile", -1)) == _AppearanceRef.DEFAULT_PROFILE,
 		"save sanitizes unknown profile int → CALM")
+	_assert(int(prefs.get("identity", -1)) == _IdentityRef.DEFAULT,
+		"save sanitizes unknown identity int → SMOLIT_SALAMANDER")
 
 
 func _check_save_preserves_foreign_section() -> void:
@@ -157,6 +165,7 @@ func _check_save_preserves_foreign_section() -> void:
 		_AppearanceRef.ThemePreset.SOFT,
 		_AppearanceRef.BehaviorProfile.CALM,
 		1.0,
+		_IdentityRef.DEFAULT,
 		_path,
 	)
 
@@ -181,6 +190,7 @@ func _check_clear_preferences() -> void:
 		_AppearanceRef.ThemePreset.MINIMAL,
 		_AppearanceRef.BehaviorProfile.RESERVED,
 		0.8,
+		_IdentityRef.DEFAULT,
 		_path,
 	)
 	var err: int = _PrefsRef.clear_preferences(_path)
@@ -202,6 +212,7 @@ func _check_intensity_clamp_on_save() -> void:
 		_AppearanceRef.ThemePreset.DEFAULT,
 		_AppearanceRef.BehaviorProfile.CALM,
 		99.0,
+		_IdentityRef.DEFAULT,
 		_path,
 	)
 	var prefs_hi := _PrefsRef.load_preferences(_path)
@@ -213,8 +224,56 @@ func _check_intensity_clamp_on_save() -> void:
 		_AppearanceRef.ThemePreset.DEFAULT,
 		_AppearanceRef.BehaviorProfile.CALM,
 		-5.0,
+		_IdentityRef.DEFAULT,
 		_path,
 	)
 	var prefs_lo := _PrefsRef.load_preferences(_path)
 	_assert(abs(float(prefs_lo.get("intensity", -1.0)) - _AppearanceRef.INTENSITY_MIN) < 0.001,
 		"save clamps intensity -5.0 → INTENSITY_MIN")
+
+
+func _check_identity_invalid_values_ignored() -> void:
+	# Zusätzliche Phase-B-Robustheit: ein kaputter identity-Eintrag
+	# (unbekannter String, falscher Typ) darf beim Laden nicht zu
+	# einer stillen Figur-Änderung führen. Stattdessen wird der Key
+	# aus dem Ergebnis-Dict weggelassen und der Controller fällt auf
+	# Env / Default zurück.
+	_reset_file()
+	var cfg := ConfigFile.new()
+	cfg.set_value(_PrefsRef.SECTION, _PrefsRef.KEY_IDENTITY, "purple-dragon")
+	cfg.save(_path)
+	var prefs_unknown := _PrefsRef.load_preferences(_path)
+	_assert(not prefs_unknown.has("identity"),
+		"invalid identity string → key absent from result")
+
+	_reset_file()
+	var cfg2 := ConfigFile.new()
+	cfg2.set_value(_PrefsRef.SECTION, _PrefsRef.KEY_IDENTITY, 7)
+	cfg2.save(_path)
+	var prefs_typed := _PrefsRef.load_preferences(_path)
+	_assert(not prefs_typed.has("identity"),
+		"non-string identity → key absent from result")
+
+
+func _check_identity_alias_not_accepted_as_stored() -> void:
+	# Aliasse wie "smolit" oder "robot" werden vom Parser akzeptiert
+	# (Komfort für Env-Variable), aber nicht als kanonisch gespeicherte
+	# Form. So verhindern wir, dass eine manuell gepflegte Config-Datei
+	# mit Alias-Name unbemerkt als valider Preference-Eintrag durch-
+	# schlägt — stattdessen erzwingen wir die kanonische Schreibweise.
+	_reset_file()
+	var cfg := ConfigFile.new()
+	cfg.set_value(_PrefsRef.SECTION, _PrefsRef.KEY_IDENTITY, "smolit")
+	cfg.save(_path)
+	var prefs := _PrefsRef.load_preferences(_path)
+	_assert(not prefs.has("identity"),
+		"alias 'smolit' (non-canonical) → key absent from result")
+
+	# Aber die kanonische Schreibweise funktioniert sauber.
+	_reset_file()
+	var cfg2 := ConfigFile.new()
+	cfg2.set_value(_PrefsRef.SECTION, _PrefsRef.KEY_IDENTITY, "orb")
+	cfg2.save(_path)
+	var prefs2 := _PrefsRef.load_preferences(_path)
+	_assert(int(prefs2.get("identity", -1)) == _IdentityRef.Identity.ORB,
+		"canonical identity 'orb' → loaded as ORB")

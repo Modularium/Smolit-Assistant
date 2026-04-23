@@ -55,6 +55,12 @@
 #                   Prüft Load/Save/Fallback-Reihenfolge, invalide
 #                   Werte, partielle Dateien, Fremd-Sektions-
 #                   Erhaltung und Intensity-Clamping. Exit 0 = alle PASS.
+#   avatar-identity-smoke
+#                 — Führt scripts/avatar_identity_smoke.gd aus.
+#                   Prüft den Phase-B-Identity-Katalog
+#                   (ui/scripts/avatar/avatar_identity.gd): Default,
+#                   Parser + Aliasse, Fallback-auf-Smolit, Render-
+#                   Kind / Shape / Capability-Lookups. Exit 0 = alle PASS.
 #   resolver-wayland-mutter
 #                 — Env-Override (Wayland + GNOME) + Report. Zeigt, dass
 #                   der Resolver backend_wayland_mutter wählt und der
@@ -218,6 +224,13 @@ case "${CASE}" in
     # partielle Dateien, Fremd-Sektions-Erhaltung und Intensity-Clamping.
     exec godot --headless --path "${UI_DIR}" \
       --script "${REPO_ROOT}/scripts/avatar_preferences_smoke.gd"
+    ;;
+  avatar-identity-smoke)
+    # Spezialfall: Katalog-Smoke für ui/scripts/avatar/avatar_identity.gd.
+    # Prüft Default, Parser + Aliasse, Fallback-auf-Smolit, Render-
+    # Kind / Shape / Capability-Lookups (Phase B, kuratiert).
+    exec godot --headless --path "${UI_DIR}" \
+      --script "${REPO_ROOT}/scripts/avatar_identity_smoke.gd"
     ;;
   resolver-wayland-mutter)
     export SMOLIT_WINDOW_REPORT=1
