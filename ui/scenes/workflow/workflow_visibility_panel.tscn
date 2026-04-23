@@ -1,0 +1,10 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/workflow/workflow_visibility_panel.gd" id="1_ctrl"]
+
+[node name="WorkflowVisibilityPanel" type="PanelContainer"]
+visible = false
+mouse_filter = 2
+custom_minimum_size = Vector2(220, 0)
+modulate = Color(1, 1, 1, 0.85)
+script = ExtResource("1_ctrl")

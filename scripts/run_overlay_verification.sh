@@ -100,6 +100,18 @@
 #                   Autoloads nicht); die Laufzeit-Integration wird
 #                   beim regulären Start der Main-Scene geprüft.
 #                   Exit 0 = alle PASS.
+#   workflow-visibility-smoke
+#                 — Führt scripts/workflow_visibility_smoke.gd aus
+#                   (PR 16). Prüft das Workflow Visibility Overlay v1:
+#                   pure `SmolitWorkflowVisibilityModel` (Enum-Helfer,
+#                   Snippet-Kürzung, Event-Mapping heard/thinking/
+#                   response/action_*/speaking_*, Terminal- und
+#                   Disconnect-Pfade, Resilienz gegen unbekannte
+#                   Reihenfolgen) plus Panel-Scene-Spawn (Default-
+#                   hidden ohne `SMOLIT_WORKFLOW_OVERLAY=1`, Toggle-
+#                   Roundtrip, `reset_for_tests`). Keine echten
+#                   EventBus-Roundtrips (Headless-`--script`).
+#                   Exit 0 = alle PASS.
 #   avatar-render-polish-smoke
 #                 — Führt scripts/avatar_render_polish_smoke.gd aus.
 #                   Prüft den Phase-3.2-Render-Polish:
@@ -345,6 +357,16 @@ case "${CASE}" in
     # bindend). Keine Scene-Spawn-Ausführung.
     exec godot --headless --path "${UI_DIR}" \
       --script "${REPO_ROOT}/scripts/avatar_expression_smoke.gd"
+    ;;
+  workflow-visibility-smoke)
+    # Spezialfall: Smoke für das Workflow Visibility Overlay v1
+    # (PR 16). Prüft pure `SmolitWorkflowVisibilityModel`-Logik
+    # (Enum-Helfer, Snippet-Kürzung, Event-Mapping, Terminal-/
+    # Disconnect-Pfade, Resilienz gegen unbekannte Reihenfolgen)
+    # plus Panel-Scene-Spawn (Default-hidden, Toggle-Roundtrip,
+    # `reset_for_tests`). Keine echten EventBus-Roundtrips.
+    exec godot --headless --path "${UI_DIR}" \
+      --script "${REPO_ROOT}/scripts/workflow_visibility_smoke.gd"
     ;;
   avatar-render-polish-smoke)
     # Spezialfall: Smoke für den Phase-3.2-Render-Polish

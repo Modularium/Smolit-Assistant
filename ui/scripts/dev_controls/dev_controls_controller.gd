@@ -86,10 +86,16 @@ const _VISUAL_ACTION_MODE_OPTIONS: Array = [
 @export var avatar_path: NodePath = ^"../Avatar"
 @export var workflow_overlay_path: NodePath = ^"../WorkflowOverlay"
 @export var main_controller_path: NodePath = ^".."
+## PR 16: optionaler Zugriff auf das Workflow-Visibility-Panel für den
+## Toggle. Fehlt der Knoten (älterer Build), bleibt der Toggle-Button
+## stumm — keine Crash-Gefahr.
+@export var workflow_visibility_path: NodePath = ^"../WorkflowVisibilityPanel"
 
 var _avatar: Node = null
 var _workflow_overlay: Node = null
 var _main_controller: Node = null
+var _workflow_visibility: Node = null
+var _workflow_visibility_toggle: CheckBox = null
 
 var _identity_picker: OptionButton = null
 var _theme_picker: OptionButton = null
@@ -122,10 +128,12 @@ func _ready() -> void:
 	_avatar = get_node_or_null(avatar_path)
 	_workflow_overlay = get_node_or_null(workflow_overlay_path)
 	_main_controller = get_node_or_null(main_controller_path)
+	_workflow_visibility = get_node_or_null(workflow_visibility_path)
 
 	_build_ui()
 	_sync_from_live_appearance()
 	_sync_from_live_visual_action_mode()
+	_sync_from_live_workflow_visibility()
 
 	print("[dev-controls] enabled — avatar+overlay+visual-action preview hooks active")
 
@@ -160,6 +168,14 @@ func _build_ui() -> void:
 
 	# Visual Action Mode section
 	root.add_child(_build_visual_action_mode_section())
+
+	# Separator
+	var sep_wf := HSeparator.new()
+	sep_wf.modulate = Color(1, 1, 1, 0.3)
+	root.add_child(sep_wf)
+
+	# Workflow Visibility toggle (PR 16).
+	root.add_child(_build_workflow_visibility_section())
 
 	# Separator
 	var sep2 := HSeparator.new()
@@ -558,3 +574,55 @@ func _on_expression_preview_pressed(kind: int) -> void:
 		# den anderen Preview-Hooks auch machen.
 		return
 	_avatar.call("preview_expression", kind)
+
+
+# --- PR 16: Workflow Visibility Overlay toggle ---------------------------
+#
+# Einzelner CheckBox-Toggle (Session-only). Wenn das Panel fehlt
+# (z. B. älterer Build), bleibt die Zeile still — gleiches Muster wie
+# beim Expression-Preview.
+
+
+func _build_workflow_visibility_section() -> Control:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 4)
+
+	var title := Label.new()
+	title.text = "Workflow visibility"
+	title.add_theme_font_size_override("font_size", 10)
+	title.modulate = Color(1, 1, 1, 0.6)
+	box.add_child(title)
+
+	_workflow_visibility_toggle = CheckBox.new()
+	_workflow_visibility_toggle.text = "Show workflow overlay"
+	_workflow_visibility_toggle.tooltip_text =
+		"Session-only toggle. Env default is SMOLIT_WORKFLOW_OVERLAY=0."
+	_workflow_visibility_toggle.toggled.connect(_on_workflow_visibility_toggled)
+	box.add_child(_workflow_visibility_toggle)
+
+	var hint := Label.new()
+	hint.text = "No save. Events keep flowing even when hidden."
+	hint.add_theme_font_size_override("font_size", 9)
+	hint.modulate = Color(1, 1, 1, 0.4)
+	box.add_child(hint)
+
+	return box
+
+
+func _sync_from_live_workflow_visibility() -> void:
+	if _workflow_visibility == null or _workflow_visibility_toggle == null:
+		return
+	if not _workflow_visibility.has_method("is_overlay_visible"):
+		_workflow_visibility_toggle.disabled = true
+		return
+	_workflow_visibility_toggle.set_pressed_no_signal(
+		bool(_workflow_visibility.call("is_overlay_visible"))
+	)
+
+
+func _on_workflow_visibility_toggled(pressed: bool) -> void:
+	if _workflow_visibility == null:
+		return
+	if not _workflow_visibility.has_method("set_overlay_visible"):
+		return
+	_workflow_visibility.call("set_overlay_visible", pressed)

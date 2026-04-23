@@ -8,6 +8,7 @@
 [ext_resource type="PackedScene" path="res://scenes/dev_controls/dev_controls_panel.tscn" id="6_dev_controls"]
 [ext_resource type="PackedScene" path="res://scenes/utterance/utterance_bubble.tscn" id="7_utterance"]
 [ext_resource type="PackedScene" path="res://scenes/settings/settings_panel.tscn" id="8_settings"]
+[ext_resource type="PackedScene" path="res://scenes/workflow/workflow_visibility_panel.tscn" id="9_workflow_visibility"]
 
 [node name="Main" type="Control" unique_id=748218674]
 layout_mode = 3
@@ -337,3 +338,11 @@ offset_left = 130.0
 offset_top = 46.0
 offset_right = 460.0
 offset_bottom = 150.0
+
+[node name="WorkflowVisibilityPanel" parent="." instance=ExtResource("9_workflow_visibility")]
+z_index = 42
+layout_mode = 0
+offset_left = 130.0
+offset_top = 162.0
+offset_right = 380.0
+offset_bottom = 330.0
