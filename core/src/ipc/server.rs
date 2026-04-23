@@ -405,8 +405,16 @@ mod tests {
         interaction: InteractionConfig,
         approval: ApprovalConfig,
     ) -> Arc<App> {
+        test_app_with_abrain_cmd("/bin/false", interaction, approval)
+    }
+
+    fn test_app_with_abrain_cmd(
+        abrain_cmd: &str,
+        interaction: InteractionConfig,
+        approval: ApprovalConfig,
+    ) -> Arc<App> {
         let config = Config {
-            abrain_cmd: "/bin/false".into(),
+            abrain_cmd: abrain_cmd.into(),
             log_level: "info".into(),
             audio: AudioConfig {
                 tts_enabled: true,
@@ -423,6 +431,9 @@ mod tests {
             },
             interaction,
             approval,
+            text_provider: crate::config::TextProviderConfig {
+                chain: vec!["abrain".into()],
+            },
         };
         Arc::new(App::new(config))
     }
@@ -511,6 +522,148 @@ mod tests {
         let failed = recv_text(&mut ws).await;
         assert!(failed.contains(r#""type":"action_failed""#));
         assert!(failed.contains(r#""status":"failed""#));
+    }
+
+    // PR 2 (Text Provider Resolver): vergewissert, dass der IPC-Pfad
+    // `submit_text` weiterhin eine vollständige `action_*` + `response`-
+    // Sequenz produziert, wenn der konfigurierte Text-Provider (hier
+    // `/bin/echo` über den Abrain-Kind) erfolgreich antwortet. Der
+    // direkte Aufruf `abrain::run_task_with_cmd` wurde entfernt — dieser
+    // Test prüft also genau die neue Routing-Linie durch den Resolver
+    // bis hinunter ins `AbrainCliProvider::run`.
+    #[tokio::test]
+    async fn submit_text_via_resolver_emits_response_when_provider_succeeds() {
+        // /bin/echo akzeptiert beliebige Argumente und produziert
+        // nicht-leeren stdout → der AbrainCliProvider behandelt das als
+        // Erfolg. Das simuliert eine reale ABrain-Installation, die
+        // antwortet, ohne echtes ABrain zu benötigen.
+        let app = test_app_with_abrain_cmd(
+            "/bin/echo",
+            InteractionConfig {
+                enabled: true,
+                backend: "command".into(),
+                allow_open_application: true,
+                allow_focus_window: true,
+                allow_type_text: false,
+                allow_shortcuts: false,
+                require_confirmation: false,
+                open_app_cmd_template: Some("/bin/true".into()),
+                focus_window_cmd_template: Some("/bin/true".into()),
+            },
+            default_approval_config(),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"submit_text","text":"hi"}"#.into(),
+        ))
+        .await
+        .unwrap();
+
+        let planned = recv_text(&mut ws).await;
+        assert!(planned.contains(r#""type":"action_planned""#));
+        let started = recv_text(&mut ws).await;
+        assert!(started.contains(r#""type":"action_started""#));
+        let step = recv_text(&mut ws).await;
+        assert!(step.contains(r#""type":"action_step""#));
+        let thinking = recv_text(&mut ws).await;
+        assert_eq!(thinking, r#"{"type":"thinking"}"#);
+
+        let response = recv_text(&mut ws).await;
+        assert!(response.contains(r#""type":"response""#));
+        assert!(response.contains(r#""text""#));
+
+        let completed = recv_text(&mut ws).await;
+        assert!(completed.contains(r#""type":"action_completed""#));
+
+        // Status reflektiert nach dem Request, dass der konfigurierte
+        // Primary (`abrain`) tatsächlich geantwortet hat.
+        let st = app.text_provider_status();
+        assert_eq!(st.configured, "abrain");
+        assert_eq!(st.active, "abrain");
+        assert_eq!(st.availability, "available");
+        assert!(st.last_error.is_none());
+        assert!(!st.cloud);
+    }
+
+    // PR 2: der Resolver-Fehlerpfad muss ehrlich als `error` +
+    // `action_failed` durchschlagen und darf keinen stillen Fallback in
+    // etwas nicht Konfiguriertes nehmen. Mit `/bin/false` als
+    // abrain_cmd wird der einzige Kettenelement-Provider immer
+    // fehlschlagen; die `availability` im StatusPayload fällt auf
+    // `unavailable`, `last_error` trägt die kurze Klasse `exit_nonzero`.
+    #[tokio::test]
+    async fn submit_text_via_resolver_reports_error_and_status_when_all_fail() {
+        let app = test_app();
+        // status payload reflects the new text_provider fields
+        let payload = app.build_status_payload();
+        // Before any request: nominal `available` (chain non-empty,
+        // nothing probed yet), `active` leer.
+        assert_eq!(payload.text_provider_configured, "abrain");
+        assert_eq!(payload.text_provider_active, "");
+        assert_eq!(payload.text_provider_availability, "available");
+        assert!(payload.text_provider_last_error.is_none());
+        assert!(!payload.text_provider_cloud);
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"submit_text","text":"hi"}"#.into(),
+        ))
+        .await
+        .unwrap();
+
+        // Pump through the full event sequence; we only care about the
+        // terminal `error` + `action_failed` pair and the updated
+        // status afterwards.
+        let _ = recv_text(&mut ws).await; // planned
+        let _ = recv_text(&mut ws).await; // started
+        let _ = recv_text(&mut ws).await; // step
+        let _ = recv_text(&mut ws).await; // thinking
+        let err = recv_text(&mut ws).await;
+        assert!(err.starts_with(r#"{"type":"error""#));
+        let failed = recv_text(&mut ws).await;
+        assert!(failed.contains(r#""type":"action_failed""#));
+
+        let payload = app.build_status_payload();
+        assert_eq!(payload.text_provider_configured, "abrain");
+        assert_eq!(payload.text_provider_active, "");
+        assert_eq!(payload.text_provider_availability, "unavailable");
+        assert_eq!(
+            payload.text_provider_last_error.as_deref(),
+            Some("exit_nonzero"),
+        );
+        assert!(!payload.text_provider_cloud);
+    }
+
+    // PR 2: `get_status` liefert die neuen text_provider_*-Felder
+    // additiv aus. Die Antwort enthält `configured=abrain` (Default-
+    // Kette) und `availability=available` im frischen Zustand.
+    #[tokio::test]
+    async fn get_status_includes_text_provider_fields() {
+        let url = spawn_server().await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(r#"{"type":"get_status"}"#.into()))
+            .await
+            .unwrap();
+        let got = recv_text(&mut ws).await;
+        assert!(got.contains(r#""text_provider_configured":"abrain""#));
+        assert!(got.contains(r#""text_provider_active":"""#));
+        assert!(got.contains(r#""text_provider_availability":"available""#));
+        assert!(got.contains(r#""text_provider_last_error":null"#));
+        assert!(got.contains(r#""text_provider_cloud":false"#));
     }
 
     #[tokio::test]

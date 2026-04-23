@@ -14,7 +14,6 @@ use crate::actions::{
     ActionPlannedPayload, ActionStartedPayload, ActionStatus, ActionStepPayload, ActionTarget,
     ActionVerificationPayload,
 };
-use crate::adapters::abrain;
 use crate::approvals::{
     ApprovalDecision, ApprovalRequest, ApprovalResolvedPayload, PendingApprovalError,
     PendingApprovalRegistry,
@@ -29,6 +28,11 @@ use crate::interaction::{
 use crate::ipc::protocol::{
     InteractionFocusTarget, OutgoingMessage, TargetClearedPayload, TargetSelectedPayload,
 };
+use crate::providers::text::{
+    TextProviderChainItem, TextProviderError, TextProviderResolver,
+};
+#[cfg(test)]
+use crate::providers::text::TextProviderRuntimeStatus;
 
 const EVENTS_CHANNEL_CAPACITY: usize = 256;
 
@@ -46,6 +50,11 @@ pub struct App {
     /// no cross-session memory.
     selected_target: Mutex<Option<SelectedTarget>>,
     events_tx: broadcast::Sender<OutgoingMessage>,
+    /// Text/Reasoning-Provider-Resolver. PR 2 der Provider-Fallback-
+    /// Linie: `handle_text_query` routet ab jetzt ausschließlich über
+    /// diesen Resolver. ABrain bleibt Default-Provider — der Resolver
+    /// kapselt den CLI-Aufruf.
+    text_provider: Arc<TextProviderResolver>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -66,6 +75,36 @@ pub struct StatusPayload {
     pub accessibility_probe: String,
     /// Short free-form reason accompanying `accessibility_probe`.
     pub accessibility_probe_reason: String,
+    // --- Text / Reasoning Provider (PR 2, additiv) ------------------
+    /// Primärer (konfigurierter) Text-Provider-Kind-Name. `"none"`
+    /// wenn keine gültige Kette konfiguriert ist. Entspricht dem
+    /// Feld `configured_provider` aus
+    /// `docs/provider_fallback_and_settings_architecture.md` §8.
+    pub text_provider_configured: String,
+    /// Kind des Providers, der den **letzten** `submit_text` /
+    /// `voice_once`-Request erfolgreich beantwortet hat. Leer,
+    /// solange noch kein Request durchgelaufen ist.
+    pub text_provider_active: String,
+    /// `"available"` (nominell) / `"unavailable"` (keine Kette oder
+    /// kompletter Fehlschlag) / `"fallback_active"` (ein Nicht-
+    /// Primary-Provider hat zuletzt geantwortet). Enum-artiges Feld
+    /// — additiv, damit spätere Provider-PRs `degraded` oder
+    /// Ähnliches ergänzen können, ohne das Schema zu brechen.
+    pub text_provider_availability: String,
+    /// Kurze Fehlerklasse der letzten komplett fehlgeschlagenen
+    /// Runde (`timeout`, `process_missing`, `empty_response`,
+    /// `exit_nonzero`, `invalid_response`, `unknown`). `None` im
+    /// Erfolgsfall. Keine Nutzerinhalte, keine Stacktraces, keine
+    /// Secrets — Freitext-Fehler laufen weiterhin über das
+    /// `error`-IPC-Envelope.
+    pub text_provider_last_error: Option<String>,
+    /// Ob der aktuell aktive Provider eine Cloud-Komponente hat. In
+    /// PR 2 existiert kein Cloud-Provider; das Feld ist additiv
+    /// vorhanden, damit der UI-Transparenz-Vertrag aus §7 der
+    /// Architektur-Doku („Externe Provider klar sichtbar") ohne
+    /// Protokoll-Revision einlösbar bleibt, sobald ein Cloud-Pfad
+    /// existiert.
+    pub text_provider_cloud: bool,
 }
 
 impl App {
@@ -88,6 +127,14 @@ impl App {
         let interaction = InteractionExecutor::new(backend, policy);
         let (events_tx, _) = broadcast::channel(EVENTS_CHANNEL_CAPACITY);
 
+        let chain: Vec<TextProviderChainItem> = config
+            .text_provider
+            .chain
+            .iter()
+            .map(|k| TextProviderChainItem { kind: k.clone() })
+            .collect();
+        let text_provider = Arc::new(TextProviderResolver::from_chain(&chain, &config.abrain_cmd));
+
         Self {
             config,
             tts,
@@ -99,7 +146,17 @@ impl App {
             pending_approvals: Arc::new(PendingApprovalRegistry::new()),
             selected_target: Mutex::new(None),
             events_tx,
+            text_provider,
         }
+    }
+
+    /// Read-only-Snapshot des Text-Provider-Laufzeit-Status — für
+    /// Tests und ggf. spätere Diagnostik-Endpoints. Kein Write-Pfad,
+    /// kein Event-Fan-out; der Status wird exklusiv durch die
+    /// `run`-Aufrufe in `handle_text_query` aktualisiert.
+    #[cfg(test)]
+    pub fn text_provider_status(&self) -> TextProviderRuntimeStatus {
+        self.text_provider.status()
     }
 
     pub fn next_action_id(&self) -> String {
@@ -199,7 +256,19 @@ impl App {
     }
 
     pub async fn handle_text_query(&self, input: &str) -> Result<String> {
-        abrain::run_task_with_cmd(&self.config.abrain_cmd, input).await
+        // PR 2: geht ausschließlich über die Provider-Schicht. Der
+        // alte direkte Aufruf in `adapters::abrain::run_task_with_cmd`
+        // wohnt jetzt im `AbrainCliProvider` innerhalb des Resolvers.
+        // Resolver-Fehler werden in den generischen `anyhow::Error`-
+        // Rückgabetyp gemappt, damit sich die bestehende Callsite-
+        // Semantik (CLI-Loop, IPC-`submit_text`) byte-identisch
+        // verhält: ein Text-Antwort-Erfolg bleibt ein Erfolg, ein
+        // Provider-Fehler bleibt ein `error`-Envelope mit
+        // menschenlesbarer Meldung.
+        self.text_provider
+            .run(input)
+            .await
+            .map_err(|err: TextProviderError| anyhow::anyhow!(err))
     }
 
     pub async fn handle_voice_once(&self) -> Result<String> {
@@ -526,6 +595,7 @@ impl App {
         let tts = self.tts.state();
         let stt = self.stt.state();
         let probe = AccessibilityProbe::detect();
+        let text_provider = self.text_provider.status();
         StatusPayload {
             tts_enabled: tts.enabled,
             tts_available: tts.available,
@@ -538,6 +608,11 @@ impl App {
             approval_timeout_seconds: self.config.approval.timeout_seconds,
             accessibility_probe: probe.status_str().to_string(),
             accessibility_probe_reason: probe.reason().to_string(),
+            text_provider_configured: text_provider.configured,
+            text_provider_active: text_provider.active,
+            text_provider_availability: text_provider.availability,
+            text_provider_last_error: text_provider.last_error,
+            text_provider_cloud: text_provider.cloud,
         }
     }
 }

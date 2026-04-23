@@ -1,14 +1,12 @@
 mod actions;
 mod app;
-pub mod adapters {
-    pub mod abrain;
-}
 mod approvals;
 mod audio;
 mod config;
 mod event_loop;
 mod interaction;
 mod ipc;
+mod providers;
 
 use std::sync::Arc;
 

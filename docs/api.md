@@ -132,17 +132,22 @@ Beispiele:
 
 ```json
 {
-  "tts_enabled":                 true,
-  "tts_available":               false,
-  "stt_enabled":                 true,
-  "stt_available":               false,
-  "auto_speak":                  true,
-  "ipc_enabled":                 true,
-  "interaction_enabled":         true,
-  "interaction_backend":         "command",
-  "approval_timeout_seconds":    20,
-  "accessibility_probe":         "unavailable",
-  "accessibility_probe_reason":  "DBUS_SESSION_BUS_ADDRESS is unset"
+  "tts_enabled":                   true,
+  "tts_available":                 false,
+  "stt_enabled":                   true,
+  "stt_available":                 false,
+  "auto_speak":                    true,
+  "ipc_enabled":                   true,
+  "interaction_enabled":           true,
+  "interaction_backend":           "command",
+  "approval_timeout_seconds":      20,
+  "accessibility_probe":           "unavailable",
+  "accessibility_probe_reason":    "DBUS_SESSION_BUS_ADDRESS is unset",
+  "text_provider_configured":      "abrain",
+  "text_provider_active":          "",
+  "text_provider_availability":    "available",
+  "text_provider_last_error":      null,
+  "text_provider_cloud":           false
 }
 ```
 
@@ -169,6 +174,35 @@ Semantik:
   Bestätigung, dass AT-SPI tatsächlich funktioniert.
 - `accessibility_probe_reason`: Kurze, freie Begründung zum
   `accessibility_probe`-Wert (z. B. `"DBUS_SESSION_BUS_ADDRESS is unset"`).
+- `text_provider_configured`: Kanonischer Kind-Name des primär
+  konfigurierten Text-/Reasoning-Providers (erstes Element der
+  Provider-Kette). `"none"` nur, wenn die Kette leer ist. Default
+  `"abrain"`. Siehe
+  [`docs/provider_fallback_and_settings_architecture.md`](./provider_fallback_and_settings_architecture.md) §8.
+- `text_provider_active`: Kind-Name des Providers, der den **letzten**
+  `submit_text` / `voice_once`-Request erfolgreich beantwortet hat.
+  Leer, solange noch kein Request durchgelaufen ist. Weicht
+  `active != configured` ab, zeigt das: ein Fallback-Provider hat
+  geantwortet (siehe `text_provider_availability`).
+- `text_provider_availability`: Einer der Strings `"available"`
+  (nominell, Kette nicht leer, kein totaler Fehlschlag) /
+  `"unavailable"` (leere Kette oder alle Provider der Kette sind am
+  letzten Request gescheitert) / `"fallback_active"` (ein Nicht-Primary
+  hat den letzten Request beantwortet). Das Vokabular ist additiv
+  ausbaubar (`"degraded"` u. ä.); UIs müssen unbekannte Werte tolerant
+  behandeln.
+- `text_provider_last_error`: Kurze Fehlerklasse der letzten komplett
+  fehlgeschlagenen Runde (`"timeout"` / `"process_missing"` /
+  `"empty_response"` / `"exit_nonzero"` / `"invalid_response"` /
+  `"unknown"`). `null` im Erfolgsfall. Keine Nutzerinhalte, keine
+  Stacktraces, keine Secrets — ausführliche Meldungen laufen weiter
+  über das `error`-Envelope.
+- `text_provider_cloud`: Ob der aktuell aktive Provider eine Cloud-
+  Komponente hat. In dieser Stufe implementiert nur ABrain-CLI; das
+  Feld bleibt immer `false`. Additiv vorhanden, damit der UI-
+  Transparenzvertrag aus §7 der Architektur-Doku (Cloud-Kennzeichnung)
+  ohne Protokoll-Revision einlösbar ist, sobald ein Cloud-Pfad
+  existiert.
 
 ### 2.4 Flow-Beispiele
 
@@ -940,6 +974,20 @@ Heute spricht der Core ABrain über einen **externen Prozess** an.
 
 Diese Schnittstelle ist bewusst schmal. Sie abstrahiert ABrain von der
 konkreten Einbettung und erlaubt später einen Austausch (siehe 5.).
+
+Seit PR 2 der Provider-Fallback-Linie
+([`docs/provider_fallback_and_settings_architecture.md`](./provider_fallback_and_settings_architecture.md))
+wird der ABrain-CLI-Aufruf **nicht mehr direkt** aus dem IPC-Handler
+gesprochen, sondern über die interne Text-Provider-Schicht
+(`core/src/providers/text.rs`). ABrain-CLI ist dort der Provider-Kind
+`abrain` — die äußere Kommandoform bleibt 1:1 erhalten. Zusätzlich
+kann die Reihenfolge über die Konfiguration festgelegt werden:
+
+- Env: `SMOLIT_TEXT_PROVIDER_CHAIN` — komma-separierte Liste von
+  Kind-Namen. Heute produktiv unterstützt: nur `abrain`. Unbekannte
+  Namen werden sichtbar verworfen; leere Kette → Default `["abrain"]`.
+  Weitere Kinds (lokales Command/HTTP, Cloud) folgen in späteren
+  kleinen PRs und sind **heute nicht implementiert**.
 
 ---
 

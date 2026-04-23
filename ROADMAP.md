@@ -970,11 +970,25 @@ Grundlage steht als Architektur-Dokument:
 Transparenz-/Sicherheitsgrenzen, Status-/Health-Modell, Settings-Scope
 und Nicht-Ziele.
 
-- [x] Architektur + Doku (dieser PR, PR 1 aus §9 der Doku). Kein
-      Code, kein Scene-/IPC-/Core-Eingriff.
-- [ ] PR 2: Core Provider Resolver für Text (Trait-/Enum-Schicht
-      hinter bestehendem ABrain-CLI-Adapter; konservativer Default;
-      Konfig-Kette, auch wenn vorerst einelementig).
+- [x] Architektur + Doku (PR 1 aus §9 der Doku). Kein Code, kein
+      Scene-/IPC-/Core-Eingriff.
+- [x] PR 2: Core Provider Resolver für Text — gelandet. Neuer
+      `core/src/providers/text.rs` mit `TextProviderImpl`-Enum,
+      `TextProviderResolver` (geordnete Kette, deterministischer
+      Fallback, Runtime-Status), `AbrainCliProvider` als einziger
+      produktiver Kind. Config: `TextProviderConfig.chain` (Env
+      `SMOLIT_TEXT_PROVIDER_CHAIN`, unbekannte Kinds sichtbar
+      verworfen, leere Kette → Default `["abrain"]`). `App::handle_text_query`
+      geht jetzt ausschließlich durch den Resolver (alter
+      `adapters::abrain`-Pfad entfernt). `StatusPayload` additiv um
+      fünf `text_provider_*`-Felder erweitert
+      (`configured` / `active` / `availability` / `last_error` /
+      `cloud`). Keine neuen Eventtypen, keine Policy-Änderung, kein
+      Cloud-Pfad. Tests: 103 Core-PASS (8 neue Resolver-Unit-Tests,
+      3 neue Config-Tests, 3 neue IPC-Server-Integrationstests), alle
+      10 UI-Smokes bleiben unverändert grün. Details in
+      [docs/provider_fallback_and_settings_architecture.md §9](./docs/provider_fallback_and_settings_architecture.md)
+      und [docs/api.md §2.3 / §3](./docs/api.md).
 - [ ] PR 3: Settings-Shell im UI (Expanded-Window, read-only
       Bereiche aus Doku §6; keine Schreibaktionen in den Core).
 - [ ] PR 4: STT-/TTS-Provider-Settings + Status-Anzeige (additive

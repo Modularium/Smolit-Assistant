@@ -358,15 +358,34 @@ Die folgende Sequenz ist ein **Vorschlag**. Sie darf umgeordnet
 werden, solange jeder Teil klein, eigenständig und rückfallsicher
 bleibt.
 
-- **PR 1 — Architektur + Doku (dieser PR).** Genau dieses Dokument
+- **PR 1 — Architektur + Doku (Ist).** Dokument `provider_fallback_and_settings_architecture.md`
   plus kleine Crosslinks. Kein Code, kein Protokoll-Eingriff.
-- **PR 2 — Core Provider Resolver für Text.** Einführung einer
-  Provider-Abstraktion hinter dem bestehenden ABrain-CLI-Adapter.
-  Keine neuen Provider-Implementierungen in diesem PR; nur die
-  Trait-/Enum-Schicht, ein konservativer Default (weiterhin ABrain),
-  und die Möglichkeit, in der Konfiguration eine Kette anzugeben —
-  auch wenn sie vorerst nur einen Eintrag enthält. Tests über die
-  bestehenden Core-Smoke-Pfade.
+- **PR 2 — Core Provider Resolver für Text (Ist).** Provider-
+  Abstraktion hinter dem bisherigen ABrain-CLI-Pfad. Realisiert als
+  `enum TextProviderImpl` (Enum-Dispatch, kuratiert, kein Plug-in-
+  Register) in `core/src/providers/text.rs`. Heute produktiv
+  implementiert: **genau ein** Kind — `abrain` (CLI, Signatur
+  unverändert `{cmd} task run "<input>"`, siehe
+  [`api.md` §3](./api.md)). Der `TextProviderResolver` liest eine
+  geordnete Kette, probiert jeden Provider in Reihenfolge, liefert
+  die erste erfolgreiche Antwort und hält einen kleinen
+  Laufzeit-Status (`configured` / `active` / `availability` /
+  `last_error` / `cloud`). Konfiguration in `config.rs` über den
+  neuen `TextProviderConfig.chain`-Vektor; Env-Override
+  `SMOLIT_TEXT_PROVIDER_CHAIN` (komma-separierte Kind-Namen; unbekannte
+  Namen werden sichtbar verworfen; leere Kette → Default
+  `["abrain"]`). `App::handle_text_query` geht ausschließlich
+  durch den Resolver. Fehlerklassen werden in einen kurzen Tag
+  (`timeout` / `process_missing` / `empty_response` /
+  `exit_nonzero` / `invalid_response` / `unknown`) abgebildet und in
+  `StatusPayload.text_provider_last_error` gespiegelt. Kein neuer
+  Eventtyp, kein Policy-Eingriff, kein Cloud-Pfad. StatusPayload
+  additiv um fünf `text_provider_*`-Felder erweitert (siehe
+  [`api.md` §2.3](./api.md)). Tests: 8 neue Resolver-Unit-Tests in
+  `core/src/providers/text.rs`, 3 neue Config-Tests in `config.rs`,
+  3 neue IPC-Server-Tests (Resolver-Erfolg über IPC, Resolver-
+  Fehler-/Status-Durchschlag, `get_status`-Payload mit den neuen
+  Feldern). Gesamtsumme Core-Tests: 103 PASS.
 - **PR 3 — Settings-Shell im UI.** Reine UI-Shell für ein
   Settings-Panel im Expanded-Window: Bereiche aus §6 als leere /
   read-only Kästen, erreichbar über einen neuen Dev-/Opt-in-Eintrag.

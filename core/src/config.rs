@@ -14,6 +14,9 @@ const DEFAULT_TTS_TIMEOUT_SECONDS: u64 = 20;
 const DEFAULT_IPC_BIND: &str = "127.0.0.1:8787";
 const DEFAULT_INTERACTION_BACKEND: &str = "command";
 const DEFAULT_APPROVAL_TIMEOUT_SECONDS: u64 = 20;
+/// Konservativer Default der Text-Provider-Kette. ABrain bleibt
+/// Primary — explizit in der Architektur-Doku §3 / §5 festgelegt.
+const DEFAULT_TEXT_PROVIDER_CHAIN: &[&str] = &["abrain"];
 
 #[derive(Debug, Parser)]
 #[command(name = "smolit", about = "Smolit Assistant core daemon")]
@@ -71,6 +74,25 @@ pub struct ApprovalConfig {
     pub timeout_seconds: u64,
 }
 
+/// Text/Reasoning-Provider-Konfiguration (PR 2 der Provider-Fallback-
+/// Linie, siehe `docs/provider_fallback_and_settings_architecture.md`).
+///
+/// Bewusst klein gehalten:
+///   * Eine geordnete **Kette** von Provider-Kind-Namen. ABrain ist
+///     Default und erster Eintrag, solange nichts anderes konfiguriert
+///     ist.
+///   * Kein per-Kind-Struktur-Dict in PR 2. Per-Kind-Konfiguration
+///     (Endpoint, Timeout, Secret-Slot) kommt in späteren PRs, wenn
+///     zusätzliche Provider-Klassen tatsächlich implementiert werden.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TextProviderConfig {
+    /// Reihenfolge der probierten Provider. Unbekannte Namen werden
+    /// beim Resolver-Bau sichtbar verworfen; bleibt die Liste leer,
+    /// fällt der Resolver auf `["abrain"]` zurück (siehe
+    /// [`crate::providers::text::TextProviderResolver::from_chain`]).
+    pub chain: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub abrain_cmd: String,
@@ -79,6 +101,7 @@ pub struct Config {
     pub ipc: IpcConfig,
     pub interaction: InteractionConfig,
     pub approval: ApprovalConfig,
+    pub text_provider: TextProviderConfig,
 }
 
 impl Config {
@@ -149,6 +172,16 @@ impl Config {
             DEFAULT_APPROVAL_TIMEOUT_SECONDS,
         );
 
+        // Text-Provider-Kette. Env-Format: komma-separierte
+        // Kind-Namen. Unbekannte Kinds werden beim Resolver-Bau mit
+        // `warn!` verworfen — Config hält den Rohwert und filtert nur
+        // leere Tokens. Ohne Env bleibt der Default `["abrain"]`
+        // bindend, damit ein Start ohne Konfiguration das bisherige
+        // ABrain-Only-Verhalten reproduziert.
+        let text_provider_chain = parse_text_provider_chain(
+            lookup("SMOLIT_TEXT_PROVIDER_CHAIN").as_deref(),
+        );
+
         Ok(Self {
             abrain_cmd,
             log_level,
@@ -179,6 +212,9 @@ impl Config {
             approval: ApprovalConfig {
                 timeout_seconds: approval_timeout_seconds,
             },
+            text_provider: TextProviderConfig {
+                chain: text_provider_chain,
+            },
         })
     }
 
@@ -199,6 +235,34 @@ fn parse_u64(value: Option<&str>, default: u64) -> u64 {
     value
         .and_then(|v| v.trim().parse::<u64>().ok())
         .unwrap_or(default)
+}
+
+/// Parst die rohe `SMOLIT_TEXT_PROVIDER_CHAIN`-Eingabe (komma-separiert)
+/// in eine Liste normalisierter Kind-Namen. Leerer oder nicht gesetzter
+/// Input → Default `["abrain"]`. Unbekannte Kinds bleiben hier
+/// **enthalten** — der eigentliche Whitelist-Filter passiert im
+/// Provider-Resolver, damit die Doku-Entscheidung („unbekannte Kinds
+/// werden sichtbar verworfen") an einer einzigen Stelle lebt.
+fn parse_text_provider_chain(raw: Option<&str>) -> Vec<String> {
+    let Some(value) = raw else {
+        return DEFAULT_TEXT_PROVIDER_CHAIN
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+    };
+    let items: Vec<String> = value
+        .split(',')
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if items.is_empty() {
+        DEFAULT_TEXT_PROVIDER_CHAIN
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect()
+    } else {
+        items
+    }
 }
 
 fn non_empty(value: Option<String>) -> Option<String> {
@@ -276,4 +340,28 @@ fn normalize_env_value(value: &str) -> String {
 #[allow(dead_code)]
 fn _is_repo_root(path: &Path) -> bool {
     path.join("core").exists()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_text_provider_chain_defaults_to_abrain_when_missing() {
+        assert_eq!(parse_text_provider_chain(None), vec!["abrain"]);
+    }
+
+    #[test]
+    fn parse_text_provider_chain_trims_normalises_and_filters_empty() {
+        assert_eq!(
+            parse_text_provider_chain(Some("  ABrain , , local_cmd ")),
+            vec!["abrain", "local_cmd"],
+        );
+    }
+
+    #[test]
+    fn parse_text_provider_chain_empty_string_falls_back_to_default() {
+        assert_eq!(parse_text_provider_chain(Some("")), vec!["abrain"]);
+        assert_eq!(parse_text_provider_chain(Some(", , ")), vec!["abrain"]);
+    }
 }
