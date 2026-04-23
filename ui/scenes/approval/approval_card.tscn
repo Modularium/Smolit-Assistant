@@ -1,0 +1,9 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/approval/approval_card.gd" id="1_ctrl"]
+
+[node name="ApprovalCard" type="PanelContainer"]
+visible = false
+custom_minimum_size = Vector2(260, 0)
+modulate = Color(1, 1, 1, 0.95)
+script = ExtResource("1_ctrl")

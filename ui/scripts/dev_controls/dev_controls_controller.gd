@@ -178,6 +178,14 @@ func _build_ui() -> void:
 	root.add_child(_build_workflow_visibility_section())
 
 	# Separator
+	var sep_appr := HSeparator.new()
+	sep_appr.modulate = Color(1, 1, 1, 0.3)
+	root.add_child(sep_appr)
+
+	# Approval demo trigger (PR 17).
+	root.add_child(_build_approval_demo_section())
+
+	# Separator
 	var sep2 := HSeparator.new()
 	sep2.modulate = Color(1, 1, 1, 0.3)
 	root.add_child(sep2)
@@ -595,8 +603,7 @@ func _build_workflow_visibility_section() -> Control:
 
 	_workflow_visibility_toggle = CheckBox.new()
 	_workflow_visibility_toggle.text = "Show workflow overlay"
-	_workflow_visibility_toggle.tooltip_text =
-		"Session-only toggle. Env default is SMOLIT_WORKFLOW_OVERLAY=0."
+	_workflow_visibility_toggle.tooltip_text = "Session-only toggle. Env default is SMOLIT_WORKFLOW_OVERLAY=0."
 	_workflow_visibility_toggle.toggled.connect(_on_workflow_visibility_toggled)
 	box.add_child(_workflow_visibility_toggle)
 
@@ -626,3 +633,55 @@ func _on_workflow_visibility_toggled(pressed: bool) -> void:
 	if not _workflow_visibility.has_method("set_overlay_visible"):
 		return
 	_workflow_visibility.call("set_overlay_visible", pressed)
+
+
+# --- PR 17: Approval UX demo trigger -----------------------------------
+#
+# Ein Button, der ein harmloses Demo-Approval am Core auslöst. Kein
+# Systemaufruf, kein AdminBot, kein Shell. Der Core antwortet mit
+# `approval_requested` → die Approval-Card rendert. Nach Approve/Deny
+# resolvet der Core ohne Side-Effect.
+
+
+func _build_approval_demo_section() -> Control:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 4)
+
+	var title := Label.new()
+	title.text = "Approval demo (harmless)"
+	title.add_theme_font_size_override("font_size", 10)
+	title.modulate = Color(1, 1, 1, 0.6)
+	box.add_child(title)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 4)
+	box.add_child(row)
+
+	for risk in ["low", "medium", "high"]:
+		var btn := Button.new()
+		btn.text = "Demo %s" % risk
+		btn.tooltip_text = "Request a harmless demo approval at risk=%s." % risk
+		btn.pressed.connect(_on_approval_demo_pressed.bind(risk))
+		row.add_child(btn)
+
+	var hint := Label.new()
+	hint.text = "Core runs no action. UX only."
+	hint.add_theme_font_size_override("font_size", 9)
+	hint.modulate = Color(1, 1, 1, 0.4)
+	box.add_child(hint)
+
+	return box
+
+
+func _on_approval_demo_pressed(risk: String) -> void:
+	var client: Node = get_node_or_null("/root/IpcClient")
+	if client == null:
+		push_warning("[dev-controls] IpcClient autoload missing; cannot fire demo approval")
+		return
+	if not client.has_method("request_approval_demo"):
+		push_warning("[dev-controls] IpcClient missing request_approval_demo (older build)")
+		return
+	client.call("request_approval_demo",
+		"Demo approval",
+		"Harmless UX demo. The core will not run any action after this decision.",
+		risk)

@@ -42,6 +42,8 @@ func _init() -> void:
 	_check_disconnect_skips_active_steps()
 	_check_unknown_event_order_does_not_crash()
 	_check_long_text_gets_trimmed_in_step_snippet()
+	_check_approval_requested_renders_active_step()
+	_check_approval_resolved_outcomes()
 	_check_panel_scene_defaults_to_hidden()
 	_check_panel_toggle_roundtrip()
 	_check_panel_reset_for_tests_clears_model()
@@ -86,8 +88,11 @@ func _check_enum_helpers() -> void:
 	_assert(not _ModelRef.is_terminal_kind(_ModelRef.StepKind.STEP),
 		"is_terminal_kind(STEP) == false")
 	var kinds: Array = _ModelRef.all_kinds()
-	_assert(kinds.size() == 8,
-		"all_kinds() contains eight categories")
+	# PR 17 fügt APPROVAL hinzu → 9 Kategorien.
+	_assert(kinds.size() == 9,
+		"all_kinds() contains nine categories (PR 17 added APPROVAL)")
+	_assert(kinds.has(_ModelRef.StepKind.APPROVAL),
+		"all_kinds() includes APPROVAL")
 
 
 func _check_snippet_trim() -> void:
@@ -272,6 +277,59 @@ func _check_long_text_gets_trimmed_in_step_snippet() -> void:
 		"response snippet is trimmed to MAX_SNIPPET_CHARS")
 	_assert(snippet.ends_with(_ModelRef.ELLIPSIS),
 		"response snippet ends with ellipsis when truncated")
+
+
+func _check_approval_requested_renders_active_step() -> void:
+	var model = _ModelRef.new()
+	model.apply_approval_requested({
+		"approval_id": "apr_000001",
+		"title": "Open calendar",
+		"message": "Open calendar?",
+		"risk": "high",
+	})
+	var snap: Dictionary = model.snapshot()
+	_assert(_status_for(snap["steps"], _ModelRef.StepKind.APPROVAL) == _ModelRef.Status.ACTIVE,
+		"APPROVAL step is ACTIVE after approval_requested")
+	var snippet: String = _snippet_for(snap["steps"], _ModelRef.StepKind.APPROVAL)
+	_assert(snippet.contains("high") and snippet.contains("Open calendar"),
+		"APPROVAL snippet carries risk + title")
+	# Modell-Label für APPROVAL ist stabil.
+	_assert(_ModelRef.kind_label(_ModelRef.StepKind.APPROVAL) == "Approval",
+		"kind_label(APPROVAL) == 'Approval'")
+
+
+func _check_approval_resolved_outcomes() -> void:
+	# approved → DONE
+	var model_ok = _ModelRef.new()
+	model_ok.apply_approval_requested({"approval_id": "apr_ok", "title": "t", "risk": "low"})
+	model_ok.apply_approval_resolved({"approval_id": "apr_ok", "decision": "approved",
+			"source": "user"})
+	_assert(_status_for(model_ok.snapshot()["steps"], _ModelRef.StepKind.APPROVAL)
+			== _ModelRef.Status.DONE,
+		"approved → APPROVAL status DONE")
+	# denied → FAILED
+	var model_deny = _ModelRef.new()
+	model_deny.apply_approval_requested({"approval_id": "apr_no", "title": "t"})
+	model_deny.apply_approval_resolved({"approval_id": "apr_no", "decision": "denied",
+			"source": "user"})
+	_assert(_status_for(model_deny.snapshot()["steps"], _ModelRef.StepKind.APPROVAL)
+			== _ModelRef.Status.FAILED,
+		"denied → APPROVAL status FAILED")
+	# timed_out → SKIPPED
+	var model_to = _ModelRef.new()
+	model_to.apply_approval_requested({"approval_id": "apr_to", "title": "t"})
+	model_to.apply_approval_resolved({"approval_id": "apr_to", "decision": "timed_out",
+			"source": "timeout"})
+	_assert(_status_for(model_to.snapshot()["steps"], _ModelRef.StepKind.APPROVAL)
+			== _ModelRef.Status.SKIPPED,
+		"timed_out → APPROVAL status SKIPPED")
+	# Unbekannte Decision → SKIPPED (defensive, kein Leak auf DONE).
+	var model_unknown = _ModelRef.new()
+	model_unknown.apply_approval_requested({"approval_id": "apr_x", "title": "t"})
+	model_unknown.apply_approval_resolved({"approval_id": "apr_x", "decision": "weird"})
+	_assert(_status_for(model_unknown.snapshot()["steps"], _ModelRef.StepKind.APPROVAL)
+			== _ModelRef.Status.SKIPPED,
+		"unknown decision defaults to SKIPPED")
 
 
 # --- Panel scene --------------------------------------------------------

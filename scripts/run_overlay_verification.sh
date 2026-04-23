@@ -100,6 +100,19 @@
 #                   Autoloads nicht); die Laufzeit-Integration wird
 #                   beim regulären Start der Main-Scene geprüft.
 #                   Exit 0 = alle PASS.
+#   approval-card-smoke
+#                 — Führt scripts/approval_card_smoke.gd aus (PR 17).
+#                   Prüft die Approval UX v1: pure
+#                   `SmolitApprovalModel`-Logik (Risk-Sanitizer,
+#                   Title-/Summary-Kürzung, Decision-Outcome-Mapping)
+#                   sowie das Panel-Scene-Verhalten (default hidden,
+#                   Render bei approval_requested, Resolving-Flow,
+#                   Mismatched-approval_id-Ignore, Disconnect-Pfad,
+#                   missing fields, reset_for_tests) plus eine
+#                   Quelltext-Assertion, dass `ipc_client.gd` die
+#                   neuen Commands `approval_approve` /
+#                   `approval_deny` / `request_approval_demo`
+#                   trägt. Exit 0 = alle PASS.
 #   workflow-visibility-smoke
 #                 — Führt scripts/workflow_visibility_smoke.gd aus
 #                   (PR 16). Prüft das Workflow Visibility Overlay v1:
@@ -364,9 +377,24 @@ case "${CASE}" in
     # (Enum-Helfer, Snippet-Kürzung, Event-Mapping, Terminal-/
     # Disconnect-Pfade, Resilienz gegen unbekannte Reihenfolgen)
     # plus Panel-Scene-Spawn (Default-hidden, Toggle-Roundtrip,
-    # `reset_for_tests`). Keine echten EventBus-Roundtrips.
+    # `reset_for_tests`). Keine echten EventBus-Roundtrips. Seit
+    # PR 17 auch APPROVAL-Step-Mapping.
     exec godot --headless --path "${UI_DIR}" \
       --script "${REPO_ROOT}/scripts/workflow_visibility_smoke.gd"
+    ;;
+  approval-card-smoke)
+    # Spezialfall: Smoke für die Approval UX v1 (PR 17). Prüft den
+    # `SmolitApprovalModel`-Sanitizer, das Kürzen von Titel/Summary,
+    # das Decision-Outcome-Mapping und das Panel-Scene-Verhalten
+    # (default hidden, Render bei approval_requested, Resolving-
+    # Flow mit Idempotenz, Mismatched-ID-Ignore, Disconnect-Pfad,
+    # Missing-Fields-Toleranz, reset_for_tests). Zusätzlich prüft
+    # der Smoke per Quelltext-Assertion, dass `ipc_client.gd` die
+    # neuen Commands (`approval_approve`, `approval_deny`,
+    # `request_approval_demo`) trägt. Keine echten EventBus-
+    # Roundtrips, keine Core-Verbindung.
+    exec godot --headless --path "${UI_DIR}" \
+      --script "${REPO_ROOT}/scripts/approval_card_smoke.gd"
     ;;
   avatar-render-polish-smoke)
     # Spezialfall: Smoke für den Phase-3.2-Render-Polish

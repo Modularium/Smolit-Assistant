@@ -143,6 +143,12 @@ func _connect_event_bus() -> void:
 		bus.speaking_started_received.connect(_on_speaking_started)
 	if bus.has_signal("speaking_ended_received"):
 		bus.speaking_ended_received.connect(_on_speaking_ended)
+	# PR 17 — Approval-Envelopes werden als eigene APPROVAL-Karte
+	# gerendert. Unabhängig von der Approval-Card-UX.
+	if bus.has_signal("approval_requested_received"):
+		bus.approval_requested_received.connect(_on_approval_requested)
+	if bus.has_signal("approval_resolved_received"):
+		bus.approval_resolved_received.connect(_on_approval_resolved)
 	if bus.has_signal("ipc_disconnected"):
 		bus.ipc_disconnected.connect(_on_ipc_disconnected)
 
@@ -207,6 +213,16 @@ func _on_speaking_started(payload: Dictionary) -> void:
 
 func _on_speaking_ended(payload: Dictionary) -> void:
 	_model.apply_speaking_ended(payload, _ts_ms())
+	_render()
+
+
+func _on_approval_requested(payload: Dictionary) -> void:
+	_model.apply_approval_requested(payload, _ts_ms())
+	_render()
+
+
+func _on_approval_resolved(payload: Dictionary) -> void:
+	_model.apply_approval_resolved(payload, _ts_ms())
 	_render()
 
 

@@ -231,6 +231,16 @@ func _ready() -> void:
 	EventBus.speaking_started_received.connect(_on_speaking_started)
 	EventBus.speaking_ended_received.connect(_on_speaking_ended)
 
+	# PR 17 — Approval UX v1. Der Avatar spiegelt offene Approvals
+	# weich: `approval_requested` zieht den Ausdruck auf `curious`
+	# (transient), `denied` / `cancelled` / `expired` / `timed_out`
+	# auf den weichen `error_soft`-Cue. `approved` bleibt stumm — es
+	# folgt meist eine reguläre `action_*`-Kette, die den Ausdruck
+	# ohnehin übernimmt. Kein State-Wechsel; bestehende Guards (PR
+	# 14) lassen ACTING/ERROR unangetastet.
+	EventBus.approval_requested_received.connect(_on_approval_requested)
+	EventBus.approval_resolved_received.connect(_on_approval_resolved)
+
 	var initial: int = AvatarStateRef.State.IDLE if IpcClient.is_connected_to_core() \
 		else AvatarStateRef.State.DISCONNECTED
 	_set_state(initial)
@@ -754,6 +764,36 @@ func _on_heard(_text: String) -> void:
 	# Cores). Die Expression allein signalisiert den „Hm, gehört"-
 	# Moment und verschwindet nach `CURIOUS.hold_seconds` wieder.
 	_set_expression(AvatarExpressionRef.Kind.CURIOUS)
+
+
+# --- PR 17: Approval UX-Hook (Expression-Layer only) --------------------
+
+
+func _on_approval_requested(_payload: Dictionary) -> void:
+	# Ein offenes Approval zieht die Aufmerksamkeit der Figur — aber
+	# nur weich. Kein State-Wechsel, kein Hold-Reset. Bestehende
+	# Guards aus PR 14 gelten: wenn wir gerade ACTING oder ERROR
+	# rendern, lassen wir den Cue fallen, damit ein laufender
+	# Desktop-/Fehler-Cue nicht zerbricht.
+	if _state == AvatarStateRef.State.ACTING or _state == AvatarStateRef.State.ERROR:
+		return
+	_set_expression(AvatarExpressionRef.Kind.CURIOUS)
+
+
+func _on_approval_resolved(payload: Dictionary) -> void:
+	var decision: String = String(payload.get("decision", ""))
+	match decision:
+		"denied", "cancelled", "timed_out", "expired":
+			if _state == AvatarStateRef.State.ACTING or _state == AvatarStateRef.State.ERROR:
+				return
+			_set_expression(AvatarExpressionRef.Kind.ERROR_SOFT)
+		_:
+			# `approved` oder unbekannt: kein eigener Cue — meist
+			# folgt eine reguläre Action-Event-Kette, die den
+			# Ausdruck sowieso übernimmt. Eine stumme Rückkehr auf
+			# den State-Default wird vom Expression-Hold-Timer
+			# ohnehin erledigt, sobald der aktuelle Cue abläuft.
+			pass
 
 
 ## Setzt die aktuelle Expression. Transiente Ausdrücke (`curious` /

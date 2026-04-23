@@ -39,6 +39,7 @@ enum StepKind {
 	ACTION,
 	STEP,
 	SPEAKING,
+	APPROVAL,
 	COMPLETED,
 	FAILED,
 }
@@ -71,6 +72,7 @@ const _KIND_NAMES: Dictionary = {
 	StepKind.ACTION: "action",
 	StepKind.STEP: "step",
 	StepKind.SPEAKING: "speaking",
+	StepKind.APPROVAL: "approval",
 	StepKind.COMPLETED: "completed",
 	StepKind.FAILED: "failed",
 }
@@ -90,6 +92,7 @@ const _KIND_LABELS: Dictionary = {
 	StepKind.ACTION: "Action",
 	StepKind.STEP: "Step",
 	StepKind.SPEAKING: "Speaking",
+	StepKind.APPROVAL: "Approval",
 	StepKind.COMPLETED: "Done",
 	StepKind.FAILED: "Failed",
 }
@@ -289,6 +292,69 @@ func apply_speaking_ended(payload: Dictionary, timestamp_ms: int = 0) -> void:
 	if not ok:
 		snippet = trim_snippet(_str_field(payload, "error_class"))
 	_upsert(StepKind.SPEAKING, status, snippet, _str_field(payload, "action_id"), timestamp_ms)
+
+
+## PR 17 — Approval UX v1. Ein eingehendes `approval_requested` wird
+## als eigene APPROVAL-Karte gerendert; Risk und Titel landen im
+## Snippet, damit die Workflow-Kurzanzeige neben der Approval-Card
+## einen ehrlichen Kontext hat. Der Schritt ist aktiv, bis das
+## `approval_resolved`-Envelope eintrifft.
+func apply_approval_requested(payload: Dictionary, timestamp_ms: int = 0) -> void:
+	_offline = false
+	_start_new_workflow_if_terminal()
+	var title: String = _str_field(payload, "title")
+	if title.is_empty():
+		title = _str_field(payload, "message")
+	var risk: String = _str_field(payload, "risk")
+	if risk.is_empty():
+		risk = "medium"
+	var summary: String = trim_snippet("[%s] %s" % [risk, title])
+	_upsert(
+		StepKind.APPROVAL,
+		Status.ACTIVE,
+		summary,
+		_str_field(payload, "approval_id"),
+		timestamp_ms,
+	)
+
+
+## PR 17 — Zusammen mit [method apply_approval_requested] bildet
+## diese Funktion das APPROVAL-Kapitel auf die bestehenden Status-
+## Stufen ab:
+##
+##   * `approved` → DONE
+##   * `denied` / `cancelled` → FAILED
+##   * `timed_out` / `expired` → SKIPPED
+##   * unbekannt → SKIPPED (defensiv, kein DONE-Leak)
+##
+## Der Schritt bleibt in der Kette sichtbar; ein neues Approval
+## überschreibt ihn später upsert-basiert.
+func apply_approval_resolved(payload: Dictionary, timestamp_ms: int = 0) -> void:
+	_offline = false
+	var decision: String = _str_field(payload, "decision")
+	var status: int = Status.SKIPPED
+	match decision:
+		"approved":
+			status = Status.DONE
+		"denied", "cancelled":
+			status = Status.FAILED
+		"timed_out", "expired":
+			status = Status.SKIPPED
+		_:
+			status = Status.SKIPPED
+	var source: String = _str_field(payload, "source")
+	var snippet: String
+	if source.is_empty():
+		snippet = trim_snippet(decision)
+	else:
+		snippet = trim_snippet("%s (%s)" % [decision, source])
+	_upsert(
+		StepKind.APPROVAL,
+		status,
+		snippet,
+		_str_field(payload, "approval_id"),
+		timestamp_ms,
+	)
 
 
 func apply_disconnected() -> void:

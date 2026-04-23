@@ -63,6 +63,45 @@ func send_approval_response(approval_id: String, decision: String) -> void:
 	})
 
 
+## PR 17 — schmaler Approve-Pfad; wire-äquivalent zu
+## `send_approval_response(..., "approved")`, nur mit separatem
+## `type`-Wert. Der Core akzeptiert beide.
+func approval_approve(approval_id: String) -> void:
+	_send({
+		"type": "approval_approve",
+		"approval_id": approval_id,
+	})
+
+
+## PR 17 — schmaler Deny-Pfad. Siehe [method approval_approve].
+func approval_deny(approval_id: String) -> void:
+	_send({
+		"type": "approval_deny",
+		"approval_id": approval_id,
+	})
+
+
+## PR 17 — harmloser Demo-Auslöser. Keine Systemaktion danach. Dient
+## nur zur Evaluation der Approval-Card-UX. Alle Argumente sind
+## optional; der Core kuratiert kurze Defaults, wenn sie fehlen. Die
+## UI reicht Strings unverändert durch — *keine* lokale Sanitisierung
+## sensibler Inhalte; der Aufrufer ist verantwortlich, ausschließlich
+## harmlose Demo-Texte mitzugeben.
+func request_approval_demo(
+	title: Variant = null,
+	summary: Variant = null,
+	risk: Variant = null,
+) -> void:
+	var payload: Dictionary = {"type": "request_approval_demo"}
+	if typeof(title) == TYPE_STRING:
+		payload["title"] = String(title)
+	if typeof(summary) == TYPE_STRING:
+		payload["summary"] = String(summary)
+	if typeof(risk) == TYPE_STRING:
+		payload["risk"] = String(risk)
+	_send(payload)
+
+
 ## Select a discovered target as the current Interaction context. The
 ## core validates and echoes back a `target_selected` envelope (or an
 ## `error` frame when the payload is malformed). Selection is *not*
