@@ -441,13 +441,36 @@ Desktop Interaction Layer, die UI projiziert nur.
       Rein UI-seitig, keine neuen States, keine IPC-/Protokolländerung.
       Siehe
       [docs/ui_architecture.md §7](./docs/ui_architecture.md) „Phase B++".
-- [ ] Feinere Animationszustände (`curious`, `focused`, `alert`, …)
+- [x] **Behavioral Expression Layer v1 (UI-only, PR 15)** — sechs
+      kuratierte Ausdrucksmodi (`neutral` / `focused` / `curious` /
+      `speaking` / `pleased` / `error_soft`) als dünner Multiplier-
+      /Tint-Patch oberhalb der bestehenden Avatar-States. Event-
+      Mapping: `thinking → focused`, `response → pleased → state-
+      default`, `speaking_started → speaking` (sticky), `speaking_ended
+      ok → pleased → state-default`, `speaking_ended !ok → error_soft
+      + bestehender ERROR-Pfad`, `heard → curious` (transient),
+      `disconnected → neutral`. Template-Capability-Contract bleibt
+      bindend (`orb.wiggle = NONE` ist auch in `curious` still).
+      **Ausdrücklich kein** Emotion-Protokoll, **kein** Phonem-/Lip-
+      Sync, **kein** Streaming-Audio, **keine** Asset-Imports. PR 14-
+      Speech-Sync bleibt das Fundament; PR 15 nutzt
+      `speaking_started` / `speaking_ended` nur visuell. Verifiziert
+      durch `scripts/avatar_expression_smoke.gd` (Harness-Case
+      `avatar-expression-smoke`). Details in
+      [docs/ui_architecture.md §7 „Phase 4 – Behavioral Expression Layer v1"](./docs/ui_architecture.md).
+      **Offene Restschuld:** feinere Zustände wie `alert`, Emotion-
+      Mapping aus ABrain-Responses, antwortabhängige Reaktionen
+      (Text-Tonalität → Ausdruck) — das würde ein neues Protokoll
+      und/oder einen Streaming-Pfad brauchen und bleibt Phase C.
 - [ ] Emotion-Mapping Core → UI (setzt Protokollerweiterung um
       `emotion` voraus)
 - [x] Speech-Sync (TTS-Lebenszyklus-Events → Animation) — MVP via
       PR 14, siehe Subeinheit 3.2. Tiefer gehender Sync (Phonem,
       Audio-Timeline) bleibt offen.
-- [ ] Antwortabhängige Reaktionen
+- [ ] Antwortabhängige Reaktionen (Text-Tonalität → Expression-
+      Auswahl); heute nur binär PLEASED bei Erfolg / ERROR_SOFT bei
+      Fehler. Feinere Abbildung bräuchte Emotion- oder Sentiment-
+      Signal aus dem Core.
 - [ ] erste echte Persönlichkeits-Cues über rein visuelle Mikro-Cues
       hinaus
 
@@ -1566,8 +1589,12 @@ Speech-Sync ist mit PR 14 im MVP angekommen
 (`speaking_started` / `speaking_ended` + UI-Projektion, siehe
 [docs/api.md §2.11](./docs/api.md) und
 [docs/ui_architecture.md §8.4a](./docs/ui_architecture.md));
-tieferer Sync (Phonem, Audio-Timeline, Ausdrucksstufen) bleibt in
-Phase C geparkt.
+PR 15 setzt darauf den **Behavioral Expression Layer v1** auf (sechs
+UI-only Ausdrucksmodi als Multiplier-/Tint-Patch, siehe
+[docs/ui_architecture.md §8.4b](./docs/ui_architecture.md)). Tieferer
+Speech-Sync (Phonem, Audio-Timeline) und Emotion-Mapping aus ABrain
+bleiben in Phase C geparkt — PR 15 ändert ausdrücklich **kein**
+Protokoll.
 
 Für den Desktop Interaction Layer läuft jetzt ein konkreter
 **Approval / Confirmation Flow MVP**: freigabepflichtige Aktionen

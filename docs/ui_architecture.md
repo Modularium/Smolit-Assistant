@@ -438,9 +438,97 @@ Rim-Node sowie einen Redraw-Sanity-Durchlauf aller vier kuratierten
 Identities (inkl. unbekannter ID clamp) ab. Harness-Case
 `scripts/run_overlay_verification.sh avatar-render-polish-smoke`.
 
+### Phase 4 – Behavioral Expression Layer v1 (PR 15, Ist-Zustand)
+
+Auf Phase B/B+/B++ und dem Speech-Sync-MVP aus PR 14 sitzt eine
+**UI-only Ausdrucksschicht** oberhalb der bestehenden Avatar-State-
+Maschine (`avatar_state.gd`). Sie ist der erste kleine Schritt in
+Richtung Phase C und bleibt bewusst minimal: keine neuen Events, kein
+neues Protokoll, kein Emotion-Feld, kein Audio-/Lip-Sync.
+
+- **Modul:** [`ui/scripts/avatar/avatar_expression.gd`](../ui/scripts/avatar/avatar_expression.gd) — reine
+  `RefCounted`-Logik (Enum `Kind`, Namen-Parser, Hold-Semantik,
+  Multiplier, `default_for_state`). Kein Scene-Knoten, kein Signal,
+  keine eigene State-Maschine.
+- **Wiring:** [`ui/scripts/avatar/avatar_controller.gd`](../ui/scripts/avatar/avatar_controller.gd) hält
+  die aktuelle Expression als UI-Nebenfeld (`_expression`,
+  `_expression_is_transient`, `_expression_hold_timer`) und faltet
+  drei Multiplikatoren auf den bestehenden Render-Pfad:
+  - Puls-Amplitude (`_start_breath_tween` — `pulse_mult × expression_pulse`)
+  - Wiggle-Winkel (`_play_wiggle` — `angle_mult × expression_wiggle`)
+  - Appearance-Tint (`_apply_expression_tint`, multiplikativ auf das
+    Ergebnis von `_appearance_tint`).
+
+  Alle drei Faltungen sitzen **nach** der bestehenden Template-
+  Capability-Multiplikation (`avatar_template_capabilities.gd`). Ein
+  Template mit `wiggle = NONE` bleibt damit in jeder Expression
+  still; der Expression-Layer kann eine Fähigkeit nicht „nachrüsten".
+- **Modi:** `neutral`, `focused`, `curious`, `speaking`, `pleased`,
+  `error_soft`. Sticky sind `neutral`, `focused`, `speaking`;
+  transient (mit kurzem Hold-Timer) sind `curious`, `pleased`,
+  `error_soft`. Transient-Holds sind bewusst ≤ 1.5 s, damit der
+  Layer ein Mikro-Cue bleibt und nicht zu einem Schatten-State wird.
+- **Event-Mapping (rein UI-seitig):**
+  - `thinking` → `focused` (via `default_for_state(THINKING)` beim
+    State-Wechsel auf `THINKING`).
+  - `response_received` → `pleased` (transient). Ohne TTS rollt der
+    Hold den Ausdruck anschließend auf den State-Default.
+  - `speaking_started` → `speaking` (sticky). Pinnt den Ausdruck und
+    löst einen eventuell noch laufenden `pleased`-Cue sauber ab. Der
+    PR-14-Guard (steigt nicht aus `ACTING`/`ERROR` auf `TALKING`)
+    bleibt bindend — keine Expression wird gesetzt, wenn der Handler
+    früh zurückkehrt.
+  - `speaking_ended(ok=true)` → kurzer `pleased`-Cue, danach via
+    State-Hold zurück auf `neutral`.
+  - `speaking_ended(ok=false)` → `error_soft` *vor* dem State-Wechsel
+    auf `ERROR`, damit kein Flackerfenster TALKING→ERROR sichtbar
+    wird. Der bestehende Fehler-Pfad bleibt führend: der State wird
+    wie vor PR 15 auf `ERROR` geschaltet.
+  - `heard_received` → `curious` (transient). Kein State-Wechsel; nur
+    visueller „Hm, gehört"-Cue. STT-Ergebnisse bleiben Core-seitig
+    bindend für Thinking/Approval-Entscheidungen.
+  - `disconnected` → State-Default über
+    `default_for_state(…, connected=false)` = `neutral`.
+    `DISCONNECTED_MODULATE` aus der State-Visualisierung färbt
+    weiterhin den Offline-Look; der Expression-Layer bleibt stumm.
+- **Dev-Preview:** `preview_expression(kind)` auf dem Controller ist
+  ein kleiner Lese-/Schreib-Hook für zukünftige Dev-Controls. PR 15
+  verdrahtet ihn noch nicht in ein Panel — das passiert nur, wenn
+  die bestehende `ui/scripts/dev_controls/`-Struktur sauber wieder-
+  verwendbar ist. Kein Settings-/Auto-Save-System.
+- **Smoke:** [`scripts/avatar_expression_smoke.gd`](../scripts/avatar_expression_smoke.gd),
+  als Case `avatar-expression-smoke` im
+  [`scripts/run_overlay_verification.sh`](../scripts/run_overlay_verification.sh) registriert.
+  Prüft pure Logik (Parser, Holds, Multiplier-Grenzen, Tint-Shift-
+  Shape, `default_for_state` inkl. Disconnect-Dominanz) und
+  Controller-Verdrahtung (Multiplier-Fold, Event-Mapping, PR-14-
+  Guard, Template-Capability-Gates bleiben bindend) auf
+  Quelltextebene.
+
+**Abgrenzungen:**
+
+- Keine Emotion-Protokollerweiterung. Kein `emotion`-Feld auf
+  `response`, `action_*` oder `thinking`.
+- Kein Phonem-/Lip-Sync, keine Audio-Timeline, keine Streaming-
+  Audiodaten — der Layer reagiert rein auf die bestehenden
+  Lifecycle-Events aus §8.4a.
+- Kein Stage-C-Asset-Import. Alle Cues sitzen auf prozeduralen
+  Nodes/Properties; es gibt keine neuen Binärassets.
+- Kein State-Ersatz. `avatar_state.gd` bleibt die Wahrheit für
+  idle/thinking/talking/acting/error/disconnected. Der Expression-
+  Layer ist eine parallele, subtile Projektion — sichtbar nur als
+  Puls-/Wiggle-/Tint-Modulation.
+- Kein Personality-/Policy-Kanal. Der Layer kennt keine Provider,
+  keine Approval-Semantik, keine Settings.
+
+
 ### Phase C – Erweiterter Ausdruck (Ziel > 3.x)
 
 - Feinere Zustände (z. B. `curious`, `focused`, `alert`).
+  **Hinweis:** `curious` und `focused` sind seit PR 15 als
+  UI-Expressions verfügbar (siehe Phase 4). Phase C meint zusätzlich
+  tiefere Zustandsfeinheit im Core-Protokoll — das ist nicht Teil
+  des Expression-Layers.
 - Speech-Sync mit TTS-Lebenszyklus — **MVP gelandet (PR 14).** Der
   Core meldet `speaking_started` / `speaking_ended` (siehe §8.5);
   tieferer Sync (Phonem-/Lip-Sync, Audio-Timeline) bleibt bewusst
@@ -774,11 +862,165 @@ Avatar-Controller-Handler auf Quelltext-Ebene sowie den weichen
 Bubble-Sync auf Scene-Ebene. Harness-Case:
 `scripts/run_overlay_verification.sh speech-sync-smoke`.
 
-**Offene Restschuld.** Phonem-/Lip-Sync, Audio-Timeline und feinere
-Ausdrucksstufen (`curious`, `focused`, …) sind weiterhin in Phase C
-(§7) geparkt. Der jetzt gelandete Lifecycle ist ausdrücklich das
-MVP — keine Audio-Pipeline, keine halbe Lip-Sync-Engine, kein
-globales Speech-Event-Register.
+**Offene Restschuld.** Phonem-/Lip-Sync und Audio-Timeline sind
+weiterhin in Phase C (§7) geparkt. Feinere Ausdrucksstufen wie
+`curious`, `focused`, `pleased` sind mit PR 15 als **Behavioral
+Expression Layer v1** gelandet (UI-only, siehe §8.4b) — sie ersetzen
+weder den Lifecycle noch diese Scope-Grenze.
+
+### 8.4b Behavioral Expression Layer v1 (PR 15, Ist-Zustand)
+
+Erster kuratierter Schritt aus Phase 4 „Persönlichkeit / Ausdruck":
+eine kleine UI-Schicht, die **oberhalb** der bestehenden Avatar-State-
+Maschine lebt und sichtbares Verhalten feiner zeichnet, ohne dafür
+neue Protokolle, Audio-Streams oder Assets zu brauchen.
+
+**Datei-Layout.**
+
+```text
+ui/scripts/avatar/
+├── avatar_expression.gd          # NEU: RefCounted-Modell
+│                                 # (Enum, Multiplier, Tint,
+│                                 # default_for_state)
+└── avatar_controller.gd          # hängt Expression ein (Event-
+                                  # Handler, Multiplier-Fold,
+                                  # preview_expression)
+
+ui/scripts/dev_controls/
+└── dev_controls_controller.gd    # optionale Preview-Zeile
+                                  # (`SMOLIT_UI_DEV_CONTROLS=1`)
+
+scripts/
+└── avatar_expression_smoke.gd    # NEU: Smoke für Modell + Wiring
+```
+
+**Sechs kuratierte Ausdrucksmodi.** Alle Werte sind bewusst subtil;
+wer den Layer abschaltet (oder auf `neutral` stellt) sieht das
+Rendering byte-identisch zum vor-PR-Verhalten:
+
+| Ausdruck     | hold | Puls-Mult. | Wiggle-Mult. | Tint-Shift        |
+|--------------|------|------------|--------------|-------------------|
+| `neutral`    | 0.0  | 1.00       | 1.00         | identity          |
+| `focused`    | 0.0  | 0.85       | 0.30         | leicht kühl       |
+| `curious`    | 0.9  | 1.10       | 1.70         | leicht grünlich   |
+| `speaking`   | 0.0  | 1.20       | 0.50         | leicht warm       |
+| `pleased`    | 0.6  | 1.05       | 0.80         | leicht warm-gelb  |
+| `error_soft` | 0.9  | 0.90       | 0.00         | leicht rötlich    |
+
+`hold=0.0` bedeutet *sticky*: der Ausdruck bleibt, bis ein neuer Event
+oder ein State-Wechsel ihn ablöst. `hold>0.0` markiert **transiente
+Cues** — der Controller fährt nach Ablauf automatisch auf den
+`default_for_state` zurück (siehe unten).
+
+**Zuordnung State → Default-Expression.** `AvatarExpression.default_for_state`
+bildet eine deterministische Pfeilstruktur:
+
+| Avatar-State    | Default-Expression |
+|-----------------|--------------------|
+| `IDLE`          | `neutral`          |
+| `THINKING`      | `focused`          |
+| `TALKING`       | `speaking`         |
+| `ACTING`        | `neutral`          |
+| `ERROR`         | `error_soft`       |
+| `DISCONNECTED`  | `neutral`          |
+
+Ein zusätzlicher `connected`-Parameter dominiert: offline ist die
+Expression immer `neutral`, selbst wenn der State später auf `ERROR`
+oder `TALKING` geraten sollte (stilles Sleeping-Verhalten).
+
+**Event-Mapping (aus `avatar_controller.gd`).**
+
+- `thinking_received` → State `THINKING` → Default `focused`.
+- `response_received` → State `TALKING` + **transienter** `pleased`-
+  Cue (0.6 s). Folgt `speaking_started`, ersetzt es den Cue durch
+  sticky `speaking`; bleibt es aus, fällt die Expression nach dem
+  Hold auf den `TALKING`-Default (`speaking`) zurück und nach
+  `TALK_HOLD_SECONDS` über den State-Default-Pfad auf `neutral`.
+- `speaking_started` → State `TALKING` + sticky `speaking`. Der
+  bestehende PR-14-Guard (kein Übernehmen aus `ACTING`/`ERROR`)
+  bleibt bindend.
+- `speaking_ended(ok=true)` → transienter `pleased`-Cue + Settle-Hold.
+- `speaking_ended(ok=false)` → transienter `error_soft`-Cue +
+  State-Wechsel auf `ERROR` (dort übernimmt der State-Default
+  `error_soft` nahtlos).
+- `heard_received` → transienter `curious`-Cue (0.9 s). Kein
+  State-Wechsel.
+- `ipc_disconnected` → State `DISCONNECTED` → Default `neutral`; ein
+  noch laufender transienter Cue wird fallen gelassen.
+
+**Visuelle Wirkung.** Der Layer greift ausschließlich über drei
+multiplikative Faktoren:
+
+- **Puls-Amplitude** (`_start_breath_tween`): Expression-Multiplier
+  multipliziert sich mit dem Template-Capability-Multiplier. `speaking`
+  hebt den Talking-Puls leicht an, `focused` dämpft den Thinking-Puls;
+  `error_soft` dämpft den Rest.
+- **Wiggle-Auslenkung** (`_play_wiggle`): gleiche Komposition. Eine
+  Figur mit `wiggle = NONE` auf Template-Ebene bleibt in jeder
+  Expression still — der Capability-Gate in `_arm_wiggle_timer`
+  bleibt die primäre Bremse.
+- **Tint-Shift** (`_apply_expression_tint`): multiplikativ auf die
+  `_appearance_tint`-Ausgabe; zusätzlich mit dem `EXPR_THEME_TINT`-
+  Multiplier des Templates gedämpft. Templates mit
+  `theme_tint = NONE` sehen den Shift nicht.
+
+Andere Render-Pfade (Rim-Accent, Tween-Timings, Texturen,
+Disconnected-Tint, ACTING-Tint-Tabelle, Error-Startle) bleiben
+bindend — der Layer modifiziert sie nicht, er kommentiert sie nur.
+
+**Optional: Dev-Preview.** Bei `SMOLIT_UI_DEV_CONTROLS=1` ergänzt
+`dev_controls_panel` eine Zeile mit sechs Buttons (einer pro
+Expression). Klick → `avatar_controller.preview_expression(kind)`,
+kein Auto-Save, keine Persistenz, keine Core-Kommunikation. Die
+transiente Hold-Semantik bleibt aktiv — ein Preview von `pleased`
+fällt nach 0.6 s automatisch auf den State-Default zurück, genauso
+wie bei echten Events.
+
+**Bindende Grenzen.**
+
+- **Kein neues Protokoll.** Der Core weiß nichts vom Expression-Layer.
+  Kein `emotion`-Feld, kein neues IPC-Event, kein neuer Core-Hook.
+- **Keine neue State-Maschine.** Expressions sind ein Multiplier-
+  Patch, nicht die Wahrheit. Avatar-State bleibt Source für
+  idle/thinking/talking/acting/error/disconnected.
+- **Kein Streaming-Audio, kein Phonem-/Lip-Sync.** Der Layer
+  konsumiert weiterhin nur den binären TTS-Lifecycle aus PR 14
+  (`speaking_started` / `speaking_ended`) — keine Audio-Bytes, keine
+  Timeline, keine Mundform-Simulation.
+- **Keine Asset-Imports, keine User-Uploads.** Ausschließlich
+  prozedurale Parameter auf existierenden Nodes. Phase C bleibt
+  geparkt.
+- **Template-Capability bleibt bindend.** Expressions dürfen nicht
+  an der Kapazitätsgrenze vorbei. `orb.wiggle = NONE` ist auch in
+  `curious` still; `theme_tint = NONE` filtert auch den Expression-
+  Tint.
+- **Keine Personality-/Policy-Verwechslung.** Der Layer weiß nichts
+  über Approval, Interaction, Provider oder Settings. Er reagiert
+  rein auf bestehende Presence-Events.
+
+**Verifikation.** `scripts/avatar_expression_smoke.gd` (Harness-Case
+`avatar-expression-smoke`) prüft das Modell (Enum, Namen, Parser,
+Multiplier-Schranken, Tint-Shift-Schranken, sticky-vs-transient-
+Klassifizierung, `default_for_state` inkl. `connected`-Dominanz)
+und das Controller-Wiring über Quelltext-Assertions (Multiplier-
+Fold in Puls-/Wiggle-/Tint-Pfad, Existenz der Event-Handler, PR-14-
+Guard intakt, Template-Capability-Gates bleiben bindend). Scene-
+Spawn-Tests entfallen, weil der Headless-`--script`-Modus die
+`EventBus`-/`IpcClient`-Autoloads nicht registriert — die echte
+Laufzeit-Integration läuft beim regulären Start der Main-Scene.
+
+**Offene Restschuld (nicht Teil von PR 15).**
+
+- **Phase C Deep-Expression** — Phonem-/Lip-Sync, Audio-Timeline,
+  feinere Tempo-Achsen, Emotion-Mapping aus ABrain-Responses. Diese
+  Pfade würden ein neues Protokoll und/oder Streaming-Audio brauchen
+  und sind ausdrücklich ausgeklammert.
+- **Persistenz des Expression-Defaults.** Heute kommen Expressions
+  ausschließlich aus Events; es gibt keinen gespeicherten User-
+  Default. Falls Bedarf entsteht, wäre das eine eigene kleine
+  Preferences-Linie — nicht Teil von PR 15.
+- **Emission aus dem Core.** Der Core sendet weiterhin keine
+  Expressions und nimmt keine entgegen. PR 15 ist UI-only.
 
 ### 8.5 Visual Action Mode (UI-Staging MVP, Phase 3.3, Ist-Zustand)
 
@@ -2586,9 +2828,14 @@ Einordnung und Testfälle:
   fertig; das Desktop-Overlay hängt nur noch am Fenstermodus.
 - **Tieferer Speech-Sync** — der MVP-Lifecycle `speaking_started` /
   `speaking_ended` ist in PR 14 gelandet (siehe §8.4a). Offen bleiben
-  Phonem-/Lip-Sync, Audio-Timeline und feinere Ausdrucksstufen
-  (Phase C); der heutige Pfad transportiert nur „TTS läuft / TTS ist
-  fertig".
+  Phonem-/Lip-Sync, Audio-Timeline und tiefer gehende
+  Ausdrucksbewegungen (Phase C); der heutige Pfad transportiert nur
+  „TTS läuft / TTS ist fertig".
+- **Behavioral Expression Layer v2+** — v1 (sechs kuratierte
+  Ausdrucksmodi, UI-only) ist in PR 15 gelandet (siehe §8.4b). Offen
+  bleiben feinere Zustände wie `alert`, antwortabhängige Reaktionen
+  auf Basis von Text-Tonalität, und ein optionales Emotion-Mapping
+  aus ABrain — der nächste Punkt.
 - **Emotion-Feld** — heute transportiert das Protokoll keine Emotion in
   `response`-Payloads. Sobald ABrain Emotionen liefert, wird das Feld in
   [`docs/api.md`](./api.md) additiv ergänzt.

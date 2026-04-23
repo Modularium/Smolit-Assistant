@@ -1866,7 +1866,13 @@ implementiert**; sie kommen additiv über neue `type`-Werte oder
 optionale Felder:
 
 - `response.payload.emotion` — optionales Feld, sobald ABrain Emotion
-  liefert.
+  liefert. *Hinweis:* Der UI-seitige **Behavioral Expression Layer v1**
+  (PR 15, siehe [`ui_architecture.md` §8.4b](./ui_architecture.md))
+  bringt sechs kuratierte Ausdrucksmodi (`neutral` / `focused` /
+  `curious` / `speaking` / `pleased` / `error_soft`) als visuelle
+  Patches oberhalb der bestehenden Avatar-States — **ohne** neues
+  IPC-Feld. Der Core sendet weiterhin keine Expressions und nimmt
+  keine entgegen; das Protokoll bleibt unverändert.
 - `tool_call` / `tool_result` — wenn Tool-Orchestrierung einzieht.
 - `session_reset` — explizites Beenden/Zurücksetzen einer Session.
 - Vision-/Sensor-Modalitäten — erst nach Klärung von Datenschutz und
