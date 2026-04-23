@@ -121,6 +121,11 @@ const ACTING_TINT_BY_TARGET: Dictionary = {
 ## `_body.scale` und `_body.rotation` auf diesen Node — so bleibt die
 ## bestehende Tween-Logik byte-identisch zu Phase A.
 @onready var _identity_shape: Control = $IdentityShape
+## Rim Accent — dünner prozeduraler State-Ring an der Silhouette.
+## Identitäts-neutral (Smolit wie kuratierte Alternativen teilen den
+## Ring); keine Tween-Animation, keine Eingabe. Der Controller stupst
+## ihn in jedem `_apply_state_visuals`-Durchlauf per `set_state` an.
+@onready var _rim_accent: Control = $RimAccent
 
 var _state: int = AvatarStateRef.State.DISCONNECTED
 var _thinking_tween: Tween = null       # _body.modulate:a loop (keeps MVP feel)
@@ -328,6 +333,15 @@ func _apply_state_visuals() -> void:
 	# Eingangs-State; `orb` mappt `TALKING` → `ACTING`, weil die Figur
 	# keinen Mund hat. Siehe `avatar_template_capabilities.gd::resolve_state`.
 	var effective_state: int = AvatarTemplateCapsRef.resolve_state(_identity_id, _state)
+
+	# Rim-Accent zeigt die Silhouetten-Kante in State-Farbe — unabhängig
+	# davon, ob Body oder IdentityShape aktiv rendert. Wir setzen den
+	# *tatsächlich* gerenderten State (nach Template-Fallback), damit
+	# z. B. `orb.TALKING → ACTING` den passenden Acting-Rim zeigt statt
+	# eines Talking-Rims, der mit dem sichtbaren Ausdruck nicht
+	# übereinstimmen würde.
+	if _rim_accent != null and _rim_accent.has_method("set_state"):
+		_rim_accent.call("set_state", effective_state)
 
 	match effective_state:
 		AvatarStateRef.State.IDLE:

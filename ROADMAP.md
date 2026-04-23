@@ -184,7 +184,26 @@ Subeinheit 3.4 unten sowie
 
 ### Offen (Phase 3.2)
 
-- [ ] Echte Sprite-/Charakteranimation statt Platzhalter
+- [~] Echte Sprite-/Charakteranimation statt Platzhalter — Phase 3.2
+      Render-Polish gelandet: geteilter prozeduraler **Rim-Accent-Ring**
+      an der Silhouette (`ui/scripts/avatar/avatar_rim_accent.gd`,
+      `$AvatarRoot/RimAccent`), der Smolit und die drei kuratierten
+      Alternativen identitätsneutral mit state-farbigem Silhouetten-
+      Akzent versorgt (`IDLE` / `THINKING` / `TALKING` / `ACTING` /
+      `DISCONNECTED` / `ERROR`); dazu kleiner prozeduraler Polish in
+      `avatar_identity_visual.gd` für Robot (Face-Plate + Pupillen +
+      Antennen-Stalk), Humanoid (Wangen + Pupillen-Highlights +
+      Kinn-Schatten) und Orb (vierstufiger Halo-Verlauf +
+      Sekundär-Highlight). Smolit-`TEXTURE`-Pfad unverändert; Rim
+      profitiert auch den Default. Rein prozedural, keine Asset-
+      Imports, keine neue State-Maschine, kein Capability-Contract-
+      Eingriff. Verifiziert durch 19-Assertions-Smoke
+      `scripts/avatar_render_polish_smoke.gd` (Harness-Case
+      `avatar-render-polish-smoke`). **Restschuld:** echte
+      Sprite-/Charakteranimation im Sinn einer animierten Figur
+      (z. B. Blink, Idle-Breath auf Asset-Ebene, Acting-Geste) ist
+      weiterhin offen und nicht Teil dieses Schritts. Details in
+      [docs/ui_architecture.md §7 „Phase B Render Polish"](./docs/ui_architecture.md).
 - [x] Speech-Bubble für `response` und `heard` — kleiner Utterance-MVP
       (`ui/scripts/utterance/`, `ui/scenes/utterance/utterance_bubble.tscn`)
       neben dem Avatar. Rein rendernd, EventBus-getrieben

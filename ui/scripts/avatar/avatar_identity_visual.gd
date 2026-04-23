@@ -97,72 +97,150 @@ func _draw_rounded_rect(rect: Rect2, color: Color) -> void:
 
 
 func _draw_robot_face(rect: Rect2) -> void:
-	# Minimaler Ausdruck: zwei Augen + ein orangefarbener Antennen-
-	# Punkt oben. Bewusst nicht animiert — State-Feedback kommt über
-	# den vom Controller vorgegebenen `modulate`.
-	var eye_y: float = rect.position.y + rect.size.y * 0.44
+	# Polish-Stufe Phase 3.2 Render-MVP: Kopf wird klar lesbarer durch
+	# eine etwas dunklere "Face-Plate" (kleine Hinterlegung für die
+	# Augen), Augen bekommen Pupillen, die Antenne einen sichtbaren
+	# Stalk und einen Mund-Slit. Alles weiter rein prozedural, keine
+	# Animation, keine Assets — State-Feedback kommt unverändert über
+	# `modulate` (siehe `avatar_controller.gd::_apply_state_visuals`).
+	var cx: float = rect.position.x + rect.size.x * 0.5
+	var top: float = rect.position.y
+	# Face-Plate: ein leicht abgesetztes dunkleres Rounded-Rect im
+	# Augenband-Bereich. Hebt die Augenpartie optisch vom Kopf ab und
+	# lässt den Roboter weniger wie eine blanke Fläche wirken.
+	var plate_rect := Rect2(
+		rect.position + Vector2(rect.size.x * 0.16, rect.size.y * 0.30),
+		Vector2(rect.size.x * 0.68, rect.size.y * 0.30),
+	)
+	var plate_color := Color(0.10, 0.16, 0.26, 0.42)
+	_draw_inner_rounded_rect(plate_rect, plate_color, rect.size.x * 0.06)
+
+	# Augen — leicht kleiner und tiefer als zuvor, damit sie in der
+	# Face-Plate sitzen. Pupillen sind kleine dunkle Kreise; der Kontrast
+	# zur Plate gibt dem Ausdruck eine klare Richtung.
+	var eye_y: float = rect.position.y + rect.size.y * 0.45
 	var eye_r: float = rect.size.x * 0.085
 	var eye_color := Color(1, 1, 1, 0.95)
-	draw_circle(
-		Vector2(rect.position.x + rect.size.x * 0.33, eye_y), eye_r, eye_color,
+	var pupil_color := Color(0.08, 0.12, 0.18, 0.95)
+	var left_eye := Vector2(rect.position.x + rect.size.x * 0.34, eye_y)
+	var right_eye := Vector2(rect.position.x + rect.size.x * 0.66, eye_y)
+	draw_circle(left_eye, eye_r, eye_color)
+	draw_circle(right_eye, eye_r, eye_color)
+	draw_circle(left_eye, eye_r * 0.48, pupil_color)
+	draw_circle(right_eye, eye_r * 0.48, pupil_color)
+
+	# Antenne: kurzer vertikaler Stalk plus die bekannte orangene Kuppe.
+	# Der Stalk hebt den Dot von der Kopfsilhouette ab, statt ihn wie
+	# einen aufgesetzten Aufkleber wirken zu lassen.
+	var stalk_w: float = rect.size.x * 0.022
+	var stalk_h: float = rect.size.y * 0.12
+	var stalk_top_y: float = top + rect.size.y * 0.06
+	var stalk_color := Color(0.35, 0.38, 0.44, 0.85)
+	draw_rect(
+		Rect2(Vector2(cx - stalk_w * 0.5, stalk_top_y), Vector2(stalk_w, stalk_h)),
+		stalk_color,
 	)
 	draw_circle(
-		Vector2(rect.position.x + rect.size.x * 0.67, eye_y), eye_r, eye_color,
-	)
-	# Antennen-Dot
-	draw_circle(
-		Vector2(rect.position.x + rect.size.x * 0.5, rect.position.y + rect.size.y * 0.14),
-		rect.size.x * 0.045,
+		Vector2(cx, stalk_top_y),
+		rect.size.x * 0.048,
 		Color(1.0, 0.72, 0.32, 1.0),
+	)
+
+	# Mund-Slit: eine kurze horizontale Linie unter der Face-Plate. Kein
+	# Smile, kein Emoji — ein schmaler Strich, der dem Kopf einen
+	# klaren "Abschluss nach unten" gibt, ohne ihn zu anthropomorph zu
+	# machen.
+	var mouth_y: float = rect.position.y + rect.size.y * 0.72
+	var mouth_half: float = rect.size.x * 0.14
+	draw_line(
+		Vector2(cx - mouth_half, mouth_y),
+		Vector2(cx + mouth_half, mouth_y),
+		Color(0.12, 0.16, 0.22, 0.70),
+		maxf(1.0, rect.size.x * 0.02),
+		true,
 	)
 
 
 func _draw_orb(rect: Rect2, color: Color) -> void:
-	# Drei konzentrische Kreise ergeben ein weiches Glow-Orb ohne
-	# Shader-Aufwand: äußerer Halo (halbtransparent), Kernkreis,
-	# innerer Highlight-Spot (off-center).
+	# Polish-Stufe: statt einem harten 35%-Halo + Kernkreis zeichnen wir
+	# jetzt einen weicheren Verlauf aus vier konzentrischen Halo-Layern
+	# mit abnehmender Alpha. Ergebnis: die Silhouette fadet sauberer nach
+	# außen, der Kern bleibt klar erkennbar, und ein kleiner
+	# Sekundär-Highlight unten rechts gibt dem Orb Tiefe ohne
+	# Shader-Aufwand.
 	var center: Vector2 = rect.position + rect.size * 0.5
 	var outer_r: float = minf(rect.size.x, rect.size.y) * 0.5
-	# Halo
-	draw_circle(center, outer_r,
-		Color(color.r, color.g, color.b, color.a * 0.35))
-	# Hauptkörper
-	draw_circle(center, outer_r * 0.78, color)
-	# Highlight (oben-links leicht versetzt)
+	# Halo-Ringe (außen → innen), jeweils leicht transparenter als der
+	# nächste. Der outerste Ring ist fast unsichtbar und simuliert einen
+	# weichen Abfall — Godot hat keinen Gradient-Kreis, aber vier
+	# Schritte reichen für eine deutlich glattere Anmutung als zuvor.
+	var halo_alphas: Array = [0.12, 0.22, 0.34, 0.55]
+	var halo_radii: Array = [1.00, 0.93, 0.86, 0.80]
+	for i in range(halo_alphas.size()):
+		var a: float = float(halo_alphas[i]) * color.a
+		var rr: float = outer_r * float(halo_radii[i])
+		draw_circle(center, rr, Color(color.r, color.g, color.b, a))
+	# Hauptkörper (Kern des Orbs).
+	draw_circle(center, outer_r * 0.70, color)
+	# Primär-Highlight oben-links.
 	draw_circle(
-		center - Vector2(outer_r * 0.18, outer_r * 0.22),
+		center - Vector2(outer_r * 0.20, outer_r * 0.24),
 		outer_r * 0.28,
-		Color(1, 1, 1, 0.5),
+		Color(1, 1, 1, 0.55),
+	)
+	# Sekundär-Highlight unten-rechts — kleiner, gedämpfter, gibt dem
+	# Orb einen weichen "Schulter"-Glanz statt einer flachen Kugel.
+	draw_circle(
+		center + Vector2(outer_r * 0.24, outer_r * 0.20),
+		outer_r * 0.14,
+		Color(1, 1, 1, 0.20),
 	)
 
 
 func _draw_humanoid(rect: Rect2, color: Color) -> void:
-	# Ruhiges menschlich gelesenes Gesicht: ein Kreis in Hauttönen
-	# plus zwei Augen und ein kleiner Mund-Arc. Bewusst flach und
-	# symmetrisch — wir wollen weder Charakterdesign noch Karikatur,
-	# nur eine deutlich vom Robot / Orb unterscheidbare Silhouette.
+	# Polish-Stufe: Kopf bekommt sanfte Wangen-Betonung (sehr schwaches
+	# Blush), Pupillen erhalten kleine Highlight-Dots, und ein dezenter
+	# Halbring unter dem Mund gibt dem Kinn etwas Tiefe. Weiter
+	# bewusst flach und symmetrisch — wir wollen keine Karikatur, nur
+	# eine klar vom Robot / Orb unterscheidbare Silhouette.
 	var center: Vector2 = rect.position + rect.size * 0.5
 	var outer_r: float = minf(rect.size.x, rect.size.y) * 0.5
-	# Hauptkörper (Kopf) — der Radius ist leicht unter 50 %, damit die
-	# Figur nicht an den Clip-Rand des AvatarRoot-Layout-Rects stößt.
+	# Kopf. Radius bleibt leicht unter 50 %, damit die Figur nicht an den
+	# Clip-Rand stößt.
 	draw_circle(center, outer_r * 0.94, color)
-	# Augen — leicht unterhalb der Mitte, vertikal identisch.
+
+	# Wangen — zwei sehr leicht rosé eingefärbte Kreise. Alpha sehr
+	# niedrig, damit der Effekt auch unter Theme-Tints dezent bleibt.
+	var cheek_color := Color(1.00, 0.72, 0.68, 0.18)
+	var cheek_r: float = outer_r * 0.16
+	var cheek_y: float = center.y + outer_r * 0.10
+	var cheek_dx: float = outer_r * 0.44
+	draw_circle(Vector2(center.x - cheek_dx, cheek_y), cheek_r, cheek_color)
+	draw_circle(Vector2(center.x + cheek_dx, cheek_y), cheek_r, cheek_color)
+
+	# Augen + Pupillen-Highlights. Die Augen selbst bleiben klein und
+	# dunkel; der Highlight-Dot ist ein kleiner weißer Akzent, der dem
+	# Blick Lebendigkeit gibt — aber bewusst klein genug, um nicht
+	# überpräsent zu wirken.
 	var eye_y: float = center.y - outer_r * 0.10
 	var eye_dx: float = outer_r * 0.30
 	var eye_r: float = outer_r * 0.09
 	var eye_color := Color(0.15, 0.18, 0.22, 0.95)
-	draw_circle(Vector2(center.x - eye_dx, eye_y), eye_r, eye_color)
-	draw_circle(Vector2(center.x + eye_dx, eye_y), eye_r, eye_color)
-	# Mund — ein sehr flacher Bogen, gezeichnet als `draw_arc` mit
-	# einer kleinen Linienstärke. Ein Smile ohne Übertreibung; die
-	# Neutralität erlaubt es State-Tints, die Stimmung zu tragen.
+	var highlight_color := Color(1.0, 1.0, 1.0, 0.85)
+	var left_eye := Vector2(center.x - eye_dx, eye_y)
+	var right_eye := Vector2(center.x + eye_dx, eye_y)
+	draw_circle(left_eye, eye_r, eye_color)
+	draw_circle(right_eye, eye_r, eye_color)
+	draw_circle(left_eye + Vector2(-eye_r * 0.30, -eye_r * 0.35),
+		eye_r * 0.30, highlight_color)
+	draw_circle(right_eye + Vector2(-eye_r * 0.30, -eye_r * 0.35),
+		eye_r * 0.30, highlight_color)
+
+	# Mund — wie bisher ein sanftes Lächeln via `draw_arc`. Werte sind
+	# unverändert, damit der Grundausdruck identisch bleibt.
 	var mouth_center: Vector2 = center + Vector2(0, outer_r * 0.28)
 	var mouth_r: float = outer_r * 0.26
 	var mouth_color := Color(0.25, 0.20, 0.18, 0.90)
-	# Arc-Winkel in Radian: unterer Halbkreis-Ausschnitt. Godot
-	# zeichnet `draw_arc` standardmäßig gegen den Uhrzeigersinn vom
-	# Start- zum Endwinkel; ein Bereich von 0.15π bis 0.85π auf einer
-	# abwärts zeigenden Ringachse liefert ein sanftes Lächeln.
 	draw_arc(
 		mouth_center,
 		mouth_r,
@@ -172,3 +250,39 @@ func _draw_humanoid(rect: Rect2, color: Color) -> void:
 		mouth_color,
 		minf(outer_r * 0.05, 3.0),
 	)
+
+	# Kinn-Schatten: ein schmaler Bogen unter dem Mund, sehr
+	# transparent. Gibt dem Gesicht eine minimale Dreidimensionalität,
+	# ohne in Schattenspiel abzudriften.
+	var chin_center: Vector2 = center + Vector2(0, outer_r * 0.52)
+	var chin_r: float = outer_r * 0.62
+	var chin_color := Color(0.15, 0.12, 0.10, 0.14)
+	draw_arc(
+		chin_center,
+		chin_r,
+		deg_to_rad(35.0),
+		deg_to_rad(145.0),
+		24,
+		chin_color,
+		minf(outer_r * 0.045, 2.5),
+	)
+
+
+## Ein kleiner Helper für das Face-Plate-Rendering im Robot-Kopf.
+## Verwendet dieselbe „zwei Rechtecke + vier Eckenkreise"-Technik wie
+## `_draw_rounded_rect`, bleibt aber lokal inset- und radius-parametriert,
+## damit die Face-Plate sauber innerhalb der Kopfsilhouette sitzt.
+func _draw_inner_rounded_rect(rect: Rect2, color: Color, corner_radius: float) -> void:
+	var r: float = minf(minf(rect.size.x, rect.size.y) * 0.5, corner_radius)
+	draw_rect(Rect2(
+		rect.position + Vector2(0, r),
+		Vector2(rect.size.x, rect.size.y - 2.0 * r),
+	), color)
+	draw_rect(Rect2(
+		rect.position + Vector2(r, 0),
+		Vector2(rect.size.x - 2.0 * r, rect.size.y),
+	), color)
+	draw_circle(rect.position + Vector2(r, r), r, color)
+	draw_circle(rect.position + Vector2(rect.size.x - r, r), r, color)
+	draw_circle(rect.position + Vector2(r, rect.size.y - r), r, color)
+	draw_circle(rect.position + Vector2(rect.size.x - r, rect.size.y - r), r, color)

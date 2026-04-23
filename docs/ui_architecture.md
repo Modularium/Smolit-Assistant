@@ -271,7 +271,7 @@ die geplante Ausbaustrecke, nicht der heutige Stand.
 - `LineEdit` + Buttons „Send" / „Ping" bedienen `submit_text` und `ping`.
 - Kein Avatar, keine Animation, keine Sprechblase.
 
-### Phase B – 2D-Avatar + Zustände (Ziel 3.2)
+### Phase B – 2D-Avatar + Zustände (Ist 3.2, weiter prozedural)
 
 - 2D-Sprite als Kind-Scene, zentrale State-Machine auf EventBus-Signalen
   (`thinking_received`, `response_received`, `error_received`,
@@ -346,6 +346,80 @@ Weitere Eigenschaften:
 - Ausdruck basiert **ausschließlich** auf vorhandenen Core-Events /
   Avatar-States. Keine neue Entscheidungs- oder Emotionslogik, keine
   neuen IPC-Nachrichten, kein neues State-Feld im Protokoll.
+
+### Phase B Render Polish (Ist 3.2, rein prozedural)
+
+Kleine, bewusst konservative Qualitätsanhebung des bestehenden 2D-MVPs.
+**Keine** Sprite-/Spritesheet-Animation, **keine** Frame-Sequenzen,
+**keine** neuen Assets, **keine** 2.5D-/3D-Arbeit, **keine** Stage-C-
+Vorarbeit. Zweck ist lediglich, die Figur als Figur besser lesbar zu
+machen, statt sie wie einen technischen Block-/Rect-Placeholder wirken
+zu lassen.
+
+Zwei additive Bausteine sitzen auf der bestehenden Avatar-Scene:
+
+- **Rim Accent (`ui/scripts/avatar/avatar_rim_accent.gd`,
+  `$AvatarRoot/RimAccent`).** Ein dünner prozeduraler State-Ring an der
+  Silhouette, oberhalb von `Body` / `IdentityShape` gezeichnet. Der
+  Ring ist **identitäts-neutral** — Smolit-Texture und alle drei
+  kuratierten Alternativen teilen sich denselben Rim, die Farbe kommt
+  ausschließlich aus dem Avatar-State
+  (`IDLE` / `THINKING` / `TALKING` / `ACTING` / `DISCONNECTED` /
+  `ERROR`). Der Controller stupst den Ring in jedem
+  `_apply_state_visuals`-Durchlauf per `set_state(effective_state)`
+  an; für kuratierte Identities mit `state_fallback` (z. B.
+  `orb.TALKING → ACTING`) zeigt der Rim die Farbe des *tatsächlich*
+  gerenderten States — keine zweite Wahrheit neben dem Capability-
+  Contract. Rein statisch: keine Tweens, keine Timer, keine
+  Eingabe-Annahme (`mouse_filter = MOUSE_FILTER_IGNORE`). Smolit
+  profitiert hier sichtbar, obwohl der `TEXTURE`-Pfad selbst
+  unverändert bleibt.
+- **Polish im prozeduralen Zeichnen
+  (`ui/scripts/avatar/avatar_identity_visual.gd`).** Die drei
+  kuratierten Alternativen bekommen eine kleine, tastefully zurück-
+  gehaltene Qualitätsanhebung, weiter rein prozedural:
+  - **Robot-Head** — abgesetzte dunklere „Face-Plate" im Augenband,
+    Pupillen in den Augen, sichtbarer Antennen-Stalk zum Dot,
+    schmale Mund-Slit-Linie.
+  - **Humanoid-Head** — sehr dezente Wangen-Blush-Kreise, kleine
+    weiße Highlight-Dots in den Pupillen, zusätzlicher weicher
+    Kinn-Schatten-Arc unter dem Mund.
+  - **Orb** — vier konzentrische Halo-Layer mit abnehmender Alpha
+    statt des früheren zweistufigen Verlaufs, plus ein kleiner
+    Sekundär-Highlight unten-rechts für Tiefe.
+  - **Smolit-Salamander** — `TEXTURE`-Pfad unverändert, damit die
+    Identitätsgarantie (Default + CALM + Unity-Overrides = vor-PR-
+    Verhalten) bytegleich gültig bleibt. Die sichtbare Qualitäts-
+    anhebung für Smolit kommt über den gemeinsamen Rim-Accent.
+
+Harte Grenzen dieses Schritts, bindend für spätere PRs in dieser Linie:
+
+- **Kein Sprite-/Asset-Import.** Keine neuen PNG/SVG/GLB-Dateien,
+  kein Asset-Loader, keine Import-Pipeline.
+- **Kein `if identity == …`-Branch im Controller.** Template-Fallbacks
+  und Expression-Levels laufen weiterhin ausschließlich über
+  `avatar_template_capabilities.gd` (§8b.8). Der Rim-Accent selbst ist
+  identitätsneutraler Presence-Polish — keine neue Ausdrucks-Achse
+  im Capability-Contract.
+- **Kein State-Maschinen-Umbau.** Die sechs Avatar-States
+  (`IDLE` / `THINKING` / `TALKING` / `ACTING` / `DISCONNECTED` /
+  `ERROR`) bleiben unverändert; keine neuen Phasen, kein neues
+  Ausdrucks-Feld im Protokoll.
+- **Kein TTS-/Speech-Sync.** TTS-Lebenszyklus-Events sind weiterhin
+  offen (siehe Phase C und ROADMAP Phase 3.2); der Polish reagiert
+  rein auf den Avatar-State.
+- **Default-Smolit und Fallback-Verhalten bleiben geschützt.**
+  Unbekannte Identity-IDs werden weiterhin auf Smolit geklemmt
+  (`avatar_identity.gd::identity_from_string`); unbekannte States am
+  Rim fallen still auf die `IDLE`-Farbe zurück, ohne den Controller-
+  State zu ändern.
+
+Verifikation: `scripts/avatar_render_polish_smoke.gd` (19 Assertions,
+alle PASS) deckt die Rim-Farbtabelle, den Unbekannte-State-Fallback,
+Distinctness der sechs State-Farben, `set_state` / `current_state` am
+Rim-Node sowie einen Redraw-Sanity-Durchlauf aller vier kuratierten
+Identities (inkl. unbekannter ID clamp) ab. Harness-Case
+`scripts/run_overlay_verification.sh avatar-render-polish-smoke`.
 
 ### Phase C – Erweiterter Ausdruck (Ziel > 3.x)
 

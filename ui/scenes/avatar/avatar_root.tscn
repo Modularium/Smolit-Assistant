@@ -1,9 +1,10 @@
-[gd_scene load_steps=8 format=3]
+[gd_scene load_steps=9 format=3]
 
 [ext_resource type="Script" path="res://scripts/avatar/avatar_controller.gd" id="1_ctrl"]
 [ext_resource type="Texture2D" path="res://assets/avatar/smolit_idle.png" id="2_idle"]
 [ext_resource type="Texture2D" path="res://assets/avatar/smolit_active.png" id="3_active"]
 [ext_resource type="Script" path="res://scripts/avatar/avatar_identity_visual.gd" id="4_identity"]
+[ext_resource type="Script" path="res://scripts/avatar/avatar_rim_accent.gd" id="5_rim"]
 
 [sub_resource type="Shader" id="Shader_circle_mask"]
 code = "shader_type canvas_item;
@@ -82,3 +83,16 @@ offset_bottom = -8.0
 mouse_filter = 2
 pivot_offset = Vector2(44, 44)
 script = ExtResource("4_identity")
+
+[node name="RimAccent" type="Control" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 8.0
+offset_top = 8.0
+offset_right = -8.0
+offset_bottom = -8.0
+mouse_filter = 2
+pivot_offset = Vector2(44, 44)
+script = ExtResource("5_rim")

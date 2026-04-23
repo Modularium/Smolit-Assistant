@@ -76,6 +76,16 @@
 #                   sowie Scene-Verhalten des Controllers (set_utterance,
 #                   clear_utterance, leere/whitespace-Eingaben, Replace,
 #                   wiederholte Updates). Exit 0 = alle PASS.
+#   avatar-render-polish-smoke
+#                 — Führt scripts/avatar_render_polish_smoke.gd aus.
+#                   Prüft den Phase-3.2-Render-Polish:
+#                   `avatar_rim_accent.gd` (State-Farbtabelle,
+#                   unbekannte-State-Fallback, distinct colors,
+#                   set_state/current_state) plus Sanity-Redraw für
+#                   alle vier kuratierten Identities via
+#                   `avatar_identity_visual.gd` (Smolit / Robot-Head /
+#                   Humanoid-Head / Orb; unbekannte ID bleibt geklemmt,
+#                   kein Crash). Exit 0 = alle PASS.
 #   resolver-wayland-mutter
 #                 — Env-Override (Wayland + GNOME) + Report. Zeigt, dass
 #                   der Resolver backend_wayland_mutter wählt und der
@@ -264,6 +274,17 @@ case "${CASE}" in
     # wiederholte Updates). Keine IPC, kein EventBus-Roundtrip.
     exec godot --headless --path "${UI_DIR}" \
       --script "${REPO_ROOT}/scripts/utterance_bubble_smoke.gd"
+    ;;
+  avatar-render-polish-smoke)
+    # Spezialfall: Smoke für den Phase-3.2-Render-Polish
+    # (ui/scripts/avatar/avatar_rim_accent.gd + gepolisherter
+    # avatar_identity_visual.gd). Prüft State-Farbtabelle,
+    # Fallback bei unbekannten States, Scene-Instanz-Verhalten des
+    # Rim-Accents und einen Redraw-Sanity-Durchlauf aller vier
+    # kuratierten Identities (Smolit / Robot-Head / Humanoid-Head /
+    # Orb) inkl. Unbekannte-ID-Clamping.
+    exec godot --headless --path "${UI_DIR}" \
+      --script "${REPO_ROOT}/scripts/avatar_render_polish_smoke.gd"
     ;;
   resolver-wayland-mutter)
     export SMOLIT_WINDOW_REPORT=1
