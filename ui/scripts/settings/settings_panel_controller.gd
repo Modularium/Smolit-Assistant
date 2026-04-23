@@ -99,6 +99,26 @@ var _local_http_probe_button: Button = null
 var _local_http_apply_status_label: Label = null
 var _local_http_probe_status_label: Label = null
 
+## PR 10 — Cloud-HTTP-Editor. Bewusst klein und security-first:
+## Enabled + Endpoint + Modell + Secret + Probe + Apply. Der Secret-
+## Wert wird **nie** aus dem Status rückgespiegelt — das Edit-Feld
+## bleibt beim Rendering leer, ein separates Label zeigt nur
+## „key saved ✓" vs. „key not set ✗" an.
+var _cloud_http_enabled_check: CheckBox = null
+var _cloud_http_endpoint_edit: LineEdit = null
+var _cloud_http_model_edit: LineEdit = null
+## Secret-Eingabefeld mit `secret = true` (Godot-Masking). Der Wert
+## wird **nie** von `apply_status` befüllt — nur vom Nutzer.
+var _cloud_http_secret_edit: LineEdit = null
+var _cloud_http_apply_button: Button = null
+var _cloud_http_save_secret_button: Button = null
+var _cloud_http_clear_secret_button: Button = null
+var _cloud_http_probe_button: Button = null
+var _cloud_http_apply_status_label: Label = null
+var _cloud_http_probe_status_label: Label = null
+var _cloud_http_secret_status_label: Label = null
+var _cloud_http_external_warning_label: Label = null
+
 ## PR 9 — Text-Provider-Chain-Editor. Bewusst klein: eine Liste der
 ## bekannten Kinds mit Enable-CheckBox + Up/Down-Buttons, Apply-Knopf
 ## und kleiner Reset-Knopf. Die UI hält keinen zweiten
@@ -120,6 +140,7 @@ var _syncing_stt_widgets: bool = false
 var _syncing_tts_widgets: bool = false
 var _syncing_local_http_widgets: bool = false
 var _syncing_text_chain_widgets: bool = false
+var _syncing_cloud_http_widgets: bool = false
 
 const _LLAMAFILE_MODE_OPTIONS: Array = [
 	{"id": 0, "value": "on_demand", "label": "On demand"},
@@ -387,6 +408,18 @@ func _render_sections() -> void:
 	_text_chain_reset_button = null
 	_text_chain_apply_status_label = null
 	_text_chain_state = []
+	_cloud_http_enabled_check = null
+	_cloud_http_endpoint_edit = null
+	_cloud_http_model_edit = null
+	_cloud_http_secret_edit = null
+	_cloud_http_apply_button = null
+	_cloud_http_save_secret_button = null
+	_cloud_http_clear_secret_button = null
+	_cloud_http_probe_button = null
+	_cloud_http_apply_status_label = null
+	_cloud_http_probe_status_label = null
+	_cloud_http_secret_status_label = null
+	_cloud_http_external_warning_label = null
 
 	for section in _SectionsRef.all_sections():
 		_content_vbox.add_child(_build_section(section))
@@ -400,10 +433,14 @@ func _render_sections() -> void:
 		if section == _SectionsRef.SectionId.TEXT_PROVIDER:
 			# PR 9: Chain-Editor zuerst, weil er die sichtbare
 			# Reihenfolge kontrolliert; anschließend die Per-Kind-
-			# Editoren (llamafile/local_http) in gewohnter Reihenfolge.
+			# Editoren (llamafile/local_http/cloud_http) in gewohnter
+			# Reihenfolge. PR 10: cloud_http kommt zuletzt, damit die
+			# externe/Cloud-Oberfläche visuell von den lokalen Blöcken
+			# abgesetzt bleibt.
 			_content_vbox.add_child(_build_text_chain_editor_block())
 			_content_vbox.add_child(_build_llamafile_editor_block())
 			_content_vbox.add_child(_build_local_http_editor_block())
+			_content_vbox.add_child(_build_cloud_http_editor_block())
 		elif section == _SectionsRef.SectionId.STT:
 			_content_vbox.add_child(_build_stt_editor_block())
 		elif section == _SectionsRef.SectionId.TTS:
@@ -1543,3 +1580,289 @@ func simulate_text_chain_toggle_for_test(row_index: int, pressed: bool) -> void:
 
 func simulate_text_chain_move_for_test(row_index: int, direction: int) -> void:
 	_on_text_chain_row_move(row_index, direction)
+
+
+# --- Cloud-HTTP-Editor (PR 10) ------------------------------------------
+
+
+## Baut den Cloud-HTTP-Editor. Konservativ: Enabled + Endpoint +
+## Modell + Secret + Probe + Apply. Der Secret-Wert wird **nie** aus
+## `apply_status` rückgespiegelt — das Edit-Feld bleibt leer, ein
+## separates Label trägt den `cloud_http_secret_present`-Flag.
+func _build_cloud_http_editor_block() -> Control:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 4)
+
+	var title := Label.new()
+	title.text = "cloud_http · Edit · external"
+	title.add_theme_font_size_override("font_size", 11)
+	title.modulate = Color(1, 0.85, 0.55, 0.95)
+	box.add_child(title)
+
+	_cloud_http_external_warning_label = Label.new()
+	_cloud_http_external_warning_label.text = (
+		"Achtung: externer / cloud Pfad. Requests verlassen diese Maschine in dem Moment, in dem dieser Provider in der Chain steht und enabled ist."
+	)
+	_cloud_http_external_warning_label.modulate = Color(1, 0.85, 0.55, 0.9)
+	_cloud_http_external_warning_label.add_theme_font_size_override("font_size", 10)
+	_cloud_http_external_warning_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(_cloud_http_external_warning_label)
+
+	_cloud_http_enabled_check = CheckBox.new()
+	_cloud_http_enabled_check.text = "SMOLIT_CLOUD_HTTP_ENABLED"
+	_cloud_http_enabled_check.tooltip_text = "Master-Schalter für cloud_http. Ohne diesen Flag bleibt der Provider inert, auch wenn er in der Chain steht."
+	box.add_child(_cloud_http_enabled_check)
+
+	var endpoint_row := HBoxContainer.new()
+	endpoint_row.add_theme_constant_override("separation", 6)
+	box.add_child(endpoint_row)
+	var endpoint_label := Label.new()
+	endpoint_label.text = "endpoint"
+	endpoint_label.custom_minimum_size = Vector2(90, 0)
+	endpoint_row.add_child(endpoint_label)
+	_cloud_http_endpoint_edit = LineEdit.new()
+	_cloud_http_endpoint_edit.placeholder_text = "http://host:port/path  (https:// in dieser Stufe noch nicht unterstützt)"
+	_cloud_http_endpoint_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	endpoint_row.add_child(_cloud_http_endpoint_edit)
+
+	var model_row := HBoxContainer.new()
+	model_row.add_theme_constant_override("separation", 6)
+	box.add_child(model_row)
+	var model_label := Label.new()
+	model_label.text = "model"
+	model_label.custom_minimum_size = Vector2(90, 0)
+	model_row.add_child(model_label)
+	_cloud_http_model_edit = LineEdit.new()
+	_cloud_http_model_edit.placeholder_text = "optional, z. B. gpt-4o-mini"
+	_cloud_http_model_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	model_row.add_child(_cloud_http_model_edit)
+
+	# Secret-Zeile: Maskiertes LineEdit + Status + Save/Clear. Der
+	# Wert wird **nie** aus `apply_status` befüllt.
+	var secret_row := HBoxContainer.new()
+	secret_row.add_theme_constant_override("separation", 6)
+	box.add_child(secret_row)
+	var secret_label := Label.new()
+	secret_label.text = "api_key"
+	secret_label.custom_minimum_size = Vector2(90, 0)
+	secret_row.add_child(secret_label)
+	_cloud_http_secret_edit = LineEdit.new()
+	_cloud_http_secret_edit.secret = true
+	_cloud_http_secret_edit.placeholder_text = "paste key — not echoed, not stored in UI"
+	_cloud_http_secret_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	secret_row.add_child(_cloud_http_secret_edit)
+	_cloud_http_save_secret_button = Button.new()
+	_cloud_http_save_secret_button.text = "Save key"
+	_cloud_http_save_secret_button.tooltip_text = "Schreibt den eingegebenen Key über settings_set_cloud_http_secret in den Core-Secret-Store (0600). Leeres Feld = kein Write."
+	_cloud_http_save_secret_button.pressed.connect(_on_cloud_http_save_secret_pressed)
+	secret_row.add_child(_cloud_http_save_secret_button)
+	_cloud_http_clear_secret_button = Button.new()
+	_cloud_http_clear_secret_button.text = "Clear key"
+	_cloud_http_clear_secret_button.tooltip_text = "Löscht den persistierten Key im Core-Secret-Store."
+	_cloud_http_clear_secret_button.pressed.connect(_on_cloud_http_clear_secret_pressed)
+	secret_row.add_child(_cloud_http_clear_secret_button)
+
+	_cloud_http_secret_status_label = Label.new()
+	_cloud_http_secret_status_label.text = "key: unknown"
+	_cloud_http_secret_status_label.modulate = Color(1, 1, 1, 0.6)
+	_cloud_http_secret_status_label.add_theme_font_size_override("font_size", 10)
+	box.add_child(_cloud_http_secret_status_label)
+
+	var actions_row := HBoxContainer.new()
+	actions_row.add_theme_constant_override("separation", 6)
+	box.add_child(actions_row)
+	_cloud_http_apply_button = Button.new()
+	_cloud_http_apply_button.text = "Apply"
+	_cloud_http_apply_button.tooltip_text = "Schreibt enabled/endpoint/model in den Core (Secret ist getrennter Pfad)."
+	_cloud_http_apply_button.pressed.connect(_on_cloud_http_apply_pressed)
+	actions_row.add_child(_cloud_http_apply_button)
+	_cloud_http_probe_button = Button.new()
+	_cloud_http_probe_button.text = "Probe"
+	_cloud_http_probe_button.tooltip_text = "TCP-Connect gegen den Endpoint; kein Completion-Request, kein Bearer-Header."
+	_cloud_http_probe_button.pressed.connect(_on_cloud_http_probe_pressed)
+	actions_row.add_child(_cloud_http_probe_button)
+
+	_cloud_http_apply_status_label = Label.new()
+	_cloud_http_apply_status_label.text = ""
+	_cloud_http_apply_status_label.modulate = Color(1, 1, 1, 0.6)
+	_cloud_http_apply_status_label.add_theme_font_size_override("font_size", 10)
+	box.add_child(_cloud_http_apply_status_label)
+	_cloud_http_probe_status_label = Label.new()
+	_cloud_http_probe_status_label.text = ""
+	_cloud_http_probe_status_label.modulate = Color(1, 1, 1, 0.6)
+	_cloud_http_probe_status_label.add_theme_font_size_override("font_size", 10)
+	box.add_child(_cloud_http_probe_status_label)
+
+	var sep := HSeparator.new()
+	sep.modulate = Color(1, 1, 1, 0.2)
+	box.add_child(sep)
+
+	_sync_cloud_http_widgets_from_status()
+	return box
+
+
+## Liest `cloud_http_*`-Felder aus dem letzten Status und spiegelt sie
+## in die Widgets. **Niemals** wird der API-Key zurückgeholt — das
+## Secret-Edit-Feld bleibt leer. Ein separates Label trägt den
+## `cloud_http_secret_present`-Bool.
+func _sync_cloud_http_widgets_from_status() -> void:
+	if _cloud_http_enabled_check == null:
+		return
+	_syncing_cloud_http_widgets = true
+	var enabled := bool(_last_status.get("cloud_http_enabled", false))
+	_cloud_http_enabled_check.button_pressed = enabled
+	# Endpoint/Model werden **nicht** aus dem Status geholt — der
+	# StatusPayload trägt diese Felder bewusst nicht, siehe
+	# `docs/provider_fallback_and_settings_architecture.md` §11. Die
+	# UI leert sie beim ersten Sync, damit keine Stale-Werte aus einem
+	# alten Core hängen bleiben.
+	if _cloud_http_endpoint_edit != null and _cloud_http_endpoint_edit.text == "":
+		_cloud_http_endpoint_edit.text = ""
+	if _cloud_http_model_edit != null and _cloud_http_model_edit.text == "":
+		_cloud_http_model_edit.text = ""
+	var secret_present := bool(_last_status.get("cloud_http_secret_present", false))
+	if _cloud_http_secret_status_label != null:
+		if secret_present:
+			_cloud_http_secret_status_label.text = "key: saved ✓"
+			_cloud_http_secret_status_label.modulate = Color(0.6, 0.9, 0.6, 0.9)
+		else:
+			_cloud_http_secret_status_label.text = "key: not set ✗"
+			_cloud_http_secret_status_label.modulate = Color(0.9, 0.5, 0.5, 0.9)
+	_syncing_cloud_http_widgets = false
+
+
+func _on_cloud_http_apply_pressed() -> void:
+	if _cloud_http_enabled_check == null:
+		return
+	var client: Node = null
+	if is_inside_tree():
+		client = get_node_or_null("/root/IpcClient")
+	if client == null or not client.has_method("is_connected_to_core") \
+			or not client.is_connected_to_core():
+		if _cloud_http_apply_status_label != null:
+			_cloud_http_apply_status_label.text = "offline"
+			_cloud_http_apply_status_label.modulate = Color(0.9, 0.5, 0.5, 0.9)
+		return
+	var endpoint: Variant = null
+	if _cloud_http_endpoint_edit != null:
+		endpoint = _cloud_http_endpoint_edit.text
+	var model: Variant = null
+	if _cloud_http_model_edit != null and _cloud_http_model_edit.text.strip_edges() != "":
+		model = _cloud_http_model_edit.text
+	if client.has_method("settings_set_cloud_http_config"):
+		client.call(
+			"settings_set_cloud_http_config",
+			_cloud_http_enabled_check.button_pressed,
+			endpoint,
+			model,
+			null,
+		)
+	if _cloud_http_apply_status_label != null:
+		_cloud_http_apply_status_label.text = "sent"
+		_cloud_http_apply_status_label.modulate = Color(1, 1, 1, 0.55)
+
+
+## Secret-Schreibpfad. Security-first:
+##   1. Wert aus dem Edit lesen.
+##   2. Edit-Feld **sofort** leeren (auch bei Offline / leerem Input),
+##      damit der Klartext in keinem UI-Zustand überlebt.
+##   3. Erst danach gegen den Core senden.
+func _on_cloud_http_save_secret_pressed() -> void:
+	if _cloud_http_secret_edit == null:
+		return
+	var value := _cloud_http_secret_edit.text
+	# Step 1+2: Wert kopieren, Feld sofort leeren.
+	_cloud_http_secret_edit.text = ""
+	# UI-seitige Vorbedingung: leeres Feld = kein Save (Clear
+	# läuft über den eigenen Button).
+	if value.strip_edges() == "":
+		if _cloud_http_secret_status_label != null:
+			_cloud_http_secret_status_label.text = "key: empty input — use 'Clear key' to remove a stored key"
+			_cloud_http_secret_status_label.modulate = Color(0.9, 0.7, 0.3, 0.9)
+		return
+	var client: Node = null
+	if is_inside_tree():
+		client = get_node_or_null("/root/IpcClient")
+	if client == null or not client.has_method("is_connected_to_core") \
+			or not client.is_connected_to_core():
+		if _cloud_http_secret_status_label != null:
+			_cloud_http_secret_status_label.text = "offline — key not sent (retype to retry)"
+			_cloud_http_secret_status_label.modulate = Color(0.9, 0.5, 0.5, 0.9)
+		return
+	if client.has_method("settings_set_cloud_http_secret"):
+		client.call("settings_set_cloud_http_secret", value)
+	if _cloud_http_secret_status_label != null:
+		_cloud_http_secret_status_label.text = "key: sent (field cleared)"
+		_cloud_http_secret_status_label.modulate = Color(1, 1, 1, 0.55)
+
+
+func _on_cloud_http_clear_secret_pressed() -> void:
+	var client: Node = null
+	if is_inside_tree():
+		client = get_node_or_null("/root/IpcClient")
+	if client == null or not client.has_method("is_connected_to_core") \
+			or not client.is_connected_to_core():
+		if _cloud_http_secret_status_label != null:
+			_cloud_http_secret_status_label.text = "offline"
+			_cloud_http_secret_status_label.modulate = Color(0.9, 0.5, 0.5, 0.9)
+		return
+	if client.has_method("settings_set_cloud_http_secret"):
+		client.call("settings_set_cloud_http_secret", null)
+	if _cloud_http_secret_edit != null:
+		_cloud_http_secret_edit.text = ""
+	if _cloud_http_secret_status_label != null:
+		_cloud_http_secret_status_label.text = "key: clear requested"
+		_cloud_http_secret_status_label.modulate = Color(1, 1, 1, 0.55)
+
+
+func _on_cloud_http_probe_pressed() -> void:
+	var client: Node = null
+	if is_inside_tree():
+		client = get_node_or_null("/root/IpcClient")
+	if client == null or not client.has_method("is_connected_to_core") \
+			or not client.is_connected_to_core():
+		if _cloud_http_probe_status_label != null:
+			_cloud_http_probe_status_label.text = "offline"
+			_cloud_http_probe_status_label.modulate = Color(0.9, 0.5, 0.5, 0.9)
+		return
+	if client.has_method("settings_probe_cloud_http"):
+		client.call("settings_probe_cloud_http")
+	if _cloud_http_probe_status_label != null:
+		_cloud_http_probe_status_label.text = "probe: pending…"
+		_cloud_http_probe_status_label.modulate = Color(1, 1, 1, 0.55)
+
+
+func cloud_http_editor_snapshot() -> Dictionary:
+	var built := _cloud_http_enabled_check != null
+	if not built:
+		return {
+			"built": false,
+			"enabled": false,
+			"endpoint": "",
+			"model": "",
+			"secret_status": "",
+			"secret_edit_text": "",
+			"apply_status": "",
+			"probe_status": "",
+			"external_warning": "",
+		}
+	return {
+		"built": true,
+		"enabled": _cloud_http_enabled_check.button_pressed,
+		"endpoint": _cloud_http_endpoint_edit.text if _cloud_http_endpoint_edit != null else "",
+		"model": _cloud_http_model_edit.text if _cloud_http_model_edit != null else "",
+		"secret_status": _cloud_http_secret_status_label.text if _cloud_http_secret_status_label != null else "",
+		"secret_edit_text": _cloud_http_secret_edit.text if _cloud_http_secret_edit != null else "",
+		"apply_status": _cloud_http_apply_status_label.text if _cloud_http_apply_status_label != null else "",
+		"probe_status": _cloud_http_probe_status_label.text if _cloud_http_probe_status_label != null else "",
+		"external_warning": _cloud_http_external_warning_label.text if _cloud_http_external_warning_label != null else "",
+	}
+
+
+## Test-Hook: simuliert einen Klick auf „Save key". Wird vom Smoke-
+## Test benutzt, um Secret-Masking und sofortiges Leeren des Felds zu
+## verifizieren, ohne einen echten IpcClient-Autoload zu brauchen.
+func simulate_cloud_http_save_secret_for_test(value: String) -> void:
+	if _cloud_http_secret_edit != null:
+		_cloud_http_secret_edit.text = value
+	_on_cloud_http_save_secret_pressed()

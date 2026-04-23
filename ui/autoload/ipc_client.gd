@@ -210,6 +210,48 @@ func settings_reset_text_provider_chain() -> void:
 	_send({"type": "settings_reset_text_provider_chain"})
 
 
+## PR 10 — operationale Cloud-HTTP-Config (Endpoint / Model / Timeout /
+## Enabled). **Enthält keinen API-Key** — der läuft über
+## `settings_set_cloud_http_secret`.
+func settings_set_cloud_http_config(
+	enabled: bool,
+	endpoint: Variant = null,
+	model: Variant = null,
+	request_timeout_seconds: Variant = null,
+) -> void:
+	var payload := {
+		"type": "settings_set_cloud_http_config",
+		"enabled": enabled,
+	}
+	if endpoint != null:
+		payload["endpoint"] = String(endpoint)
+	if model != null:
+		payload["model"] = String(model)
+	if request_timeout_seconds != null:
+		payload["request_timeout_seconds"] = int(request_timeout_seconds)
+	_send(payload)
+
+
+## PR 10 — Cloud-HTTP-Secret schreiben oder löschen. Der Key verlässt
+## diese Funktion auf direktem Weg über die IPC-Pipe zum Core; der
+## Core persistiert ihn in `secrets.json` (0600). Leerer String oder
+## `null` → Key wird gelöscht.
+func settings_set_cloud_http_secret(api_key: Variant) -> void:
+	var payload := {"type": "settings_set_cloud_http_secret"}
+	if api_key == null:
+		payload["api_key"] = null
+	else:
+		payload["api_key"] = String(api_key)
+	_send(payload)
+
+
+## PR 10 — Cloud-HTTP-Probe. TCP-Connect gegen den geparsten Endpoint,
+## kein Completion-Request, kein Bearer-Header auf der Leitung.
+## Antwort: `settings_probe_result_received` mit `axis="cloud_http"`.
+func settings_probe_cloud_http() -> void:
+	_send({"type": "settings_probe_cloud_http"})
+
+
 func _load_config() -> void:
 	var cfg := ConfigFile.new()
 	var err := cfg.load(_CONFIG_PATH)

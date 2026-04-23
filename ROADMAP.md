@@ -1286,6 +1286,58 @@ und Nicht-Ziele.
       `settings-shell-smoke` um drei Blöcke erweitert (+9
       Assertions). Alle übrigen UI-Smokes grün; Headless-Boot
       sauber.
+- [x] PR 10: erster Cloud-/Remote-Text-Provider `cloud_http` +
+      dedizierter Secret-Pfad — sehr bewusster MVP, **opt-in**,
+      nicht Default, nicht stiller Fallback. POST JSON mit
+      einem Prompt-Feld + optionalem `model`, Response trägt
+      ein Text-Feld, Bearer-Auth über einen konfigurierbaren
+      Header. **Kein Streaming, kein Tool-Calling, kein
+      `messages`-Array.** Plaintext HTTP nur in dieser Stufe
+      (Scheme `https://` wird hart abgelehnt; Betreiber stellen
+      einen vertrauenswürdigen Reverse-Proxy vor den Endpoint).
+      **Secret-Pfad** ist der Herzschlag des PRs: neuer
+      [`core/src/secrets_store.rs`](./core/src/secrets_store.rs)
+      mit eigener Datei `secrets.json` (getrennt von allen
+      operationalen Overrides, Permissions 0600, atomarer
+      Write). `SecretsFile::Debug` elidiert Werte durchgängig
+      zu `<set>`/`<unset>`; `CloudHttpProvider::Debug` tut
+      dasselbe. `App.cloud_http_api_key: Mutex<Option<String>>`
+      lebt getrennt von allen operationalen `live_*`-Configs.
+      `StatusPayload` bekommt vier schmale, **nicht-sensitiven**
+      Felder: `cloud_http_in_chain`, `cloud_http_enabled`,
+      `cloud_http_configured`, `cloud_http_secret_present` —
+      der Key-Wert verlässt den Store niemals. Neue IPC-Messages
+      `settings_set_cloud_http_config` (operational),
+      `settings_set_cloud_http_secret` (einziger IPC-Pfad mit
+      Key-Klartext; Response enthält nur den `secret_present`-
+      Flag), `settings_probe_cloud_http` (TCP-Connect only,
+      kein Completion-Roundtrip, kein Bearer-Header auf der
+      Leitung). UI-Seite: deutlich abgesetzter, gold-orange
+      gefärbter „cloud_http · Edit · external"-Block mit
+      Warnhinweis, maskiertem Secret-LineEdit
+      (`secret = true`), separatem **Save key** / **Clear key**-
+      Button, sofortigem Leeren des Edit-Felds beim Klick
+      (auch offline — Security-First), Status-Label, das
+      ausschließlich kuratierte Strings zeigt (`key: saved ✓`
+      vs. `key: not set ✗`), und **niemals** einen Rückspiegel-
+      Pfad aus dem Status ins Edit-Feld. **Bewusst nicht Teil
+      von PR 10:** TLS / `https://`, Streaming, Function-/Tool-
+      Calling, `messages`-Array, Anbieter-Zoo, Approval-/
+      Interaction-/Desktop-Automation-Änderung, Stage-C-/Avatar-
+      Kopplung. Details in
+      [docs/provider_fallback_and_settings_architecture.md §9 + §11](./docs/provider_fallback_and_settings_architecture.md),
+      [docs/api.md §2.10 inkl. §2.10d](./docs/api.md),
+      [docs/ui_architecture.md §8d.5e](./docs/ui_architecture.md).
+      Tests: Core 260 PASS (+30 vs. PR 9 — acht
+      Secret-Store-Unit-Tests inkl. 0600-Permission-Test,
+      Debug-Leak-Guard und Parse-Error-ohne-Panic; elf
+      Text-Provider-Unit-Tests; vier Protocol-Parser-Tests;
+      sechs IPC-Ende-zu-Ende-Tests, davon vier mit aktiven
+      Secret-Leak-Guards — weder `status` noch Probe-Response
+      noch `error`-Envelope dürfen Key-Marker oder Endpoint
+      enthalten). UI `settings-shell-smoke` um vier
+      Cloud-HTTP-Blöcke erweitert. Alle übrigen UI-Smokes grün;
+      Headless-Boot sauber.
 
 ---
 

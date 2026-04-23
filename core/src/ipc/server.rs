@@ -185,6 +185,13 @@ async fn dispatch(app: &Arc<App>, raw: &str) -> Vec<OutgoingMessage> {
         IncomingMessage::SettingsResetTextProviderChain => {
             handle_settings_reset_text_provider_chain(app)
         }
+        IncomingMessage::SettingsSetCloudHttpConfig(update) => {
+            handle_settings_set_cloud_http_config(app, update)
+        }
+        IncomingMessage::SettingsSetCloudHttpSecret(update) => {
+            handle_settings_set_cloud_http_secret(app, update)
+        }
+        IncomingMessage::SettingsProbeCloudHttp => handle_settings_probe_cloud_http(app).await,
     }
 }
 
@@ -305,6 +312,50 @@ fn handle_settings_reset_text_provider_chain(app: &Arc<App>) -> Vec<OutgoingMess
         }],
         Err(message) => vec![OutgoingMessage::Error { message }],
     }
+}
+
+// --- PR 10: Cloud-HTTP-Pfade -------------------------------------------
+//
+// Geometrie wie die anderen `settings_set_*`-Pfade, aber mit zwei
+// getrennten Messages: eine für die operationale Config
+// (Endpoint/Modell/Timeout) und eine zweite, schlanke, nur für das
+// Secret. So kann die UI Secret-Writes separat routen und der Core
+// kann sicherstellen, dass Secret-Handling niemals mit Operational-
+// Writes vermischt wird.
+
+fn handle_settings_set_cloud_http_config(
+    app: &Arc<App>,
+    update: crate::app::SettingsCloudHttpConfigUpdate,
+) -> Vec<OutgoingMessage> {
+    match app.update_cloud_http_config(update) {
+        Ok(()) => vec![OutgoingMessage::Status {
+            payload: app.build_status_payload(),
+        }],
+        Err(message) => vec![OutgoingMessage::Error { message }],
+    }
+}
+
+/// PR 10 — Secret-Schreibpfad. Der Core antwortet **immer nur** mit
+/// einem frischen `status`-Envelope (oder einem kuratierten
+/// `error`-Envelope bei Persist-Fehlern) — der Key selbst taucht nie
+/// in der Antwort auf. `StatusPayload.cloud_http_secret_present`
+/// spiegelt den neuen Zustand.
+fn handle_settings_set_cloud_http_secret(
+    app: &Arc<App>,
+    update: crate::app::SettingsCloudHttpSecretUpdate,
+) -> Vec<OutgoingMessage> {
+    match app.set_cloud_http_api_key(update) {
+        Ok(()) => vec![OutgoingMessage::Status {
+            payload: app.build_status_payload(),
+        }],
+        Err(message) => vec![OutgoingMessage::Error { message }],
+    }
+}
+
+async fn handle_settings_probe_cloud_http(app: &Arc<App>) -> Vec<OutgoingMessage> {
+    vec![OutgoingMessage::SettingsProbeResult {
+        payload: app.probe_cloud_http().await,
+    }]
 }
 
 fn handle_approval_response(
@@ -578,6 +629,7 @@ mod tests {
                 chain: vec!["abrain".into()],
                 llamafile: crate::config::LlamafileConfig::default(),
                 local_http: crate::config::LocalHttpConfig::default(),
+                cloud_http: crate::config::CloudHttpConfig::default(),
             },
         };
         Arc::new(App::new(config))
@@ -879,6 +931,7 @@ mod tests {
                 chain: vec!["abrain".into()],
                 llamafile: crate::config::LlamafileConfig::default(),
                 local_http: crate::config::LocalHttpConfig::default(),
+                cloud_http: crate::config::CloudHttpConfig::default(),
             },
         }));
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -940,6 +993,7 @@ mod tests {
                 chain: vec!["abrain".into()],
                 llamafile: crate::config::LlamafileConfig::default(),
                 local_http: crate::config::LocalHttpConfig::default(),
+                cloud_http: crate::config::CloudHttpConfig::default(),
             },
         }));
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1007,6 +1061,7 @@ mod tests {
                     request_timeout_seconds: 10,
                 },
                 local_http: crate::config::LocalHttpConfig::default(),
+                cloud_http: crate::config::CloudHttpConfig::default(),
             },
         }));
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1098,6 +1153,7 @@ mod tests {
                     request_timeout_seconds: 10,
                 },
                 local_http: crate::config::LocalHttpConfig::default(),
+                cloud_http: crate::config::CloudHttpConfig::default(),
             },
         }))
     }
@@ -1508,6 +1564,54 @@ mod tests {
                 chain: vec!["local_http".into(), "abrain".into()],
                 llamafile: crate::config::LlamafileConfig::default(),
                 local_http: crate::config::LocalHttpConfig::default(),
+                cloud_http: crate::config::CloudHttpConfig::default(),
+            },
+        }))
+    }
+
+    /// PR 10 — Test-Helper für Cloud-HTTP-Szenarien. Baut eine App mit
+    /// einer Chain, die `cloud_http` enthält, und setzt
+    /// `SMOLIT_SETTINGS_DIR` auf einen isolierten Pfad — damit der
+    /// Secret-Store in einer eindeutigen Testdatei landet.
+    fn build_cloud_http_chain_app(settings_dir: &std::path::Path) -> Arc<App> {
+        unsafe {
+            std::env::set_var("SMOLIT_SETTINGS_DIR", settings_dir.as_os_str());
+        }
+        Arc::new(App::new(Config {
+            abrain_cmd: "/bin/false".into(),
+            log_level: "info".into(),
+            audio: AudioConfig {
+                tts_enabled: true,
+                tts_cmd: None,
+                tts_timeout_seconds: 5,
+                stt_enabled: true,
+                stt_cmd: None,
+                stt_timeout_seconds: 5,
+                auto_speak: false,
+                stt_provider_chain: vec!["command".into()],
+                tts_provider_chain: vec!["command".into()],
+            },
+            ipc: IpcConfig {
+                enabled: true,
+                bind: "127.0.0.1:0".into(),
+            },
+            interaction: InteractionConfig {
+                enabled: true,
+                backend: "command".into(),
+                allow_open_application: true,
+                allow_focus_window: true,
+                allow_type_text: false,
+                allow_shortcuts: false,
+                require_confirmation: false,
+                open_app_cmd_template: Some("/bin/true".into()),
+                focus_window_cmd_template: Some("/bin/true".into()),
+            },
+            approval: default_approval_config(),
+            text_provider: crate::config::TextProviderConfig {
+                chain: vec!["cloud_http".into(), "abrain".into()],
+                llamafile: crate::config::LlamafileConfig::default(),
+                local_http: crate::config::LocalHttpConfig::default(),
+                cloud_http: crate::config::CloudHttpConfig::default(),
             },
         }))
     }
@@ -1851,6 +1955,236 @@ mod tests {
         let resp = recv_text(&mut ws).await;
         assert!(resp.contains(r#""type":"status""#));
         assert!(resp.contains(r#""text_provider_chain":["abrain","llamafile_local"]"#));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // -------------------------------------------------------------------
+    // PR 10 — Cloud-HTTP + Secret-Store E2E-Tests.
+    //
+    // Jeder dieser Tests verifiziert mindestens EINE Secret-Leak-Grenze:
+    // Key darf niemals in `status`, `error`, oder `settings_probe_result`
+    // auftauchen.
+    // -------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn settings_set_cloud_http_config_applies_without_secret_leak() {
+        let dir = scoped_settings_dir("ch-apply");
+        let app = build_cloud_http_chain_app(&dir);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+
+        ws.send(Message::Text(r#"{"type":"get_status"}"#.into()))
+            .await
+            .unwrap();
+        let pre = recv_text(&mut ws).await;
+        assert!(pre.contains(r#""cloud_http_in_chain":true"#));
+        assert!(pre.contains(r#""cloud_http_enabled":false"#));
+        assert!(pre.contains(r#""cloud_http_secret_present":false"#));
+
+        ws.send(Message::Text(
+            r#"{"type":"settings_set_cloud_http_config","enabled":true,"endpoint":"http://cloud.invalid:8443/v1/chat","model":"m-mini","request_timeout_seconds":30}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.contains(r#""type":"status""#));
+        assert!(resp.contains(r#""cloud_http_enabled":true"#));
+        // configured=false weil kein Secret gesetzt ist.
+        assert!(resp.contains(r#""cloud_http_configured":false"#));
+        // Weder Endpoint noch Modell wandern in den StatusPayload.
+        assert!(
+            !resp.contains("cloud.invalid") && !resp.contains("m-mini"),
+            "status must not leak endpoint/model: {resp}",
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn settings_set_cloud_http_secret_persists_but_never_leaks() {
+        let dir = scoped_settings_dir("ch-secret");
+        let app = build_cloud_http_chain_app(&dir);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+
+        let secret = "sk-e2e-top-secret-marker-xyz";
+        let payload = format!(
+            r#"{{"type":"settings_set_cloud_http_secret","api_key":"{secret}"}}"#,
+        );
+        ws.send(Message::Text(payload.into())).await.unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.contains(r#""type":"status""#));
+        assert!(resp.contains(r#""cloud_http_secret_present":true"#));
+        assert!(
+            !resp.contains(secret),
+            "set-secret response leaked the key: {resp}",
+        );
+
+        // Folgeabfrage: frischer `get_status` — auch hier kein Leak.
+        ws.send(Message::Text(r#"{"type":"get_status"}"#.into()))
+            .await
+            .unwrap();
+        let status = recv_text(&mut ws).await;
+        assert!(status.contains(r#""cloud_http_secret_present":true"#));
+        assert!(
+            !status.contains(secret),
+            "subsequent get_status leaked the key: {status}",
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn settings_clear_cloud_http_secret_via_null_payload() {
+        let dir = scoped_settings_dir("ch-secret-clear");
+        let app = build_cloud_http_chain_app(&dir);
+        app.set_cloud_http_api_key(crate::app::SettingsCloudHttpSecretUpdate {
+            api_key: Some("sk-to-be-cleared".into()),
+        })
+        .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"settings_set_cloud_http_secret","api_key":null}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.contains(r#""type":"status""#));
+        assert!(resp.contains(r#""cloud_http_secret_present":false"#));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn settings_probe_cloud_http_reports_secret_missing_before_key_is_stored() {
+        let dir = scoped_settings_dir("ch-probe-missing");
+        let app = build_cloud_http_chain_app(&dir);
+        app.update_cloud_http_config(crate::app::SettingsCloudHttpConfigUpdate {
+            enabled: true,
+            endpoint: Some("http://127.0.0.1:59997/v1".into()),
+            model: None,
+            request_timeout_seconds: Some(3),
+        })
+        .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"settings_probe_cloud_http"}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.contains(r#""axis":"cloud_http""#));
+        assert!(resp.contains(r#""class":"secret_missing""#));
+        assert!(!resp.contains("127.0.0.1:59997"), "probe leaked endpoint: {resp}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn settings_probe_cloud_http_reports_connect_failed_for_closed_port() {
+        let dir = scoped_settings_dir("ch-probe-closed");
+        let app = build_cloud_http_chain_app(&dir);
+        app.update_cloud_http_config(crate::app::SettingsCloudHttpConfigUpdate {
+            enabled: true,
+            endpoint: Some("http://127.0.0.1:59996/v1/chat".into()),
+            model: None,
+            request_timeout_seconds: Some(2),
+        })
+        .unwrap();
+        app.set_cloud_http_api_key(crate::app::SettingsCloudHttpSecretUpdate {
+            api_key: Some("sk-probe-marker".into()),
+        })
+        .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"settings_probe_cloud_http"}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(
+            resp.contains(r#""class":"http_connect_failed""#)
+                || resp.contains(r#""class":"timeout""#),
+            "expected connect_failed/timeout: {resp}",
+        );
+        assert!(
+            !resp.contains("sk-probe-marker"),
+            "probe leaked secret: {resp}",
+        );
+        assert!(
+            !resp.contains("59996"),
+            "probe leaked endpoint port: {resp}",
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn settings_probe_cloud_http_rejects_https_scheme() {
+        let dir = scoped_settings_dir("ch-probe-https");
+        let app = build_cloud_http_chain_app(&dir);
+        app.update_cloud_http_config(crate::app::SettingsCloudHttpConfigUpdate {
+            enabled: true,
+            endpoint: Some("https://api.example.com/v1/chat".into()),
+            model: None,
+            request_timeout_seconds: Some(3),
+        })
+        .unwrap();
+        app.set_cloud_http_api_key(crate::app::SettingsCloudHttpSecretUpdate {
+            api_key: Some("sk-for-https-probe".into()),
+        })
+        .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let _ = accept_loop(app_handle, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"settings_probe_cloud_http"}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let resp = recv_text(&mut ws).await;
+        assert!(resp.contains(r#""class":"endpoint_scheme_unsupported""#));
+        assert!(!resp.contains("api.example.com"), "probe leaked host: {resp}");
+        assert!(!resp.contains("sk-for-https-probe"), "probe leaked secret: {resp}");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

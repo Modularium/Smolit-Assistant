@@ -116,6 +116,19 @@ PR 7 erweitert):
 - `settings_reset_text_provider_chain` (PR 9) — setzt die Kette
   auf den Compile-Zeit-Default `["abrain"]` zurück und löscht den
   persistierten Override im Settings-Store. Antwort: `status`.
+- `settings_set_cloud_http_config` (PR 10) — editiert die
+  **operationale** Config des ersten Cloud-/Remote-Text-Providers
+  `cloud_http` (enabled / endpoint / model / request_timeout). Der
+  API-Key ist **nicht Teil dieser Message** (separate Secret-Pfad,
+  s. u.). Antwort: `status` bei Erfolg.
+- `settings_set_cloud_http_secret` (PR 10) — einziger IPC-Pfad, der
+  den API-Key transportiert. Leerer String / `null` = Key löschen.
+  Antwort trägt nur `cloud_http_secret_present: bool`, nie den
+  Key-Wert.
+- `settings_probe_cloud_http` (PR 10) — TCP-Connect-only Diagnose
+  gegen den geparsten Endpoint; **kein** Completion-Request,
+  **kein** Bearer-Header auf der Leitung. Antwort:
+  `settings_probe_result` mit `axis: "cloud_http"`.
 
 Beispiele:
 
@@ -140,6 +153,10 @@ Beispiele:
 {"type":"settings_probe_local_http"}
 {"type":"settings_set_text_provider_chain","chain":["llamafile_local","local_http","abrain"]}
 {"type":"settings_reset_text_provider_chain"}
+{"type":"settings_set_cloud_http_config","enabled":true,"endpoint":"http://cloud-gateway.local:8443/v1/chat","model":"gpt-4o-mini","request_timeout_seconds":60}
+{"type":"settings_set_cloud_http_secret","api_key":"sk-XXXXXXXXXXXXXX"}
+{"type":"settings_set_cloud_http_secret","api_key":null}
+{"type":"settings_probe_cloud_http"}
 ```
 
 ### 2.2 Ausgehend (Core → UI)
@@ -288,10 +305,25 @@ die diese Felder nicht kennen, behandeln sie ignorant — das bestehende
   Provider-Kinds. Spiegelt den Resolver-Zustand nach dem Bau der Kette,
   d. h. unbekannte Kinds aus der Config sind hier bereits verworfen.
   Fallback auf `["abrain"]`, wenn die Kette nach dem Filtern leer
-  wäre. Beispiele: `["abrain"]`, `["llamafile_local", "abrain"]`.
+  wäre. Beispiele: `["abrain"]`, `["llamafile_local", "abrain"]`,
+  `["cloud_http", "llamafile_local", "abrain"]`.
   Seit PR 9 editierbar über `settings_set_text_provider_chain`
   (siehe §2.10c); ein Reset-Pfad stellt den Default `["abrain"]`
-  wieder her.
+  wieder her. Seit PR 10 akzeptiert die Whitelist zusätzlich
+  `"cloud_http"`.
+- `cloud_http_in_chain` (PR 10): Boolesch. `true` genau dann, wenn
+  `"cloud_http"` in `text_provider_chain` enthalten ist.
+- `cloud_http_enabled` (PR 10): Ausgewerteter Master-Schalter
+  (`SMOLIT_CLOUD_HTTP_ENABLED` + Runtime-Overrides). Unabhängig
+  von Chain-Mitgliedschaft — zeigt, ob der Betreiber den Pfad
+  bewusst eingeschaltet hat.
+- `cloud_http_configured` (PR 10): `enabled` **und** Endpoint
+  gesetzt **und** API-Key gesetzt. Die ehrliche „bereit für einen
+  Request"-Grenze.
+- `cloud_http_secret_present` (PR 10): **Nur ein Boolean.** Zeigt,
+  ob im Secrets-Store ein Key steht. Der Wert selbst verlässt den
+  Secrets-Store niemals — weder im Status, noch in Logs, noch in
+  Probe-/Error-Envelopes.
 - `llamafile_in_chain`: Boolesch. `true` genau dann, wenn
   `"llamafile_local"` in `text_provider_chain` enthalten ist. Wenn
   `false`, sind die folgenden vier `llamafile_*`-Felder semantisch
@@ -1127,15 +1159,15 @@ Die UI muss Auswahl-Zustand in mindestens diesen Fällen aktiv verwerfen:
   hier, Execution läuft weiterhin über das bestehende Interaction-
   Backend inkl. Approval.
 
-### 2.10 Settings-Schreib-/Probe-Pfad (Ist-Zustand, PR 5 + PR 7 + PR 8 + PR 9)
+### 2.10 Settings-Schreib-/Probe-Pfad (Ist-Zustand, PR 5 + PR 7 + PR 8 + PR 9 + PR 10)
 
 Kleine, kuratierte Schreib-/Diagnose-Oberfläche für die Settings-
 Shell. Additiv zum bestehenden Protokoll, keine neue
 Nachrichtenfamilie. Der heutige Scope umfasst `llamafile_local`-Felder
 (PR 5), STT-/TTS-Command-Provider (PR 7), den lokalen HTTP-
-Text-Provider `local_http` (PR 8) und die Text-Provider-Fallback-
-Kette (PR 9). Cloud-Provider und Secrets bleiben außerhalb dieses
-PR-Blocks.
+Text-Provider `local_http` (PR 8), die Text-Provider-Fallback-
+Kette (PR 9) und den ersten Cloud-/Remote-Text-Provider
+`cloud_http` mit dediziertem Secret-Pfad (PR 10).
 
 **Eingang:** `settings_set_llamafile_config`.
 
@@ -1347,6 +1379,73 @@ Local-HTTP-Views aus `live_llamafile` / `live_local_http`) und
 antwortet mit einem frischen `status`-Envelope. `text_provider_chain`
 spiegelt sofort die neue Reihenfolge, `llamafile_in_chain` /
 `local_http_in_chain` werden entsprechend aktualisiert.
+
+#### 2.10d Cloud-HTTP-Schreib-/Probe-Pfad + Secret-Pfad (PR 10)
+
+PR 10 führt den **ersten Cloud-/Remote-Text-Provider** `cloud_http`
+ein — mit einem **dedizierten Secret-Pfad**. Sensitive Werte (API-
+Keys) wandern durch eine andere IPC-Message als operationale Werte
+(Endpoint/Modell/Timeout) und werden in einer **separaten Datei**
+(`secrets.json`, 0600) unter
+[`crate::secrets_store`](../core/src/secrets_store.rs) persistiert.
+
+**Operational:** `settings_set_cloud_http_config`.
+
+```json
+{"type":"settings_set_cloud_http_config","enabled":true,"endpoint":"http://cloud-gateway.local:8443/v1/chat","model":"gpt-4o-mini","request_timeout_seconds":60}
+```
+
+- `enabled` (bool, Pflicht) — Master-Schalter. Cloud ist
+  opt-in; ohne `true` bleibt der Provider inert, selbst wenn er
+  in der Chain steht und ein Key gespeichert ist.
+- `endpoint` (string|null, optional) — `http://host:port/path`.
+  `https://` wird hart abgelehnt (Error-Klasse
+  `endpoint_scheme_unsupported`); TLS ist einem Folge-PR
+  vorbehalten. Ein leerer String / nur Whitespace löscht den Wert.
+- `model` (string|null, optional) — optionaler Modellname, wird
+  als `model`-Feld in den Request-Body aufgenommen.
+- `request_timeout_seconds` (u64|null, optional) — `0` wird
+  abgelehnt.
+
+Erfolg → frischer `status`-Envelope. **Endpoint und Modell tauchen
+nicht in `StatusPayload` auf** — nur die Bool-Flags
+`cloud_http_in_chain` / `cloud_http_enabled` / `cloud_http_configured`.
+
+**Secret:** `settings_set_cloud_http_secret`.
+
+```json
+{"type":"settings_set_cloud_http_secret","api_key":"sk-…"}
+```
+
+- `api_key` (string|null, Pflicht — `null` oder leerer String
+  löscht den Key).
+
+Der Core persistiert den Wert in `secrets.json` (eigene Datei,
+0600, atomarer Write); bestehende Datei-Inhalte bleiben unverändert
+außer dem cloud_http-Key. Die Antwort ist ein `status`-Envelope
+mit genau einem neuen Feld:
+`cloud_http_secret_present: bool`. **Der Key-Wert selbst taucht
+in der Antwort niemals auf, auch nicht in einer gekürzten oder
+gehashten Form.**
+
+**Probe:** `settings_probe_cloud_http`. TCP-Connect gegen den
+geparsten Endpoint; **kein** Completion-Request, **kein**
+Bearer-Header auf der Leitung. Kuratierte Klassen:
+
+- `"not_in_chain"` / `"disabled"` / `"not_configured"` —
+  Config-Stufen.
+- `"secret_missing"` — enabled, Endpoint gesetzt, aber kein Key
+  im Secrets-Store.
+- `"endpoint_scheme_unsupported"` — `https://` (noch) nicht
+  unterstützt.
+- `"endpoint_unparseable"` — URL-Parser-Fehler.
+- `"http_connect_failed"` / `"timeout"` — Netzwerk.
+- `"ok"` — TCP-Connect erfolgreich; der Server hat keinen
+  Completion-Roundtrip gesehen.
+
+Antwort: `settings_probe_result` mit `axis="cloud_http"`.
+`message` und `class` sind kuratiert; **weder Endpoint noch Key
+tauchen im Response auf.**
 
 **Eingang:** `settings_reset_text_provider_chain`.
 

@@ -7,6 +7,7 @@ mod event_loop;
 mod interaction;
 mod ipc;
 mod providers;
+mod secrets_store;
 mod settings_store;
 
 use std::sync::Arc;

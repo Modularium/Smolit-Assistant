@@ -60,6 +60,13 @@ pub const PROVIDER_NAME_LLAMAFILE_LOCAL: &str = "llamafile_local";
 /// Cloud-SDK, ohne Secrets, ohne Streaming.
 pub const PROVIDER_NAME_LOCAL_HTTP: &str = "local_http";
 
+/// Kanonischer Namensstring für den ersten Cloud-/Remote-Text-
+/// Provider (PR 10). **Opt-in, nicht Default.** Transportiert einen
+/// API-Key aus dem dedizierten [`crate::secrets_store`] als
+/// `Authorization: Bearer`-Header. Cloud ist in jedem Readout
+/// sichtbar (`cloud=true` in `TextProviderRuntimeStatus`).
+pub const PROVIDER_NAME_CLOUD_HTTP: &str = "cloud_http";
+
 /// Whitelist aller heute produktiven Text-Provider-Kinds. Wird beim
 /// Chain-Editor (PR 9) für die UI-Liste **und** die Server-seitige
 /// Validierung genutzt — es gibt keine freie Provider-Namensemantik
@@ -69,6 +76,7 @@ pub const KNOWN_TEXT_KINDS: &[&str] = &[
     PROVIDER_NAME_ABRAIN,
     PROVIDER_NAME_LLAMAFILE_LOCAL,
     PROVIDER_NAME_LOCAL_HTTP,
+    PROVIDER_NAME_CLOUD_HTTP,
 ];
 
 /// Default-Kette für den Text-Provider. Wird vom Chain-Editor-
@@ -206,6 +214,11 @@ pub enum TextProviderImpl {
     /// Text-Feldwert aus der Antwort. Loopback-first, kein TLS,
     /// keine Secrets in dieser Stufe.
     LocalHttp(LocalHttpProvider),
+    /// Cloud-/Remote-HTTP-Provider mit Bearer-Auth (PR 10). Opt-in,
+    /// nie Default, nie stiller Fallback. Der API-Key kommt aus
+    /// [`crate::secrets_store`] und ist nur über den dedizierten
+    /// Settings-Write-Pfad editierbar.
+    CloudHttp(CloudHttpProvider),
 }
 
 impl TextProviderImpl {
@@ -216,6 +229,7 @@ impl TextProviderImpl {
             Self::Abrain(_) => PROVIDER_NAME_ABRAIN,
             Self::LlamafileLocal(_) => PROVIDER_NAME_LLAMAFILE_LOCAL,
             Self::LocalHttp(_) => PROVIDER_NAME_LOCAL_HTTP,
+            Self::CloudHttp(_) => PROVIDER_NAME_CLOUD_HTTP,
         }
     }
 
@@ -235,6 +249,46 @@ impl TextProviderImpl {
         // bzw. `LlamafileLocalProvider::run`.
         let chain: Vec<String> = err.chain().map(|e| e.to_string()).collect();
         let joined = chain.join(" | ").to_ascii_lowercase();
+
+        // cloud_http-spezifische Tags (PR 10). Zuerst geprüft, damit
+        // spätere generischere Muster nicht versehentlich greifen.
+        if joined.contains("cloud_http") {
+            if joined.contains("is disabled") {
+                return "disabled";
+            }
+            if joined.contains("not configured") {
+                return "not_configured";
+            }
+            if joined.contains("secret is not set") {
+                return "secret_missing";
+            }
+            if joined.contains("endpoint must start with http://") {
+                return "endpoint_scheme_unsupported";
+            }
+            if joined.contains("endpoint url is not parseable") {
+                return "endpoint_unparseable";
+            }
+            if joined.contains("timed out") {
+                return "timeout";
+            }
+            if joined.contains("http connect") {
+                return "http_connect_failed";
+            }
+            if joined.contains("http returned status 401")
+                || joined.contains("http returned status 403")
+            {
+                return "unauthorized";
+            }
+            if joined.contains("http returned status") {
+                return "http_error";
+            }
+            if joined.contains("returned no content") {
+                return "empty_response";
+            }
+            if joined.contains("is not valid json") || joined.contains("not valid utf-8") {
+                return "invalid_response";
+            }
+        }
 
         // local_http-spezifische Tags (PR 8). Wie bei llamafile
         // zuerst geprüft, damit die allgemeinen Muster weiter unten
@@ -333,6 +387,7 @@ impl TextProviderImpl {
             Self::Abrain(p) => p.run(input).await,
             Self::LlamafileLocal(p) => p.run(input).await,
             Self::LocalHttp(p) => p.run(input).await,
+            Self::CloudHttp(p) => p.run(input).await,
         }
     }
 }
@@ -1009,6 +1064,238 @@ impl LocalHttpProvider {
     }
 }
 
+// --- Cloud-HTTP-Provider (PR 10) ---------------------------------------
+//
+// Erster Cloud-/Remote-Text-Provider. Bewusst klein: ein
+// authentifizierter HTTP-Endpoint mit Bearer-Auth. **Der API-Key kommt
+// ausschließlich aus dem dedizierten [`crate::secrets_store`]** — die
+// Provider-View trägt ihn als `Option<String>` nur für die Dauer eines
+// Request-Zyklus und **nie** als Bestandteil einer log- oder status-
+// fähigen Struktur. Das custom `Debug`-Impl unten stellt sicher, dass
+// auch `?provider`-Ausdrücke den Key nie zitieren.
+//
+// MVP-Grenzen:
+//
+//   * **Plaintext HTTP nur.** `https://` wird hart abgelehnt —
+//     TLS-/Trust-Infrastruktur ist einem Folge-PR vorbehalten. Ein
+//     Betreiber stellt einen vertrauenswürdigen Reverse-Proxy
+//     (stunnel / nginx / Cloudflare-Tunnel) vor den Endpoint.
+//   * **Bearer-Auth nur.** Genau ein Header wird geschickt
+//     (`Authorization: Bearer <key>` ist der Default; der Name ist
+//     env-konfigurierbar, der Präfix `Bearer ` ist fix).
+//   * **Kein Streaming, kein Tool-Calling, kein `messages`-Array.**
+//     POST JSON mit `{ "<prompt_field>": "<input>", "stream": false,
+//     "model"?: "<model>" }`, Antwort enthält `<response_field>`.
+
+#[derive(Clone)]
+pub struct CloudHttpConfigView {
+    pub enabled: bool,
+    pub endpoint: Option<String>,
+    pub model: Option<String>,
+    pub request_timeout_seconds: u64,
+    pub prompt_field: String,
+    pub response_field: String,
+    pub auth_header: String,
+    /// API-Key, **exklusiv** aus dem [`crate::secrets_store`] geladen.
+    /// `None` = nicht gesetzt → `run()` bricht mit
+    /// `cloud_http secret is not set` ab. Wird nie serialisiert, nie
+    /// geloggt (siehe `Debug`-Impl).
+    pub api_key: Option<String>,
+}
+
+impl std::fmt::Debug for CloudHttpConfigView {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Secret-Disziplin: `Debug` elidiert den Key-Wert vollständig.
+        f.debug_struct("CloudHttpConfigView")
+            .field("enabled", &self.enabled)
+            .field("endpoint_set", &self.endpoint.is_some())
+            .field("model_set", &self.model.is_some())
+            .field("request_timeout_seconds", &self.request_timeout_seconds)
+            .field("prompt_field", &self.prompt_field)
+            .field("response_field", &self.response_field)
+            .field("auth_header", &self.auth_header)
+            .field(
+                "api_key",
+                &if self.api_key.is_some() { "<set>" } else { "<unset>" },
+            )
+            .finish()
+    }
+}
+
+#[derive(Clone)]
+pub struct CloudHttpProvider {
+    config: CloudHttpConfigView,
+}
+
+impl std::fmt::Debug for CloudHttpProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CloudHttpProvider")
+            .field("config", &self.config)
+            .finish()
+    }
+}
+
+impl CloudHttpProvider {
+    pub fn new(config: CloudHttpConfigView) -> Self {
+        Self { config }
+    }
+
+    /// Kleiner URL-Parser. Spiegel zu [`LocalHttpProvider::parse_endpoint`],
+    /// aber mit eigenem Fehler-Prefix (`cloud_http`), damit die
+    /// Klassifikation die richtige Tag-Familie trifft. `https://`
+    /// wird hart abgelehnt.
+    pub fn parse_endpoint(endpoint: &str) -> Result<(String, u16, String)> {
+        let trimmed = endpoint.trim();
+        if trimmed.is_empty() {
+            bail!("cloud_http endpoint is not configured");
+        }
+        if trimmed.starts_with("https://") {
+            bail!(
+                "cloud_http endpoint must start with http:// (https:// is not supported in this build)"
+            );
+        }
+        let Some(rest) = trimmed.strip_prefix("http://") else {
+            bail!("cloud_http endpoint url is not parseable (missing http:// prefix)");
+        };
+        if rest.contains('@') {
+            bail!("cloud_http endpoint url is not parseable (user-info in url not supported)");
+        }
+        let (authority, path) = match rest.find('/') {
+            Some(idx) => (&rest[..idx], &rest[idx..]),
+            None => (rest, "/"),
+        };
+        if authority.is_empty() {
+            bail!("cloud_http endpoint url is not parseable (empty host)");
+        }
+        let (host, port) = match authority.rfind(':') {
+            Some(idx) => {
+                let (h, p) = authority.split_at(idx);
+                let p_num = p[1..].parse::<u16>().map_err(|_| {
+                    anyhow::anyhow!("cloud_http endpoint url is not parseable (bad port)")
+                })?;
+                (h.to_string(), p_num)
+            }
+            None => (authority.to_string(), 80u16),
+        };
+        if host.is_empty() {
+            bail!("cloud_http endpoint url is not parseable (empty host)");
+        }
+        Ok((host, port, path.to_string()))
+    }
+
+    /// Validator für den Header-Namen aus der Config. Blockiert
+    /// CR/LF-Injektionen und leere Werte — der Rest wird wie ein
+    /// opaker Token behandelt.
+    fn validate_auth_header_name(name: &str) -> Result<&str> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            bail!("cloud_http auth header name is empty");
+        }
+        if trimmed.contains('\r') || trimmed.contains('\n') || trimmed.contains(':') {
+            bail!("cloud_http auth header name contains invalid characters");
+        }
+        Ok(trimmed)
+    }
+
+    pub async fn run(&self, input: &str) -> Result<String> {
+        if !self.config.enabled {
+            bail!("provider cloud_http is disabled (set SMOLIT_CLOUD_HTTP_ENABLED=1 to enable)");
+        }
+        let endpoint = self
+            .config
+            .endpoint
+            .as_deref()
+            .map(str::trim)
+            .filter(|e| !e.is_empty())
+            .context(
+                "provider cloud_http is enabled but not configured (set SMOLIT_CLOUD_HTTP_ENDPOINT)",
+            )?;
+        let api_key = self
+            .config
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|k| !k.is_empty())
+            .context("provider cloud_http secret is not set")?;
+        let auth_header = Self::validate_auth_header_name(&self.config.auth_header)?;
+
+        let (host, port, path) = Self::parse_endpoint(endpoint)?;
+        let prompt_field = if self.config.prompt_field.trim().is_empty() {
+            "prompt"
+        } else {
+            self.config.prompt_field.as_str()
+        };
+        let response_field = if self.config.response_field.trim().is_empty() {
+            "content"
+        } else {
+            self.config.response_field.as_str()
+        };
+
+        // Body: wie local_http, aber mit optionalem `model`-Feld.
+        let mut body_obj = serde_json::Map::new();
+        body_obj.insert(
+            prompt_field.to_string(),
+            serde_json::Value::String(input.to_string()),
+        );
+        body_obj.insert("stream".into(), serde_json::Value::Bool(false));
+        if let Some(model) = self.config.model.as_deref().map(str::trim).filter(|m| !m.is_empty()) {
+            body_obj.insert(
+                "model".into(),
+                serde_json::Value::String(model.to_string()),
+            );
+        }
+        let body = serde_json::Value::Object(body_obj).to_string();
+
+        // Bearer-Header bauen. `api_key` ist der einzige Ort, an dem
+        // Secret-Plaintext in einer String-Allokation lebt; sie fällt
+        // am Ende dieses `run()` out of scope.
+        let auth_value = format!("Bearer {api_key}");
+
+        let timeout_secs = self.config.request_timeout_seconds.max(1);
+        let (status, response_body) = match http_request_with_header(
+            &host,
+            port,
+            "POST",
+            &path,
+            Some(&body),
+            timeout_secs,
+            auth_header,
+            &auth_value,
+        )
+        .await
+        {
+            Ok(v) => v,
+            Err(err) => {
+                // Kontext-Prefix für classify_error; auf keinen Fall
+                // den Bearer-Wert in den Kontext aufnehmen.
+                let msg = format!("{err}");
+                if msg.contains("connect timed out") || msg.contains("connect failed") {
+                    return Err(err.context("cloud_http HTTP connect failed"));
+                }
+                if msg.contains("timed out") {
+                    return Err(err.context("cloud_http request timed out"));
+                }
+                return Err(err.context("cloud_http HTTP request failed"));
+            }
+        };
+        if status != 200 {
+            bail!("cloud_http HTTP returned status {status}");
+        }
+        let parsed: serde_json::Value = serde_json::from_str(&response_body)
+            .context("cloud_http response is not valid JSON")?;
+        let content = parsed
+            .get(response_field)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if content.is_empty() {
+            bail!("cloud_http returned no content");
+        }
+        Ok(content)
+    }
+}
+
 // --- Kleine lokale HTTP-Helfer (POST /completion + GET /health) -----
 //
 // Keine SDK-Abhängigkeit: wir sprechen HTTP/1.1 direkt über
@@ -1080,6 +1367,78 @@ async fn check_health(host: &str, port: u16, timeout_secs: u64) -> bool {
         Ok((200, _)) => true,
         _ => false,
     }
+}
+
+/// Variante von [`http_request`] mit einem zusätzlichen Header
+/// (typischerweise `Authorization`). **Nicht** für den llamafile-
+/// oder local_http-Pfad benutzt — dort wollen wir keine
+/// Auth-Header. Nur der `cloud_http`-Provider schickt Bearer-
+/// Tokens, darum lebt die Variante separat, damit ein
+/// Implementierungsfehler nicht versehentlich Secrets an einen
+/// nicht-authentifizierten Endpoint streut.
+///
+/// Das Fehler-Kontextprefix ist bewusst `cloud_http`, damit
+/// [`TextProviderImpl::classify_error`] die Fehlerklasse eindeutig
+/// dem Cloud-Pfad zuordnet, ohne dass der Bearer-Wert jemals im
+/// Fehlerbody auftaucht.
+async fn http_request_with_header(
+    host: &str,
+    port: u16,
+    method: &str,
+    path: &str,
+    body: Option<&str>,
+    timeout_secs: u64,
+    auth_header_name: &str,
+    auth_header_value: &str,
+) -> Result<(u16, String)> {
+    let addr = format!("{host}:{port}");
+    let total_timeout = Duration::from_secs(timeout_secs.max(1));
+
+    let mut request = String::new();
+    request.push_str(&format!("{method} {path} HTTP/1.1\r\n"));
+    request.push_str(&format!("Host: {host}:{port}\r\n"));
+    request.push_str("Connection: close\r\n");
+    // Defensive: Header-Name fix enthält keine CR/LF aus der Config
+    // (Validator lehnt das ab, siehe `validate_header_token`); Value
+    // darf ein Secret sein → wird **nicht** geloggt und nie in
+    // Fehlermeldungen zurückgespiegelt.
+    request.push_str(&format!("{auth_header_name}: {auth_header_value}\r\n"));
+    if let Some(b) = body {
+        request.push_str("Content-Type: application/json\r\n");
+        request.push_str(&format!("Content-Length: {}\r\n", b.len()));
+    }
+    request.push_str("\r\n");
+    if let Some(b) = body {
+        request.push_str(b);
+    }
+
+    let mut stream = timeout(total_timeout, TcpStream::connect(&addr))
+        .await
+        .context("cloud_http HTTP connect timed out")?
+        .context("cloud_http HTTP connect failed")?;
+    timeout(total_timeout, stream.write_all(request.as_bytes()))
+        .await
+        .context("cloud_http HTTP write timed out")?
+        .context("cloud_http HTTP write failed")?;
+    let mut buf = Vec::with_capacity(4096);
+    timeout(total_timeout, stream.read_to_end(&mut buf))
+        .await
+        .context("cloud_http HTTP read timed out")?
+        .context("cloud_http HTTP read failed")?;
+
+    let text = String::from_utf8(buf).context("cloud_http HTTP response not valid UTF-8")?;
+    let (status_line, rest) = text
+        .split_once("\r\n")
+        .context("cloud_http HTTP response missing status line")?;
+    let status = status_line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse::<u16>().ok())
+        .context("cloud_http HTTP response has no numeric status code")?;
+    let (_headers, body_out) = rest
+        .split_once("\r\n\r\n")
+        .context("cloud_http HTTP response has no body separator")?;
+    Ok((status, body_out.to_string()))
 }
 
 /// `POST /completion` gegen einen lokalen llama.cpp-kompatiblen Server.
@@ -1202,10 +1561,12 @@ impl TextProviderResolver {
         abrain_cmd: &str,
         llamafile: &LlamafileConfigView,
         local_http: &LocalHttpConfigView,
+        cloud_http: &CloudHttpConfigView,
     ) -> Self {
         let mut providers: Vec<TextProviderImpl> = Vec::with_capacity(chain.len());
         let mut skipped_unknown: Vec<String> = Vec::new();
         let mut saw_llamafile = false;
+        let mut saw_cloud_http = false;
         for item in chain {
             let normalized = item.kind.trim().to_ascii_lowercase();
             match normalized.as_str() {
@@ -1223,10 +1584,28 @@ impl TextProviderResolver {
                         local_http.clone(),
                     )));
                 }
+                PROVIDER_NAME_CLOUD_HTTP => {
+                    providers.push(TextProviderImpl::CloudHttp(CloudHttpProvider::new(
+                        cloud_http.clone(),
+                    )));
+                    saw_cloud_http = true;
+                }
                 other => {
                     skipped_unknown.push(other.to_string());
                 }
             }
+        }
+        if saw_cloud_http {
+            // Ehrlicher Transparenz-Log: Cloud-Provider in der Kette
+            // bedeutet, dass Requests die Maschine potenziell verlassen.
+            // Der Log trägt **nur** Bool-Flags, niemals Endpoint oder
+            // API-Key.
+            info!(
+                enabled = cloud_http.enabled,
+                endpoint_set = cloud_http.endpoint.is_some(),
+                api_key_present = cloud_http.api_key.is_some(),
+                "cloud_http provider built (external pathway — opt-in only)",
+            );
         }
         if !skipped_unknown.is_empty() {
             warn!(
@@ -1340,6 +1719,7 @@ impl TextProviderResolver {
                     } else {
                         "fallback_active".to_string()
                     };
+                    let is_cloud = kind == PROVIDER_NAME_CLOUD_HTTP;
                     let mut s = self
                         .status
                         .lock()
@@ -1348,7 +1728,7 @@ impl TextProviderResolver {
                     s.active = kind.clone();
                     s.availability = availability;
                     s.last_error = None;
-                    s.cloud = false;
+                    s.cloud = is_cloud;
                     if index > 0 {
                         info!(
                             primary = %s.configured,
@@ -1441,6 +1821,41 @@ mod tests {
             request_timeout_seconds: 3,
             prompt_field: "prompt".into(),
             response_field: "content".into(),
+        }
+    }
+
+    /// Default-`CloudHttpConfigView` für Tests, disabled und ohne
+    /// Endpoint/Key — reicht, damit Resolver-Tests den View kennen.
+    fn cloud_http_view_disabled() -> CloudHttpConfigView {
+        CloudHttpConfigView {
+            enabled: false,
+            endpoint: None,
+            model: None,
+            request_timeout_seconds: 5,
+            prompt_field: "prompt".into(),
+            response_field: "content".into(),
+            auth_header: "Authorization".into(),
+            api_key: None,
+        }
+    }
+
+    /// Aktive `CloudHttpConfigView` für Fake-Server-Tests.
+    fn cloud_http_view_with(endpoint: String, api_key: Option<String>) -> CloudHttpConfigView {
+        CloudHttpConfigView {
+            enabled: true,
+            endpoint: Some(endpoint),
+            model: Some("test-model".into()),
+            request_timeout_seconds: 3,
+            prompt_field: "prompt".into(),
+            response_field: "content".into(),
+            auth_header: "Authorization".into(),
+            api_key,
+        }
+    }
+
+    fn cloud_http_item() -> TextProviderChainItem {
+        TextProviderChainItem {
+            kind: PROVIDER_NAME_CLOUD_HTTP.to_string(),
         }
     }
 
@@ -1833,6 +2248,7 @@ mod tests {
             "/bin/true",
             &llamafile_view_disabled(),
             &local_http_view_disabled(),
+            &cloud_http_view_disabled(),
         );
         assert_eq!(r.chain_len(), 1);
         assert_eq!(r.chain_kinds(), vec!["abrain"]);
@@ -1857,6 +2273,7 @@ mod tests {
             "/bin/true",
             &llamafile_view_disabled(),
             &local_http_view_disabled(),
+            &cloud_http_view_disabled(),
         );
         assert_eq!(r.chain_kinds(), vec!["abrain"]);
     }
@@ -1872,6 +2289,7 @@ mod tests {
             "/bin/echo",
             &llamafile_view_disabled(),
             &local_http_view_disabled(),
+            &cloud_http_view_disabled(),
         );
         assert_eq!(r.chain_kinds(), vec!["abrain"]);
         assert_eq!(r.status().configured, "abrain");
@@ -1881,6 +2299,7 @@ mod tests {
             "/bin/echo",
             &llamafile_view_disabled(),
             &local_http_view_disabled(),
+            &cloud_http_view_disabled(),
         );
         assert_eq!(r_empty.chain_kinds(), vec!["abrain"]);
     }
@@ -1893,6 +2312,7 @@ mod tests {
             "/bin/echo",
             &llamafile_view_configured_missing_binary(),
             &local_http_view_disabled(),
+            &cloud_http_view_disabled(),
         );
         assert_eq!(r.chain_kinds(), vec!["abrain", "llamafile_local"]);
         // Primary bleibt abrain; availability nominell „available".
@@ -1907,6 +2327,7 @@ mod tests {
             "/bin/echo",
             &llamafile_view_configured_missing_binary(),
             &local_http_view_disabled(),
+            &cloud_http_view_disabled(),
         );
         assert_eq!(r.chain_kinds(), vec!["llamafile_local", "abrain"]);
         // Primary ist jetzt llamafile_local.
@@ -1926,6 +2347,7 @@ mod tests {
             "/bin/echo",
             &llamafile_view_configured_missing_binary(),
             &local_http_view_disabled(),
+            &cloud_http_view_disabled(),
         );
         let out = r.run("ping").await.expect("abrain fallback must succeed");
         assert!(out.contains("ping"));
@@ -1948,6 +2370,7 @@ mod tests {
             "/bin/false",
             &llamafile_view_disabled(),
             &local_http_view_disabled(),
+            &cloud_http_view_disabled(),
         );
         let err = r.run("hi").await.expect_err("all must fail");
         assert!(matches!(err, TextProviderError::AllFailed(_)));
@@ -1970,6 +2393,7 @@ mod tests {
             "/bin/echo",
             &llamafile_view_configured_missing_binary(),
             &local_http_view_disabled(),
+            &cloud_http_view_disabled(),
         );
         let out = r.run("hi").await.expect("primary abrain must win");
         assert!(out.contains("hi"));
@@ -2114,7 +2538,7 @@ mod tests {
         // durch einen neuen PR laufen (Breaking Change für UI/Docs).
         assert_eq!(
             KNOWN_TEXT_KINDS,
-            &["abrain", "llamafile_local", "local_http"],
+            &["abrain", "llamafile_local", "local_http", "cloud_http"],
         );
         assert_eq!(DEFAULT_TEXT_PROVIDER_CHAIN, &["abrain"]);
     }
@@ -2235,6 +2659,7 @@ mod tests {
             "/bin/echo",
             &llamafile_view_disabled(),
             &local_http_view_with_endpoint("http://127.0.0.1:59999/completion".into()),
+            &cloud_http_view_disabled(),
         );
         assert_eq!(r.chain_kinds(), vec!["local_http", "abrain"]);
     }
@@ -2248,6 +2673,7 @@ mod tests {
             "/bin/echo",
             &llamafile_view_disabled(),
             &local_http_view_with_endpoint("http://127.0.0.1:59999/completion".into()),
+            &cloud_http_view_disabled(),
         );
         let response = r.run("hi").await.expect("fallback to abrain must succeed");
         assert!(!response.is_empty());
@@ -2255,6 +2681,157 @@ mod tests {
         assert_eq!(status.configured, "local_http");
         assert_eq!(status.active, "abrain");
         assert_eq!(status.availability, "fallback_active");
+    }
+
+    // --- Cloud-HTTP-Provider (PR 10) ---------------------------------
+
+    #[test]
+    fn cloud_http_endpoint_parser_accepts_http_url() {
+        let (h, p, path) =
+            CloudHttpProvider::parse_endpoint("http://example.invalid:8443/v1/chat").unwrap();
+        assert_eq!(h, "example.invalid");
+        assert_eq!(p, 8443);
+        assert_eq!(path, "/v1/chat");
+    }
+
+    #[test]
+    fn cloud_http_endpoint_parser_rejects_https() {
+        let err = CloudHttpProvider::parse_endpoint("https://example.invalid/").unwrap_err();
+        assert!(format!("{err}").contains("must start with http://"));
+    }
+
+    #[test]
+    fn cloud_http_endpoint_parser_rejects_user_info() {
+        let err = CloudHttpProvider::parse_endpoint("http://user:pw@host/").unwrap_err();
+        assert!(format!("{err}").contains("not parseable"));
+    }
+
+    #[tokio::test]
+    async fn cloud_http_run_disabled_classifies_as_disabled() {
+        let provider = CloudHttpProvider::new(cloud_http_view_disabled());
+        let err = provider.run("x").await.unwrap_err();
+        assert_eq!(TextProviderImpl::classify_error(&err), "disabled");
+    }
+
+    #[tokio::test]
+    async fn cloud_http_run_enabled_without_endpoint_classifies_as_not_configured() {
+        let view = CloudHttpConfigView {
+            enabled: true,
+            endpoint: None,
+            ..cloud_http_view_disabled()
+        };
+        let provider = CloudHttpProvider::new(view);
+        let err = provider.run("x").await.unwrap_err();
+        assert_eq!(TextProviderImpl::classify_error(&err), "not_configured");
+    }
+
+    #[tokio::test]
+    async fn cloud_http_run_without_secret_classifies_as_secret_missing() {
+        let view = cloud_http_view_with(
+            "http://127.0.0.1:1/unused".into(),
+            None, // no api key
+        );
+        let provider = CloudHttpProvider::new(view);
+        let err = provider.run("x").await.unwrap_err();
+        assert_eq!(TextProviderImpl::classify_error(&err), "secret_missing");
+    }
+
+    #[tokio::test]
+    async fn cloud_http_run_returns_content_against_fake_server() {
+        let (port, _server) = start_fake_llama_server("cloud antwort").await;
+        let view = cloud_http_view_with(
+            format!("http://127.0.0.1:{port}/completion"),
+            Some("sk-test-fake-key".into()),
+        );
+        let provider = CloudHttpProvider::new(view);
+        let response = provider.run("frage?").await.expect("completion must succeed");
+        assert_eq!(response, "cloud antwort");
+    }
+
+    #[tokio::test]
+    async fn cloud_http_run_non_200_classifies_as_http_error() {
+        let (port, _server) = start_fake_llama_server_returning_500().await;
+        let view = cloud_http_view_with(
+            format!("http://127.0.0.1:{port}/completion"),
+            Some("sk-test-fake-key".into()),
+        );
+        let provider = CloudHttpProvider::new(view);
+        let err = provider.run("x").await.unwrap_err();
+        assert_eq!(TextProviderImpl::classify_error(&err), "http_error");
+    }
+
+    #[test]
+    fn cloud_http_debug_impl_elides_api_key() {
+        // Secret-Disziplin: der Debug-String darf den Key-Wert
+        // niemals auftauchen lassen, egal wie lang.
+        let view = cloud_http_view_with(
+            "http://127.0.0.1:8080/v1".into(),
+            Some("sk-this-must-not-leak-in-debug-output".into()),
+        );
+        let provider = CloudHttpProvider::new(view);
+        let rendered = format!("{provider:?}");
+        assert!(
+            !rendered.contains("sk-this-must-not-leak-in-debug-output"),
+            "Debug leaked key: {rendered}",
+        );
+        assert!(rendered.contains("<set>"));
+    }
+
+    #[test]
+    fn from_chain_instantiates_cloud_http_when_listed() {
+        let r = TextProviderResolver::from_chain(
+            &[cloud_http_item(), abrain_item()],
+            "/bin/echo",
+            &llamafile_view_disabled(),
+            &local_http_view_disabled(),
+            &cloud_http_view_with(
+                "http://127.0.0.1:59999/v1".into(),
+                Some("sk-dummy".into()),
+            ),
+        );
+        assert_eq!(r.chain_kinds(), vec!["cloud_http", "abrain"]);
+    }
+
+    #[tokio::test]
+    async fn resolver_marks_status_cloud_true_when_cloud_http_is_active() {
+        let (port, _server) = start_fake_llama_server("cloud").await;
+        let r = TextProviderResolver::from_chain(
+            &[cloud_http_item()],
+            "/bin/echo",
+            &llamafile_view_disabled(),
+            &local_http_view_disabled(),
+            &cloud_http_view_with(
+                format!("http://127.0.0.1:{port}/completion"),
+                Some("sk-test".into()),
+            ),
+        );
+        r.run("hi").await.expect("should succeed");
+        let status = r.status();
+        assert_eq!(status.configured, "cloud_http");
+        assert_eq!(status.active, "cloud_http");
+        assert!(status.cloud, "status.cloud must be true when cloud_http active");
+    }
+
+    #[tokio::test]
+    async fn resolver_falls_back_from_cloud_http_to_abrain_when_connect_fails() {
+        // Niemand lauscht auf Port 59999 — Cloud-Pfad scheitert,
+        // abrain liefert als Fallback.
+        let r = TextProviderResolver::from_chain(
+            &[cloud_http_item(), abrain_item()],
+            "/bin/echo",
+            &llamafile_view_disabled(),
+            &local_http_view_disabled(),
+            &cloud_http_view_with(
+                "http://127.0.0.1:59999/unused".into(),
+                Some("sk-dummy".into()),
+            ),
+        );
+        let response = r.run("hi").await.expect("fallback must succeed");
+        assert!(!response.is_empty());
+        let status = r.status();
+        assert_eq!(status.configured, "cloud_http");
+        assert_eq!(status.active, "abrain");
+        assert!(!status.cloud, "fallback from cloud → local must mark cloud=false");
     }
 
     // --- Chain + Llamafile lifecycle accessors (PR 4) -----------------
@@ -2270,6 +2847,7 @@ mod tests {
             "/bin/echo",
             &llamafile_view_disabled(),
             &local_http_view_disabled(),
+            &cloud_http_view_disabled(),
         );
         assert_eq!(r.chain_kinds(), vec!["abrain"]);
         assert!(r.llamafile_lifecycle().is_none());
@@ -2287,6 +2865,7 @@ mod tests {
             "/bin/echo",
             &llamafile_view_disabled(),
             &local_http_view_disabled(),
+            &cloud_http_view_disabled(),
         );
         assert_eq!(r.chain_kinds(), vec!["llamafile_local", "abrain"]);
         assert_eq!(r.llamafile_lifecycle(), Some(LlamafileLifecycle::Disabled));
@@ -2304,6 +2883,7 @@ mod tests {
             "/bin/echo",
             &llamafile_view_not_configured(),
             &local_http_view_disabled(),
+            &cloud_http_view_disabled(),
         );
         assert_eq!(r.chain_kinds(), vec!["llamafile_local"]);
         assert_eq!(
@@ -2323,6 +2903,7 @@ mod tests {
             "/bin/echo",
             &llamafile_view_configured_missing_binary(),
             &local_http_view_disabled(),
+            &cloud_http_view_disabled(),
         );
         assert_eq!(
             r.llamafile_lifecycle(),
@@ -2342,6 +2923,7 @@ mod tests {
             "/bin/echo",
             &llamafile_view_disabled(),
             &local_http_view_disabled(),
+            &cloud_http_view_disabled(),
         );
         assert_eq!(r.chain_kinds(), vec!["llamafile_local", "abrain"]);
     }

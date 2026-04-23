@@ -19,7 +19,8 @@ use crate::approvals::{
     PendingApprovalRegistry,
 };
 use crate::config::{
-    validate_llamafile_mode, AudioConfig, Config, LlamafileConfig, LocalHttpConfig,
+    validate_llamafile_mode, AudioConfig, CloudHttpConfig, Config, LlamafileConfig,
+    LocalHttpConfig,
 };
 use crate::interaction::{
     AccessibilityDiscovery, AccessibilityProbe, CommandBackend, CommandBackendConfig,
@@ -33,14 +34,15 @@ use crate::providers::stt::{
     SttProviderChainItem, SttProviderError, SttProviderResolver,
 };
 use crate::providers::text::{
-    LlamafileConfigView, LocalHttpConfigView, TextProviderChainItem, TextProviderError,
-    TextProviderResolver,
+    CloudHttpConfigView, LlamafileConfigView, LocalHttpConfigView, TextProviderChainItem,
+    TextProviderError, TextProviderResolver,
 };
 #[cfg(test)]
 use crate::providers::text::TextProviderRuntimeStatus;
 use crate::providers::tts::{
     TtsProviderChainItem, TtsProviderError, TtsProviderResolver,
 };
+use crate::secrets_store;
 use crate::settings_store;
 
 const EVENTS_CHANNEL_CAPACITY: usize = 256;
@@ -105,6 +107,19 @@ pub struct App {
     /// Llamafile-Pfad; der alte Resolver-`Arc` lebt weiter, bis alle
     /// laufenden `handle_text_query`-Aufrufe fertig sind.
     live_local_http: Mutex<LocalHttpConfig>,
+    /// Laufender editierbarer Stand der Cloud-HTTP-Config (PR 10).
+    /// Enthält **keinen** API-Key — der liegt in [`Self::cloud_http_api_key`]
+    /// und wird nur beim Resolver-Rebuild kurz in die Provider-View
+    /// projiziert. Live-Updates über `settings_set_cloud_http_config`.
+    live_cloud_http: Mutex<CloudHttpConfig>,
+    /// API-Key für den `cloud_http`-Provider (PR 10). Lebt getrennt
+    /// von allen operationalen Configs, damit das Secret nie
+    /// versehentlich zusammen mit anderen Feldern serialisiert wird.
+    /// Geladen aus [`crate::secrets_store::load_secrets`] beim Start,
+    /// aktualisiert über `settings_set_cloud_http_secret`. Wird **nie**
+    /// im StatusPayload / EventBus / Log / Probe-Response gespiegelt —
+    /// der Status trägt nur einen boolschen „present"-Flag.
+    cloud_http_api_key: Mutex<Option<String>>,
     /// Laufender editierbarer Stand der AudioConfig (PR 7). Startet als
     /// Kopie von `config.audio`, gemischt mit STT-/TTS-Overrides aus dem
     /// Settings-Store. Nur die UI-editierbaren Felder
@@ -236,6 +251,25 @@ pub struct StatusPayload {
     /// `enabled` **und** ein nicht-leerer Endpoint. Die ehrliche
     /// „konfigurierte"-Grenze, analog zu `llamafile_configured`.
     pub local_http_configured: bool,
+    // --- Cloud-HTTP-Provider (PR 10, additiv, security-first) -----
+    /// Ob `cloud_http` Teil der aktuellen Text-Provider-Kette ist.
+    /// Cloud bleibt opt-in — ohne Chain-Eintrag bedeutet `cloud=true`
+    /// im Resolver-Status nichts, weil der Provider gar nicht gebaut
+    /// wurde.
+    pub cloud_http_in_chain: bool,
+    /// Ausgewerteter Master-Schalter (`SMOLIT_CLOUD_HTTP_ENABLED`).
+    /// Auch hier: unabhängig von der Chain-Mitgliedschaft.
+    pub cloud_http_enabled: bool,
+    /// `enabled` **und** ein nicht-leerer Endpoint **und** ein
+    /// gesetzter API-Key im Secrets-Store. Nur wenn alle drei Bedingungen
+    /// erfüllt sind, hat `run()` eine echte Chance. Der Status-Wert
+    /// ist die ehrliche „bereit für einen Request"-Grenze.
+    pub cloud_http_configured: bool,
+    /// **Nur ein Boolean.** Der Key-Wert verlässt niemals den
+    /// Secrets-Store in Richtung StatusPayload/EventBus/Log. Die UI
+    /// benutzt diesen Flag, um „Key gespeichert ✓" vs. „Key fehlt ✗"
+    /// ehrlich anzuzeigen.
+    pub cloud_http_secret_present: bool,
 }
 
 /// Eingabe-Payload für `settings_set_llamafile_config` (PR 5).
@@ -323,6 +357,39 @@ pub struct SettingsLocalHttpUpdate {
     pub endpoint: Option<String>,
     #[serde(default)]
     pub request_timeout_seconds: Option<u64>,
+}
+
+/// Eingabe-Payload für `settings_set_cloud_http_config` (PR 10).
+/// **Enthält keinen API-Key** — der läuft über die separate Nachricht
+/// `settings_set_cloud_http_secret`. Optionalsemantik wie bei
+/// `SettingsLocalHttpUpdate`: `Some("")` löscht, `None` lässt
+/// unverändert.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SettingsCloudHttpConfigUpdate {
+    pub enabled: bool,
+    #[serde(default)]
+    pub endpoint: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub request_timeout_seconds: Option<u64>,
+}
+
+/// Eingabe-Payload für `settings_set_cloud_http_secret` (PR 10). Der
+/// einzige Ort, an dem ein API-Key über IPC in den Core kommt.
+/// `api_key=None` oder `Some("")` löscht den Key (Clear-Pfad); jeder
+/// andere Wert wird persistiert.
+///
+/// **Secret-Disziplin:** der Payload selbst wird **nicht** in
+/// Request-Logs zitiert; der IPC-Dispatch antwortet mit einem
+/// Status-Envelope, der nur `cloud_http_secret_present` trägt, nie
+/// den Key selbst.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SettingsCloudHttpSecretUpdate {
+    /// `None` **oder** leerer String → Key löschen.
+    /// Jeder andere Wert → speichern.
+    #[serde(default)]
+    pub api_key: Option<String>,
 }
 
 /// Eingabe-Payload für `settings_set_text_provider_chain` (PR 9).
@@ -436,11 +503,22 @@ impl App {
             &local_http_override,
         );
         let local_http_view = local_http_view_from(&live_local_http);
+        // PR 10: Cloud-HTTP-Config aus der Startup-Config übernehmen.
+        // Der API-Key kommt aus dem dedizierten Secrets-Store (eigene
+        // Datei, 0600). `SecretsFile::Debug` elidiert den Wert — wir
+        // loggen hier nur den `api_key_present`-Bool über den
+        // Resolver-Baupfad.
+        let secrets = secrets_store::load_secrets();
+        let cloud_http_api_key = secrets.cloud_http_api_key.clone();
+        let live_cloud_http = config.text_provider.cloud_http.clone();
+        let cloud_http_view =
+            cloud_http_view_from(&live_cloud_http, cloud_http_api_key.clone());
         let text_provider = Arc::new(TextProviderResolver::from_chain(
             &chain,
             &config.abrain_cmd,
             &llamafile_view,
             &local_http_view,
+            &cloud_http_view,
         ));
         let abrain_cmd = config.abrain_cmd.clone();
 
@@ -461,6 +539,8 @@ impl App {
             live_llamafile: Mutex::new(live_llamafile),
             live_audio: Mutex::new(live_audio_initial),
             live_local_http: Mutex::new(live_local_http),
+            live_cloud_http: Mutex::new(live_cloud_http),
+            cloud_http_api_key: Mutex::new(cloud_http_api_key),
         }
     }
 
@@ -512,6 +592,37 @@ impl App {
             .lock()
             .expect("live text chain mutex poisoned")
             .clone()
+    }
+
+    /// Baut einen frischen `CloudHttpConfigView` aus dem live-Stand
+    /// (PR 10). Klont sowohl Config als auch den API-Key unter
+    /// getrennten kurzen Locks, damit weder der Schreibpfad noch das
+    /// Probe blockieren. **Einzige Stelle in `App`, die den Key-
+    /// Klartext in einer String-Allokation hält — und sie fällt am
+    /// Ende der umgebenden Funktion wieder raus.**
+    fn current_cloud_http_view(&self) -> CloudHttpConfigView {
+        let cfg = self
+            .live_cloud_http
+            .lock()
+            .expect("live cloud_http mutex poisoned")
+            .clone();
+        let key = self
+            .cloud_http_api_key
+            .lock()
+            .expect("cloud_http api key mutex poisoned")
+            .clone();
+        cloud_http_view_from(&cfg, key)
+    }
+
+    /// Ob der persistierte API-Key gesetzt ist. Nur der Bool darf in
+    /// `StatusPayload` — der Wert selbst nie. Separate Methode statt
+    /// `current_cloud_http_view().api_key.is_some()`, damit der Log-
+    /// Pfad auch ohne Secret-Allokation arbeiten kann.
+    fn cloud_http_api_key_present(&self) -> bool {
+        self.cloud_http_api_key
+            .lock()
+            .expect("cloud_http api key mutex poisoned")
+            .is_some()
     }
 
     pub fn next_action_id(&self) -> String {
@@ -1039,6 +1150,27 @@ impl App {
             .unwrap_or(false);
         let local_http_configured = local_http_cfg.enabled && local_http_endpoint_present;
 
+        // Cloud-HTTP-Projektion (PR 10). Vier Felder, **alle** nicht-
+        // sensitiv: chain-Mitgliedschaft, Master-Flag, „configured"-
+        // Status (erfordert Endpoint **und** Key), und ein boolscher
+        // „Secret vorhanden"-Flag. Weder Endpoint noch Key noch Modell
+        // werden in den StatusPayload gespiegelt.
+        let cloud_http_in_chain = chain.iter().any(|k| k == "cloud_http");
+        let cloud_http_cfg = self
+            .live_cloud_http
+            .lock()
+            .expect("live cloud_http mutex poisoned")
+            .clone();
+        let cloud_http_endpoint_present = cloud_http_cfg
+            .endpoint
+            .as_deref()
+            .map(|e| !e.trim().is_empty())
+            .unwrap_or(false);
+        let cloud_http_secret_present = self.cloud_http_api_key_present();
+        let cloud_http_configured = cloud_http_cfg.enabled
+            && cloud_http_endpoint_present
+            && cloud_http_secret_present;
+
         StatusPayload {
             tts_enabled: tts.enabled,
             tts_available: tts.available,
@@ -1080,6 +1212,10 @@ impl App {
             local_http_in_chain,
             local_http_enabled: local_http_cfg.enabled,
             local_http_configured,
+            cloud_http_in_chain,
+            cloud_http_enabled: cloud_http_cfg.enabled,
+            cloud_http_configured,
+            cloud_http_secret_present,
         }
     }
 
@@ -1187,11 +1323,13 @@ impl App {
                 .lock()
                 .expect("live local_http mutex poisoned"),
         );
+        let cloud_http_view = self.current_cloud_http_view();
         let new_resolver = Arc::new(TextProviderResolver::from_chain(
             &self.current_text_chain(),
             &self.abrain_cmd,
             &new_view,
             &local_http_view,
+            &cloud_http_view,
         ));
 
         // Atomar ersetzen. Der alte Arc lebt weiter, solange andere
@@ -1518,11 +1656,13 @@ impl App {
                 .expect("live llamafile mutex poisoned"),
         );
         let new_local_http_view = local_http_view_from(&merged);
+        let cloud_http_view = self.current_cloud_http_view();
         let new_resolver = Arc::new(TextProviderResolver::from_chain(
             &self.current_text_chain(),
             &self.abrain_cmd,
             &llamafile_view,
             &new_local_http_view,
+            &cloud_http_view,
         ));
         {
             let mut guard = self
@@ -1599,11 +1739,13 @@ impl App {
                 .lock()
                 .expect("live local_http mutex poisoned"),
         );
+        let cloud_http_view = self.current_cloud_http_view();
         let new_resolver = Arc::new(TextProviderResolver::from_chain(
             &new_chain_items,
             &self.abrain_cmd,
             &llamafile_view,
             &local_http_view,
+            &cloud_http_view,
         ));
         {
             let mut guard = self
@@ -1759,6 +1901,296 @@ impl App {
             ),
         }
     }
+
+    /// Aktualisiert die operationale Cloud-HTTP-Config (PR 10).
+    /// **Enthält keinen Secret-Pfad** — der Key läuft über
+    /// `set_cloud_http_api_key`. Dieser Pfad dreht nur an Endpoint /
+    /// Modell / Timeout / Enabled.
+    pub fn update_cloud_http_config(
+        &self,
+        update: SettingsCloudHttpConfigUpdate,
+    ) -> Result<(), String> {
+        let timeout_override: Option<u64> = match update.request_timeout_seconds {
+            Some(0) => {
+                return Err(
+                    "request_timeout_seconds must be greater than 0".to_string(),
+                );
+            }
+            Some(n) => Some(n),
+            None => None,
+        };
+
+        let mut merged: CloudHttpConfig = self
+            .live_cloud_http
+            .lock()
+            .expect("live cloud_http mutex poisoned")
+            .clone();
+        merged.enabled = update.enabled;
+        if let Some(raw_endpoint) = update.endpoint {
+            let trimmed = raw_endpoint.trim();
+            merged.endpoint = if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            };
+        }
+        if let Some(raw_model) = update.model {
+            let trimmed = raw_model.trim();
+            merged.model = if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            };
+        }
+        if let Some(t) = timeout_override {
+            merged.request_timeout_seconds = t;
+        }
+
+        // Kein Secret im Log: wir schreiben Bool-Flags für Endpoint-
+        // und Modell-Präsenz, niemals die Werte selbst.
+        info!(
+            enabled = merged.enabled,
+            endpoint_set = merged.endpoint.is_some(),
+            model_set = merged.model.is_some(),
+            request_timeout_seconds = merged.request_timeout_seconds,
+            "cloud_http config updated",
+        );
+
+        let llamafile_view = llamafile_view_from(
+            &self
+                .live_llamafile
+                .lock()
+                .expect("live llamafile mutex poisoned"),
+        );
+        let local_http_view = local_http_view_from(
+            &self
+                .live_local_http
+                .lock()
+                .expect("live local_http mutex poisoned"),
+        );
+        let api_key = self
+            .cloud_http_api_key
+            .lock()
+            .expect("cloud_http api key mutex poisoned")
+            .clone();
+        let new_cloud_http_view = cloud_http_view_from(&merged, api_key);
+        let new_resolver = Arc::new(TextProviderResolver::from_chain(
+            &self.current_text_chain(),
+            &self.abrain_cmd,
+            &llamafile_view,
+            &local_http_view,
+            &new_cloud_http_view,
+        ));
+        {
+            let mut guard = self
+                .text_provider
+                .write()
+                .expect("text provider lock poisoned");
+            *guard = new_resolver;
+        }
+        {
+            let mut guard = self
+                .live_cloud_http
+                .lock()
+                .expect("live cloud_http mutex poisoned");
+            *guard = merged;
+        }
+        Ok(())
+    }
+
+    /// Setzt (oder löscht) den Cloud-HTTP-API-Key (PR 10). Einziger
+    /// IPC-Pfad für Secret-Werte — separat vom operationalen
+    /// `update_cloud_http_config`, damit Schreibfehler / Log-Zeilen
+    /// niemals zufällig einen Keytreffer mit einer Endpoint-Änderung
+    /// vermischen.
+    ///
+    /// **Kein Secret im Log**: der Erfolgspfad loggt nur „key set"
+    /// bzw. „key cleared".
+    pub fn set_cloud_http_api_key(
+        &self,
+        update: SettingsCloudHttpSecretUpdate,
+    ) -> Result<(), String> {
+        let normalized = update
+            .api_key
+            .map(|v| v.trim().to_string())
+            .filter(|s| !s.is_empty());
+        // Persistieren — `secrets_store` selbst loggt ohne Wert.
+        if let Err(err) = secrets_store::set_cloud_http_api_key(normalized.clone()) {
+            // Fehler **ohne** Secret-Kontext zurückgeben; Settings-UI
+            // sieht den Error-Envelope, nicht den Klartext.
+            return Err(format!(
+                "failed to persist cloud_http api key: {}",
+                err.root_cause(),
+            ));
+        }
+        let is_set = normalized.is_some();
+        {
+            let mut guard = self
+                .cloud_http_api_key
+                .lock()
+                .expect("cloud_http api key mutex poisoned");
+            *guard = normalized;
+        }
+        if is_set {
+            info!("cloud_http api key set (value not logged)");
+        } else {
+            info!("cloud_http api key cleared");
+        }
+        // Resolver rebuilden — der neue Key muss in einem
+        // `CloudHttpConfigView` landen, damit ein `run()` ihn nutzen
+        // kann. Der Rebuild hält den Mutex nicht während des Baus.
+        let llamafile_view = llamafile_view_from(
+            &self
+                .live_llamafile
+                .lock()
+                .expect("live llamafile mutex poisoned"),
+        );
+        let local_http_view = local_http_view_from(
+            &self
+                .live_local_http
+                .lock()
+                .expect("live local_http mutex poisoned"),
+        );
+        let new_cloud_http_view = self.current_cloud_http_view();
+        let new_resolver = Arc::new(TextProviderResolver::from_chain(
+            &self.current_text_chain(),
+            &self.abrain_cmd,
+            &llamafile_view,
+            &local_http_view,
+            &new_cloud_http_view,
+        ));
+        {
+            let mut guard = self
+                .text_provider
+                .write()
+                .expect("text provider lock poisoned");
+            *guard = new_resolver;
+        }
+        Ok(())
+    }
+
+    /// Probe für den Cloud-HTTP-Provider (PR 10). Konservativ: kein
+    /// Completion-Roundtrip, nur ein TCP-Connect gegen den geparsten
+    /// Endpoint. Der API-Key wird hier **nicht** transportiert — eine
+    /// echte HTTP-Runde mit Bearer-Header landet in einem Folge-PR,
+    /// sobald wir TLS haben. Für den MVP ist der TCP-Connect
+    /// ausreichend ehrlich:
+    ///
+    ///   * not_in_chain → Provider fehlt in Chain.
+    ///   * disabled → Master-Flag off.
+    ///   * not_configured → Endpoint fehlt.
+    ///   * secret_missing → API-Key im Secrets-Store leer.
+    ///   * endpoint_scheme_unsupported → `https://`.
+    ///   * endpoint_unparseable → URL kaputt.
+    ///   * timeout / http_connect_failed → Netzwerk.
+    ///   * ok → TCP-Connect erfolgreich.
+    pub async fn probe_cloud_http(&self) -> SettingsProbeResultPayload {
+        let cfg = self
+            .live_cloud_http
+            .lock()
+            .expect("live cloud_http mutex poisoned")
+            .clone();
+        let resolver = self.current_resolver();
+        let in_chain = resolver.chain_kinds().iter().any(|k| *k == "cloud_http");
+        let enabled = cfg.enabled;
+        let endpoint_present = cfg
+            .endpoint
+            .as_deref()
+            .map(|e| !e.trim().is_empty())
+            .unwrap_or(false);
+        let secret_present = self.cloud_http_api_key_present();
+        let configured = enabled && endpoint_present && secret_present;
+
+        let build = |ok: bool, class: &str, message: &str| SettingsProbeResultPayload {
+            axis: "cloud_http".into(),
+            ok,
+            class: class.into(),
+            message: message.into(),
+            lifecycle: None,
+            in_chain,
+            enabled,
+            configured,
+        };
+
+        if !in_chain {
+            return build(
+                false,
+                "not_in_chain",
+                "cloud_http is not in the configured text provider chain",
+            );
+        }
+        if !enabled {
+            return build(
+                false,
+                "disabled",
+                "cloud_http is disabled (master flag off)",
+            );
+        }
+        let Some(endpoint_value) = cfg
+            .endpoint
+            .as_deref()
+            .map(str::trim)
+            .filter(|e| !e.is_empty())
+        else {
+            return build(
+                false,
+                "not_configured",
+                "cloud_http is enabled but has no endpoint configured",
+            );
+        };
+        if !secret_present {
+            return build(
+                false,
+                "secret_missing",
+                "cloud_http is enabled but no api key is stored",
+            );
+        }
+
+        let (host, port, _path) = match crate::providers::text::CloudHttpProvider::parse_endpoint(
+            endpoint_value,
+        ) {
+            Ok(parsed) => parsed,
+            Err(err) => {
+                let msg = format!("{err}");
+                let class = if msg.contains("must start with http://") {
+                    "endpoint_scheme_unsupported"
+                } else {
+                    "endpoint_unparseable"
+                };
+                let human = if class == "endpoint_scheme_unsupported" {
+                    "endpoint must start with http:// (https:// is not supported in this build)"
+                } else {
+                    "endpoint url is not parseable"
+                };
+                return build(false, class, human);
+            }
+        };
+
+        let timeout_secs = cfg.request_timeout_seconds.max(1).min(30);
+        let addr = format!("{host}:{port}");
+        let connect_result = tokio::time::timeout(
+            std::time::Duration::from_secs(timeout_secs),
+            tokio::net::TcpStream::connect(&addr),
+        )
+        .await;
+        match connect_result {
+            Err(_) => build(
+                false,
+                "timeout",
+                "tcp connect to configured endpoint timed out",
+            ),
+            Ok(Err(_)) => build(
+                false,
+                "http_connect_failed",
+                "tcp connect to configured endpoint failed",
+            ),
+            Ok(Ok(_stream)) => build(
+                true,
+                "ok",
+                "cloud_http endpoint reachable (tcp connect succeeded, request not sent)",
+            ),
+        }
+    }
 }
 
 /// Gemeinsamer Kern für STT-/TTS-Probes (PR 7). Beide Achsen haben heute
@@ -1865,6 +2297,29 @@ fn local_http_view_from(cfg: &LocalHttpConfig) -> LocalHttpConfigView {
         request_timeout_seconds: cfg.request_timeout_seconds,
         prompt_field: cfg.prompt_field.clone(),
         response_field: cfg.response_field.clone(),
+    }
+}
+
+/// Baut eine `CloudHttpConfigView` aus der operationalen
+/// [`CloudHttpConfig`] **und** dem separat gehaltenen API-Key (PR 10).
+/// Einzige Stelle, an der die beiden Quellen zusammenfinden — und
+/// damit die einzige, die Secret-Klartext sieht. Das Ergebnis wird
+/// nur kurz an den Resolver-Builder gereicht, der es in einem
+/// `CloudHttpProvider` ablegt (auch dort mit Custom-Debug ohne
+/// Key-Echo).
+fn cloud_http_view_from(
+    cfg: &CloudHttpConfig,
+    api_key: Option<String>,
+) -> CloudHttpConfigView {
+    CloudHttpConfigView {
+        enabled: cfg.enabled,
+        endpoint: cfg.endpoint.clone(),
+        model: cfg.model.clone(),
+        request_timeout_seconds: cfg.request_timeout_seconds,
+        prompt_field: cfg.prompt_field.clone(),
+        response_field: cfg.response_field.clone(),
+        auth_header: cfg.auth_header.clone(),
+        api_key,
     }
 }
 

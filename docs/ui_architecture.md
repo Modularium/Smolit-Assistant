@@ -11,6 +11,8 @@ Dieses Dokument hier bleibt auf die **UI-/Godot-Ebene** fokussiert.
 
 ---
 
+
+
 ## 1. Rolle der UI
 
 Die Godot-UI ist ein **reiner Client** des Rust-Cores. Sie hat:
@@ -1944,12 +1946,75 @@ EventBus-/IPC-Erweiterungen (additiv, PR 9):
 - `StatusPayload.text_provider_chain` bleibt der einzige
   Readout-Kanal; keine neuen Felder.
 
+### 8d.5e Cloud-HTTP-Editor + Secret-Pfad (PR 10, Ist-Zustand)
+
+PR 10 führt den ersten Cloud-/Remote-Text-Provider `cloud_http`
+ein — mit **visuell deutlich abgesetztem** „external · cloud"-
+Block unter den lokalen Editoren. Der Block ist gold-orange
+getönt und trägt einen kuratierten Warnhinweis:
+
+> Achtung: externer / cloud Pfad. Requests verlassen diese
+> Maschine in dem Moment, in dem dieser Provider in der Chain
+> steht und enabled ist.
+
+**Felder:**
+
+- **`enabled` CheckBox** — Master-Schalter. Ohne Flag bleibt der
+  Provider inert, auch mit Key im Store.
+- **`endpoint` LineEdit** — `http://host:port/path`. `https://`
+  wird vom Core abgelehnt (Scheme in PR 10 nicht unterstützt).
+- **`model` LineEdit** — optional.
+- **`api_key` LineEdit mit `secret = true`** — Godot maskiert
+  den Text. Wird **nie** von `apply_status` befüllt; der
+  StatusPayload trägt das Feld schlicht nicht. Zwei Buttons
+  daneben: **Save key** / **Clear key**.
+- **Status-Label** — zeigt nur die kuratierten Strings
+  `key: saved ✓` vs. `key: not set ✗` vs. `key: sent (field
+  cleared)` vs. `key: clear requested`. Der Wert selbst
+  erscheint an keiner Stelle.
+- **Apply** (enabled/endpoint/model) + **Probe** (TCP-Connect
+  gegen den geparsten Endpoint, kein Completion-Roundtrip, kein
+  Bearer-Header auf der Leitung).
+
+**Security-first-UX-Regeln:**
+
+- **Secret-Feld wird sofort geleert.** Sobald der Nutzer auf
+  „Save key" klickt, wird der Text aus dem LineEdit **zuerst**
+  in eine lokale Variable kopiert und das Feld **sofort**
+  geleert — bevor die IPC-Message den Core erreicht. Auch im
+  Offline-Fall (kein IpcClient verfügbar) bleibt das Feld leer;
+  der Nutzer tippt bei Bedarf neu. Kein Klartext lebt in der UI
+  länger als eine Frame-Grenze.
+- **Kein Rückspiegeln aus dem Status.** `_sync_cloud_http_widgets_from_status`
+  berührt das `_cloud_http_secret_edit`-Widget ausdrücklich
+  nicht. Selbst wenn der Status `cloud_http_secret_present=true`
+  trägt, bleibt das Feld leer.
+- **Bool-Flag statt Wert.** Die einzige Secret-Information, die
+  aus dem Core zurückkommt, ist `cloud_http_secret_present: bool`.
+  Die UI rendert daraus nur einen Status-Label-Text, nie einen
+  maskierten Proxy-Wert (keine „●●●●●●●●"-Illusion von Länge).
+
+**EventBus-/IPC-Erweiterungen (additiv, PR 10):**
+
+- Neue Client-Methoden in
+  [`ui/autoload/ipc_client.gd`](../ui/autoload/ipc_client.gd):
+  `settings_set_cloud_http_config(enabled, endpoint, model,
+  request_timeout_seconds)`,
+  `settings_set_cloud_http_secret(api_key)` (akzeptiert `null`
+  zum Clear) und `settings_probe_cloud_http()`.
+- StatusPayload bekommt vier additive Felder
+  (`cloud_http_in_chain` / `_enabled` / `_configured` /
+  `_secret_present`) — alle nicht-sensitiv.
+
 ### 8d.6 Verifikation
 
-- `scripts/settings_shell_smoke.gd` (seit PR 9 um drei Blöcke
-  für den Text-Chain-Editor erweitert — Build/Sync,
-  Toggle+Move-Verhalten und UI-seitige Empty-Guard; zusammen +9
-  Assertions, also 163 PASS, alle grün): Section-Reihenfolge,
+- `scripts/settings_shell_smoke.gd` (seit PR 10 um vier
+  Cloud-HTTP-Blöcke erweitert — Editor-Build mit externem
+  Warnhinweis, Secret-Edit bleibt nach Status-Tick leer,
+  Status-Label spiegelt `cloud_http_secret_present` korrekt
+  in beiden Richtungen, Edit-Feld ist sofort nach
+  Save-Simulation geleert; +7 Assertions seit PR 9, alle grün):
+  Section-Reihenfolge,
   Slug-Eindeutigkeit, defensive `*_lines`-Renderer für leere /
   partielle / vollständige StatusPayloads inklusive PR-4-Felder
   (`text_provider_chain`, `llamafile_in_chain`, `llamafile_lifecycle`,

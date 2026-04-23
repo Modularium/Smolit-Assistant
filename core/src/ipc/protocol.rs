@@ -5,8 +5,9 @@ use crate::actions::{
     ActionProgressPayload, ActionStartedPayload, ActionStepPayload, ActionVerificationPayload,
 };
 use crate::app::{
-    SettingsLlamafileUpdate, SettingsLocalHttpUpdate, SettingsProbeResultPayload,
-    SettingsSttUpdate, SettingsTextProviderChainUpdate, SettingsTtsUpdate, StatusPayload,
+    SettingsCloudHttpConfigUpdate, SettingsCloudHttpSecretUpdate, SettingsLlamafileUpdate,
+    SettingsLocalHttpUpdate, SettingsProbeResultPayload, SettingsSttUpdate,
+    SettingsTextProviderChainUpdate, SettingsTtsUpdate, StatusPayload,
 };
 use crate::approvals::{ApprovalRequest, ApprovalResolvedPayload, IncomingApprovalDecision};
 use crate::interaction::{AccessibilityDiscovery, AccessibilityProbe, SelectedTarget};
@@ -99,6 +100,19 @@ pub enum IncomingMessage {
     /// den persistierten Override im Settings-Store und rebuildet den
     /// Resolver. Antwort: `status` bei Erfolg.
     SettingsResetTextProviderChain,
+    /// PR 10 — operationale Cloud-HTTP-Config. **Enthält keinen
+    /// API-Key** — der läuft über `settings_set_cloud_http_secret`.
+    SettingsSetCloudHttpConfig(SettingsCloudHttpConfigUpdate),
+    /// PR 10 — Cloud-HTTP-Secret (API-Key). Einziger IPC-Pfad, der
+    /// den Key-Wert trägt. Der Core antwortet bei Erfolg mit einem
+    /// `status`-Envelope, der nur `cloud_http_secret_present: bool`
+    /// trägt — nie den Key selbst.
+    SettingsSetCloudHttpSecret(SettingsCloudHttpSecretUpdate),
+    /// PR 10 — Diagnose-Probe für den `cloud_http`-Provider. TCP-
+    /// Connect gegen den geparsten Endpoint, kein Completion-
+    /// Request, kein Bearer-Header auf der Leitung. Antwort:
+    /// `settings_probe_result` mit `axis="cloud_http"`.
+    SettingsProbeCloudHttp,
 }
 
 /// Target shape accepted by the `interaction_focus_window` IPC request.
@@ -466,6 +480,58 @@ mod tests {
         assert!(matches!(
             parse_incoming(r#"{"type":"settings_reset_text_provider_chain"}"#).unwrap(),
             IncomingMessage::SettingsResetTextProviderChain
+        ));
+    }
+
+    // PR 10 — Cloud-HTTP-Parser-Tests.
+
+    #[test]
+    fn parses_settings_set_cloud_http_config_full_payload() {
+        let raw = r#"{"type":"settings_set_cloud_http_config","enabled":true,"endpoint":"http://example.invalid:8443/v1/chat","model":"gpt-test","request_timeout_seconds":60}"#;
+        let msg = parse_incoming(raw).unwrap();
+        match msg {
+            IncomingMessage::SettingsSetCloudHttpConfig(update) => {
+                assert!(update.enabled);
+                assert_eq!(
+                    update.endpoint.as_deref(),
+                    Some("http://example.invalid:8443/v1/chat"),
+                );
+                assert_eq!(update.model.as_deref(), Some("gpt-test"));
+                assert_eq!(update.request_timeout_seconds, Some(60));
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn parses_settings_set_cloud_http_secret_with_key() {
+        let raw = r#"{"type":"settings_set_cloud_http_secret","api_key":"sk-test-abcdef"}"#;
+        let msg = parse_incoming(raw).unwrap();
+        match msg {
+            IncomingMessage::SettingsSetCloudHttpSecret(update) => {
+                assert_eq!(update.api_key.as_deref(), Some("sk-test-abcdef"));
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn parses_settings_set_cloud_http_secret_with_null_clears_key() {
+        let raw = r#"{"type":"settings_set_cloud_http_secret","api_key":null}"#;
+        let msg = parse_incoming(raw).unwrap();
+        match msg {
+            IncomingMessage::SettingsSetCloudHttpSecret(update) => {
+                assert!(update.api_key.is_none());
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn parses_settings_probe_cloud_http() {
+        assert!(matches!(
+            parse_incoming(r#"{"type":"settings_probe_cloud_http"}"#).unwrap(),
+            IncomingMessage::SettingsProbeCloudHttp
         ));
     }
 

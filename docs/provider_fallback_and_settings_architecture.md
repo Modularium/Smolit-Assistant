@@ -927,6 +927,46 @@ gegen einen lokalen Fake-HTTP-Server plus ein Shell-Skript als
   (Build + Sync, Toggle/Move, UI-Seiten-Empty-Guard). Gesamttests:
   Core 230 PASS (+20 vs. PR 8); UI-`settings-shell-smoke` auf
   erweitert (+9 Assertions).
+- **PR 10 — erster Cloud-/Remote-Text-Provider + dedizierter
+  Secret-Pfad (Ist).** Einziger Cloud-Kind heute: `cloud_http`.
+  Sehr bewusster MVP — **nicht** ein „OpenAI-Universum-Adapter":
+  POST JSON mit einem Prompt-Feld + optionalem `model`, Response
+  trägt ein Text-Feld, Bearer-Auth über einen konfigurierbaren
+  Header. Kein Streaming, kein Tool-Calling, kein `messages`-
+  Array. **Plaintext HTTP nur**; `https://` wird hart abgelehnt,
+  weil PR 10 keine TLS-/Trust-Infrastruktur mitbringt — Betreiber
+  stellen einen vertrauenswürdigen Reverse-Proxy vor den
+  Endpoint. Der Secret-Pfad ist der Herzschlag dieses PRs: ein
+  dedizierter [`crate::secrets_store`](../core/src/secrets_store.rs)
+  mit eigener Datei `secrets.json`, eigener Serde-Struktur
+  (`SecretsFile`) und eigenem `Debug`-Impl, das Werte **durchgängig**
+  elidiert (`<set>`/`<unset>`). Der Key fließt vom UI-Masked-
+  LineEdit per IPC direkt in den Store; `App.cloud_http_api_key`
+  lebt als `Mutex<Option<String>>` getrennt von allen operationalen
+  Configs. `StatusPayload` bekommt vier schmale, **nicht
+  sensitiven** Felder: `cloud_http_in_chain`, `cloud_http_enabled`,
+  `cloud_http_configured`, `cloud_http_secret_present` — der
+  Key-Wert verlässt den Store niemals. Neue IPC-Messages
+  `settings_set_cloud_http_config` (operational),
+  `settings_set_cloud_http_secret` (einziger IPC-Pfad mit
+  Key-Klartext), `settings_probe_cloud_http` (TCP-Connect only,
+  kein Completion-Roundtrip, kein Bearer-Header auf der Leitung).
+  UI: ein deutlich markierter „external · cloud"-Block mit
+  Warnhinweis, maskiertem Secret-LineEdit und sofortigem Leeren
+  des Felds nach Save-Klick (auch offline, security-first). Tests:
+  acht neue Secret-Store-Unit-Tests (inkl. 0600-Permission-Test,
+  Debug-Leak-Guard und Parse-Error-ohne-Panic), elf neue
+  Text-Provider-Unit-Tests (URL-Parser, classify_error-Tags,
+  Resolver-Fallback cloud → local, Debug-Leak-Guard auf
+  `CloudHttpProvider`), vier neue Protocol-Parser-Tests, sechs
+  neue IPC-Ende-zu-Ende-Tests (davon vier mit **aktiven**
+  Secret-Leak-Guards: weder `status` noch Probe-Response noch
+  `error`-Envelope dürfen den Key-Marker oder den Endpoint
+  enthalten). Gesamttests: Core 260 PASS (+30 vs. PR 9);
+  UI-`settings-shell-smoke` +4 Cloud-HTTP-Blöcke (Editor-Bau,
+  Secret-Edit bleibt nach Status-Tick leer, Status-Label
+  spiegelt `secret_present`-Flag, Edit-Feld ist sofort nach Save
+  geleert). Alle übrigen UI-Smokes grün; Headless-Boot sauber.
 
 Zwischenprinzipien:
 
@@ -974,7 +1014,7 @@ aufgehoben werden.
 
 ---
 
-## 11. Secrets- und Sensitive-Config-Kategorien (Ist, PR 5 + PR 7 + PR 8 + PR 9)
+## 11. Secrets- und Sensitive-Config-Kategorien (Ist, PR 5 + PR 7 + PR 8 + PR 9 + PR 10)
 
 Ab PR 5 existiert in
 [`core/src/settings_store.rs`](../core/src/settings_store.rs) ein
@@ -982,8 +1022,12 @@ kleiner persistenter Store für die editierbaren Teile der
 Llamafile-Config; PR 7 ergänzt dort die STT-/TTS-Overrides; PR 8
 bringt den `local_http`-Override dazu; PR 9 ergänzt einen
 `text_chain.json`-Override für die Text-Provider-Fallback-
-Reihenfolge. Dieser Abschnitt legt die Trennlinien fest, die jede
-künftige Schreibfläche einhalten muss.
+Reihenfolge. **PR 10** führt zusätzlich einen **dedizierten
+Secrets-Store** in
+[`core/src/secrets_store.rs`](../core/src/secrets_store.rs) mit
+eigener Datei `secrets.json` ein — getrennt von allen
+operationalen Overrides. Dieser Abschnitt legt die Trennlinien
+fest, die jede künftige Schreibfläche einhalten muss.
 
 **Kategorien.**
 
@@ -1033,16 +1077,33 @@ aber wie eine sensitive-lite-Ressource behandelt:
   im App-Schreibpfad, nicht im Store). STT-/TTS-Provider-Chains
   bleiben weiterhin env-gesteuert, damit ein altes Override-File
   eine zukünftige Cloud-Kette nicht überstimmt.
-- **Sensitive-Werte.** Noch kein Store. Wenn einer entsteht,
-  separates File (z. B. `secrets.json`), **nie** gemeinsam mit
-  operational-Werten serialisiert, und nie aus dem Core in Richtung
+- **Sensitive-Werte.** Seit PR 10 existiert ein eigener Secrets-
+  Store ([`core/src/secrets_store.rs`](../core/src/secrets_store.rs))
+  in einer **separaten** Datei `secrets.json` (gleiche
+  Verzeichnisauflösung, Permissions 0600, atomarer Write).
+  Aktuell ein einziges Feld: `cloud_http_api_key`. Der Store
+  ist der **einzige** Code-Pfad, der Secret-Klartext sieht —
+  weder das operationale `settings_store`-Modul noch das
+  `StatusPayload`-Projektions-Layer noch Logs oder IPC-Responses
+  sehen je den Wert. `SecretsFile::Debug` elidiert jedes Feld
+  ausdrücklich zu `<set>`/`<unset>`. Weitere Sensitive-Werte in
+  Folge-PRs landen im gleichen File unter neuen optionalen
+  Feldern — **nie** gemeinsam mit operational-Werten serialisiert,
+  und nie aus dem Core in Richtung
   UI/IPC exponiert — die UI sieht nur „gesetzt ja/nein" + Masking.
 
 **IPC-Disziplin.**
 
 - `settings_set_*`-Nachrichten transportieren nur Operational-
-  Werte. Sensitive-Werte wandern künftig über einen dedizierten
-  `secrets_set_*`-Pfad (Ausgestaltung offen, nicht Teil von
+  Werte **außer** `settings_set_cloud_http_secret` (PR 10) —
+  diese eine Message trägt bewusst Sensitive-Klartext und ist
+  **die einzige**, die das darf. Der Response-Pfad antwortet mit
+  einem Status-Envelope, der nur `cloud_http_secret_present: bool`
+  trägt; der Key-Wert verlässt den Core niemals in Richtung UI.
+  Künftige Cloud-Provider nutzen denselben Pfad (pro Provider-
+  Kind eine eigene `settings_set_*_secret`-Message und ein
+  eigenes Feld im Secrets-Store-Schema). Ausgestaltung für
+  weitere Sensitive-Kategorien (Ausgestaltung offen, nicht Teil von
   PR 5/7/8).
 - Antworten auf Schreibaktionen spiegeln ausschließlich den
   StatusPayload — kein Raw-Echo der Eingabe.

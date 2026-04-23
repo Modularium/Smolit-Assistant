@@ -57,6 +57,20 @@ const DEFAULT_LOCAL_HTTP_PROMPT_FIELD: &str = "prompt";
 /// Default-Feldname im JSON-Response, aus dem der Antworttext gelesen
 /// wird. Ebenfalls llama.cpp-kompatibel.
 const DEFAULT_LOCAL_HTTP_RESPONSE_FIELD: &str = "content";
+/// Default-Timeout für einzelne `cloud_http`-Completion-Requests (PR 10).
+/// Bewusst größer als bei lokalen Providern — Remote-Endpoints haben
+/// üblicherweise mehr Netzwerk-Latenz und serverseitige Warteschlangen.
+const DEFAULT_CLOUD_HTTP_REQUEST_TIMEOUT_SECONDS: u64 = 90;
+/// Default-Feldnamen für `cloud_http`. Llama.cpp-kompatibel, damit der
+/// Provider ohne Zusatz-Mapping gegen einen authentifizierten
+/// llama.cpp-Server (z. B. über LAN-Reverse-Proxy) arbeitet.
+const DEFAULT_CLOUD_HTTP_PROMPT_FIELD: &str = "prompt";
+const DEFAULT_CLOUD_HTTP_RESPONSE_FIELD: &str = "content";
+/// Default-Header-Name für den API-Key. Bewusst auf `Authorization`
+/// festgenagelt — der Provider setzt `Authorization: Bearer <key>`.
+/// Ein konfigurierbarer Header-Name ist erst sinnvoll, wenn wir einen
+/// zweiten Cloud-Provider haben, der nicht Bearer nutzt.
+const DEFAULT_CLOUD_HTTP_AUTH_HEADER: &str = "Authorization";
 
 #[derive(Debug, Parser)]
 #[command(name = "smolit", about = "Smolit Assistant core daemon")]
@@ -166,6 +180,14 @@ pub struct TextProviderConfig {
     /// Siehe [`LocalHttpConfig`] für die Semantik.
     #[serde(default)]
     pub local_http: LocalHttpConfig,
+    /// Einstellungen für den ersten Cloud-/Remote-Text-Provider
+    /// `cloud_http` (PR 10, additiv). Werden nur wirksam, wenn
+    /// `cloud_http` in `chain` enthalten ist. Siehe
+    /// [`CloudHttpConfig`] für die Semantik. **Enthält keinen
+    /// API-Key** — der Key lebt ausschließlich im dedizierten
+    /// [`crate::secrets_store`] (siehe Doku §11).
+    #[serde(default)]
+    pub cloud_http: CloudHttpConfig,
 }
 
 /// Einstellungen für den lokalen **llamafile**-Provider
@@ -278,6 +300,69 @@ impl Default for LocalHttpConfig {
             request_timeout_seconds: DEFAULT_LOCAL_HTTP_REQUEST_TIMEOUT_SECONDS,
             prompt_field: DEFAULT_LOCAL_HTTP_PROMPT_FIELD.to_string(),
             response_field: DEFAULT_LOCAL_HTTP_RESPONSE_FIELD.to_string(),
+        }
+    }
+}
+
+/// Einstellungen für den ersten Cloud-/Remote-Text-Provider
+/// `cloud_http` (PR 10).
+///
+/// Bewusst klein: ein authentifizierter HTTP-Endpoint, ein optionaler
+/// Modell-Name, ein Request-Timeout, zwei Feldnamen. **Enthält keinen
+/// API-Key** — der wohnt ausschließlich im
+/// [`crate::secrets_store`]. `CloudHttpConfig` ist damit operational-
+/// sicher: das Struct darf in `Serialize`-Pfade fallen (JSON-Dumps,
+/// Debug), ohne dass dabei Secrets durchschlagen können.
+///
+/// **MVP-Beschränkungen (PR 10):**
+///
+///   * **Plaintext HTTP nur.** `https://` wird bewusst **abgelehnt**,
+///     weil PR 10 keine TLS-/Trust-Infrastruktur mitbringt (siehe
+///     Architektur-Doku §4.1d). Ein Betreiber stellt einen
+///     vertrauenswürdigen Reverse-Proxy vor den Endpoint, der TLS
+///     terminiert.
+///   * **Ein Auth-Pfad.** `Authorization: Bearer <key>` aus dem
+///     Secrets-Store; keine Basic-Auth, keine Header-Maps.
+///   * **Kein Streaming, kein Tool-Calling, kein `messages`-Array.**
+///     POST JSON mit einem Prompt-Feld, Antwort enthält ein
+///     Text-Feld.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CloudHttpConfig {
+    /// Master-Schalter. Ohne `SMOLIT_CLOUD_HTTP_ENABLED=1` bleibt der
+    /// Provider inert, auch wenn er in der Chain steht — selbst dann,
+    /// wenn im Secret-Store bereits ein Key liegt. Cloud ist opt-in.
+    pub enabled: bool,
+    /// Ziel-URL, z. B. `http://127.0.0.1:8090/v1/completion`
+    /// (typischerweise hinter einem lokalen TLS-terminierenden
+    /// Reverse-Proxy). `https://` wird im Provider abgelehnt.
+    pub endpoint: Option<String>,
+    /// Optionaler Modellname — wird, falls gesetzt, als
+    /// `model`-Feld in den JSON-Body aufgenommen. Viele OpenAI-/
+    /// llama.cpp-kompatible Endpoints erwarten das Feld.
+    pub model: Option<String>,
+    /// Zeitbudget pro Completion-Request.
+    pub request_timeout_seconds: u64,
+    /// JSON-Feldname für den Prompt. Default `"prompt"`.
+    pub prompt_field: String,
+    /// JSON-Feldname für den Antworttext. Default `"content"`.
+    pub response_field: String,
+    /// HTTP-Header, unter dem der API-Key angehängt wird. Default
+    /// `"Authorization"` (mit `Bearer `-Prefix). Nur env-konfigurier-
+    /// bar — die Settings-Shell editiert diesen Wert nicht, um die
+    /// UX klein zu halten.
+    pub auth_header: String,
+}
+
+impl Default for CloudHttpConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            endpoint: None,
+            model: None,
+            request_timeout_seconds: DEFAULT_CLOUD_HTTP_REQUEST_TIMEOUT_SECONDS,
+            prompt_field: DEFAULT_CLOUD_HTTP_PROMPT_FIELD.to_string(),
+            response_field: DEFAULT_CLOUD_HTTP_RESPONSE_FIELD.to_string(),
+            auth_header: DEFAULT_CLOUD_HTTP_AUTH_HEADER.to_string(),
         }
     }
 }
@@ -431,6 +516,26 @@ impl Config {
         let local_http_response_field = non_empty(lookup("SMOLIT_LOCAL_HTTP_RESPONSE_FIELD"))
             .unwrap_or_else(|| DEFAULT_LOCAL_HTTP_RESPONSE_FIELD.to_string());
 
+        // Cloud-HTTP-Provider-Konfiguration (PR 10). Wie Local-HTTP
+        // opt-in; ohne Env bleibt der Provider inert. Der API-Key
+        // wird **nicht** hier gelesen — er wohnt im Secrets-Store.
+        let cloud_http_enabled = parse_bool(
+            lookup("SMOLIT_CLOUD_HTTP_ENABLED").as_deref(),
+            false,
+        );
+        let cloud_http_endpoint = non_empty(lookup("SMOLIT_CLOUD_HTTP_ENDPOINT"));
+        let cloud_http_model = non_empty(lookup("SMOLIT_CLOUD_HTTP_MODEL"));
+        let cloud_http_request_timeout = parse_u64(
+            lookup("SMOLIT_CLOUD_HTTP_REQUEST_TIMEOUT_SECONDS").as_deref(),
+            DEFAULT_CLOUD_HTTP_REQUEST_TIMEOUT_SECONDS,
+        );
+        let cloud_http_prompt_field = non_empty(lookup("SMOLIT_CLOUD_HTTP_PROMPT_FIELD"))
+            .unwrap_or_else(|| DEFAULT_CLOUD_HTTP_PROMPT_FIELD.to_string());
+        let cloud_http_response_field = non_empty(lookup("SMOLIT_CLOUD_HTTP_RESPONSE_FIELD"))
+            .unwrap_or_else(|| DEFAULT_CLOUD_HTTP_RESPONSE_FIELD.to_string());
+        let cloud_http_auth_header = non_empty(lookup("SMOLIT_CLOUD_HTTP_AUTH_HEADER"))
+            .unwrap_or_else(|| DEFAULT_CLOUD_HTTP_AUTH_HEADER.to_string());
+
         Ok(Self {
             abrain_cmd,
             log_level,
@@ -480,6 +585,15 @@ impl Config {
                     request_timeout_seconds: local_http_request_timeout,
                     prompt_field: local_http_prompt_field,
                     response_field: local_http_response_field,
+                },
+                cloud_http: CloudHttpConfig {
+                    enabled: cloud_http_enabled,
+                    endpoint: cloud_http_endpoint,
+                    model: cloud_http_model,
+                    request_timeout_seconds: cloud_http_request_timeout,
+                    prompt_field: cloud_http_prompt_field,
+                    response_field: cloud_http_response_field,
+                    auth_header: cloud_http_auth_header,
                 },
             },
         })

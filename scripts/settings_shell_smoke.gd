@@ -74,6 +74,10 @@ func _init() -> void:
 	_check_text_chain_editor_builds_and_syncs_from_status()
 	_check_text_chain_editor_toggle_and_move()
 	_check_text_chain_editor_prevents_empty_chain_on_apply()
+	_check_cloud_http_editor_builds_and_shows_external_warning()
+	_check_cloud_http_editor_never_populates_secret_edit_from_status()
+	_check_cloud_http_editor_secret_present_flag_mirrored_in_status_label()
+	_check_cloud_http_editor_save_secret_clears_edit_field()
 
 	print("---")
 	if _fail == 0:
@@ -1035,6 +1039,92 @@ func _collect_buttons_with_text(node: Node, wanted: String, out: Array[Node]) ->
 		out.append(node)
 	for child in node.get_children():
 		_collect_buttons_with_text(child, wanted, out)
+
+
+# --- PR 10: Cloud-HTTP-Editor + Secret-Masking ------------------------
+
+
+func _check_cloud_http_editor_builds_and_shows_external_warning() -> void:
+	var panel := _spawn_panel()
+	panel.apply_status({
+		"text_provider_chain": ["cloud_http", "abrain"],
+		"cloud_http_in_chain": true,
+		"cloud_http_enabled": true,
+		"cloud_http_configured": false,
+		"cloud_http_secret_present": false,
+	})
+	panel.open_panel()
+	var snap: Dictionary = panel.cloud_http_editor_snapshot()
+	_assert(bool(snap.get("built", false)),
+		"cloud_http-editor: Widgets sind gebaut nach open_panel")
+	_assert(bool(snap.get("enabled", false)),
+		"cloud_http-editor: enabled-Checkbox spiegelt status.cloud_http_enabled=true")
+	var warning := String(snap.get("external_warning", ""))
+	_assert(warning.find("extern") >= 0 or warning.find("cloud") >= 0,
+		"cloud_http-editor: externer/Cloud-Hinweis ist sichtbar")
+	_despawn_panel(panel)
+
+
+func _check_cloud_http_editor_never_populates_secret_edit_from_status() -> void:
+	# Wichtigste Secret-Grenze der UI: selbst wenn der Status
+	# `cloud_http_secret_present=true` trägt, darf das LineEdit niemals
+	# einen Wert anzeigen. Der Wert kommt ausschließlich vom Nutzer.
+	var panel := _spawn_panel()
+	panel.apply_status({
+		"cloud_http_enabled": true,
+		"cloud_http_secret_present": true,
+	})
+	panel.open_panel()
+	var snap: Dictionary = panel.cloud_http_editor_snapshot()
+	var secret_edit := String(snap.get("secret_edit_text", ""))
+	_assert(secret_edit == "",
+		"cloud_http-editor: Secret-Edit bleibt nach Status-Tick leer (kein Rückspiegeln)")
+	_despawn_panel(panel)
+
+
+func _check_cloud_http_editor_secret_present_flag_mirrored_in_status_label() -> void:
+	# `cloud_http_secret_present` muss sichtbar sein (als Bool-Flag),
+	# aber niemals als Wert.
+	var panel := _spawn_panel()
+	panel.apply_status({
+		"cloud_http_enabled": true,
+		"cloud_http_secret_present": true,
+	})
+	panel.open_panel()
+	var with_key: Dictionary = panel.cloud_http_editor_snapshot()
+	_assert(String(with_key.get("secret_status", "")).find("saved") >= 0,
+		"cloud_http-editor: Statuslabel zeigt 'saved', wenn cloud_http_secret_present=true")
+	_despawn_panel(panel)
+
+	var panel2 := _spawn_panel()
+	panel2.apply_status({
+		"cloud_http_enabled": true,
+		"cloud_http_secret_present": false,
+	})
+	panel2.open_panel()
+	var without_key: Dictionary = panel2.cloud_http_editor_snapshot()
+	_assert(String(without_key.get("secret_status", "")).find("not set") >= 0,
+		"cloud_http-editor: Statuslabel zeigt 'not set', wenn cloud_http_secret_present=false")
+	_despawn_panel(panel2)
+
+
+func _check_cloud_http_editor_save_secret_clears_edit_field() -> void:
+	# Nach einem Save-Klick muss das Edit-Feld SOFORT leer sein,
+	# damit der Klartext nicht weiter in der UI lebt. Wir simulieren
+	# den Save-Pfad direkt (kein IpcClient in der Smoke-Umgebung).
+	var panel := _spawn_panel()
+	panel.apply_status({"cloud_http_enabled": true})
+	panel.open_panel()
+	var marker := "sk-smoke-top-secret-marker"
+	panel.simulate_cloud_http_save_secret_for_test(marker)
+	var snap: Dictionary = panel.cloud_http_editor_snapshot()
+	_assert(
+		String(snap.get("secret_edit_text", "")) == "",
+		"cloud_http-editor: Secret-Edit-Feld ist nach Save sofort geleert")
+	_assert(
+		String(snap.get("secret_edit_text", "")).find(marker) < 0,
+		"cloud_http-editor: Marker taucht nicht mehr im Edit-Feld auf")
+	_despawn_panel(panel)
 
 
 func _check_panel_snapshot_shape() -> void:
