@@ -535,23 +535,32 @@ async fn handle_speak_text(app: &Arc<App>, text: String) -> Vec<OutgoingMessage>
         step(&action_id, "TTS playback"),
     ];
 
-    if !app.current_tts().is_available() {
-        let msg = "TTS is not available.";
-        out.push(OutgoingMessage::Error {
-            message: msg.into(),
-        });
-        out.push(failed(&action_id, msg));
-        return out;
-    }
+    // PR 14 — Der TTS-Lebenszyklus-Helper liefert die
+    // `speaking_started` / `speaking_ended`-Events direkt in unseren
+    // Response-Vec zurück, wenn die Kette einsatzbereit ist. Ist sie
+    // es nicht, bleibt `(vec![], None)` und wir behalten den
+    // bisherigen „TTS is not available"-Fehler-Pfad — ohne Lifecycle-
+    // Events, wie von PR 14 gefordert.
+    let (lifecycle_events, result) = app
+        .speak_with_lifecycle_events(&text, "speak_text", Some(action_id.clone()))
+        .await;
+    out.extend(lifecycle_events);
 
-    match app.handle_speak(&text).await {
-        Ok(()) => out.push(completed(&action_id)),
-        Err(err) => {
+    match result {
+        Some(Ok(())) => out.push(completed(&action_id)),
+        Some(Err(err)) => {
             let msg = format!("{err:#}");
             out.push(OutgoingMessage::Error {
                 message: msg.clone(),
             });
             out.push(failed(&action_id, &msg));
+        }
+        None => {
+            let msg = "TTS is not available.";
+            out.push(OutgoingMessage::Error {
+                message: msg.into(),
+            });
+            out.push(failed(&action_id, msg));
         }
     }
     out
@@ -672,17 +681,27 @@ mod tests {
         interaction: InteractionConfig,
         approval: ApprovalConfig,
     ) -> Arc<App> {
+        test_app_with_abrain_and_tts(abrain_cmd, None, false, interaction, approval)
+    }
+
+    fn test_app_with_abrain_and_tts(
+        abrain_cmd: &str,
+        tts_cmd: Option<&str>,
+        auto_speak: bool,
+        interaction: InteractionConfig,
+        approval: ApprovalConfig,
+    ) -> Arc<App> {
         let config = Config {
             abrain_cmd: abrain_cmd.into(),
             log_level: "info".into(),
             audio: AudioConfig {
                 tts_enabled: true,
-                tts_cmd: None,
+                tts_cmd: tts_cmd.map(|s| s.to_string()),
                 tts_timeout_seconds: 5,
                 stt_enabled: true,
                 stt_cmd: None,
                 stt_timeout_seconds: 5,
-                auto_speak: false,
+                auto_speak,
                 stt_provider_chain: vec!["command".into()],
                 tts_provider_chain: vec!["command".into()],
             },
@@ -2946,6 +2965,234 @@ mod tests {
 
         let failed = recv_text(&mut ws).await;
         assert!(failed.contains(r#""type":"action_failed""#));
+    }
+
+    // PR 14 — TTS-Lebenszyklus-Events. Wenn der Command-Provider real
+    // startet (`/bin/cat` als Stand-in), muss der Wire zwischen `step`
+    // und `action_completed` genau ein `speaking_started`/
+    // `speaking_ended`-Paar tragen — ohne doppelte / flatternde Events.
+    #[tokio::test]
+    async fn speak_text_emits_speaking_lifecycle_on_success() {
+        let app = test_app_with_abrain_and_tts(
+            "/bin/false",
+            Some("/bin/cat"),
+            false,
+            InteractionConfig {
+                enabled: true,
+                backend: "command".into(),
+                allow_open_application: true,
+                allow_focus_window: true,
+                allow_type_text: false,
+                allow_shortcuts: false,
+                require_confirmation: false,
+                open_app_cmd_template: Some("/bin/true".into()),
+                focus_window_cmd_template: Some("/bin/true".into()),
+            },
+            default_approval_config(),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = accept_loop(app, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"speak_text","text":"hallo"}"#.into(),
+        ))
+        .await
+        .unwrap();
+
+        let planned = recv_text(&mut ws).await;
+        assert!(planned.contains(r#""type":"action_planned""#));
+        let started = recv_text(&mut ws).await;
+        assert!(started.contains(r#""type":"action_started""#));
+        let step = recv_text(&mut ws).await;
+        assert!(step.contains(r#""type":"action_step""#));
+
+        let speaking_started = recv_text(&mut ws).await;
+        assert!(speaking_started.contains(r#""type":"speaking_started""#));
+        assert!(speaking_started.contains(r#""source":"speak_text""#));
+        assert!(speaking_started.contains(r#""provider":"command""#));
+        assert!(speaking_started.contains(r#""action_id":"#));
+
+        let speaking_ended = recv_text(&mut ws).await;
+        assert!(speaking_ended.contains(r#""type":"speaking_ended""#));
+        assert!(speaking_ended.contains(r#""source":"speak_text""#));
+        assert!(speaking_ended.contains(r#""ok":true"#));
+        assert!(!speaking_ended.contains(r#""error_class""#));
+
+        let completed = recv_text(&mut ws).await;
+        assert!(completed.contains(r#""type":"action_completed""#));
+    }
+
+    // PR 14 — Wenn der Command-Provider scheitert (exit != 0 bzw.
+    // stdin-Race in der CI), darf weiterhin genau ein `speaking_ended`
+    // kommen — mit `ok=false` und kuratiertem `error_class`. Kein
+    // zweites, kein stummer Abbruch.
+    #[tokio::test]
+    async fn speak_text_emits_speaking_ended_on_error() {
+        let app = test_app_with_abrain_and_tts(
+            "/bin/false",
+            Some("/bin/false"),
+            false,
+            InteractionConfig {
+                enabled: true,
+                backend: "command".into(),
+                allow_open_application: true,
+                allow_focus_window: true,
+                allow_type_text: false,
+                allow_shortcuts: false,
+                require_confirmation: false,
+                open_app_cmd_template: Some("/bin/true".into()),
+                focus_window_cmd_template: Some("/bin/true".into()),
+            },
+            default_approval_config(),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = accept_loop(app, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"speak_text","text":"nope"}"#.into(),
+        ))
+        .await
+        .unwrap();
+
+        let _planned = recv_text(&mut ws).await;
+        let _started = recv_text(&mut ws).await;
+        let _step = recv_text(&mut ws).await;
+
+        let speaking_started = recv_text(&mut ws).await;
+        assert!(speaking_started.contains(r#""type":"speaking_started""#));
+
+        let speaking_ended = recv_text(&mut ws).await;
+        assert!(speaking_ended.contains(r#""type":"speaking_ended""#));
+        assert!(speaking_ended.contains(r#""ok":false"#));
+        assert!(speaking_ended.contains(r#""error_class":"#));
+
+        let err = recv_text(&mut ws).await;
+        assert!(err.contains(r#""type":"error""#));
+        let failed = recv_text(&mut ws).await;
+        assert!(failed.contains(r#""type":"action_failed""#));
+    }
+
+    // PR 14 — Auto-speak-Pfad. Der Core emittiert die Lifecycle-Events
+    // via Broadcast **nach** dem Response-Envelope. Wir prüfen die
+    // Reihenfolge auf der Leitung: response → action_completed →
+    // speaking_started → speaking_ended.
+    #[tokio::test]
+    async fn auto_speak_emits_speaking_lifecycle_after_response() {
+        let app = test_app_with_abrain_and_tts(
+            "/bin/echo",
+            Some("/bin/cat"),
+            true,
+            InteractionConfig {
+                enabled: true,
+                backend: "command".into(),
+                allow_open_application: true,
+                allow_focus_window: true,
+                allow_type_text: false,
+                allow_shortcuts: false,
+                require_confirmation: false,
+                open_app_cmd_template: Some("/bin/true".into()),
+                focus_window_cmd_template: Some("/bin/true".into()),
+            },
+            default_approval_config(),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = accept_loop(app, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"submit_text","text":"hi"}"#.into(),
+        ))
+        .await
+        .unwrap();
+
+        let _planned = recv_text(&mut ws).await;
+        let _started = recv_text(&mut ws).await;
+        let _step = recv_text(&mut ws).await;
+        let _thinking = recv_text(&mut ws).await;
+        let response = recv_text(&mut ws).await;
+        assert!(response.contains(r#""type":"response""#));
+        let completed = recv_text(&mut ws).await;
+        assert!(completed.contains(r#""type":"action_completed""#));
+
+        let speaking_started = recv_text(&mut ws).await;
+        assert!(speaking_started.contains(r#""type":"speaking_started""#));
+        assert!(speaking_started.contains(r#""source":"auto_speak""#));
+        // Auto-speak trägt keinen `action_id` — der Event kommt nach
+        // der Action-Abschluss-Klammer.
+        assert!(!speaking_started.contains(r#""action_id""#));
+
+        let speaking_ended = recv_text(&mut ws).await;
+        assert!(speaking_ended.contains(r#""type":"speaking_ended""#));
+        assert!(speaking_ended.contains(r#""source":"auto_speak""#));
+        assert!(speaking_ended.contains(r#""ok":true"#));
+    }
+
+    // PR 14 — Negativ-Kontrolle: wenn die TTS-Kette nicht einsatzbereit
+    // ist, darf **kein** `speaking_started` auf der Leitung erscheinen
+    // (sonst würde die UI „speaking" rendern, ohne dass jemals etwas
+    // gesprochen wurde). Der bestehende Pfad
+    // `speak_text_emits_action_events_when_tts_unavailable` deckt den
+    // Error-Envelope ab; dieser Test stellt sicher, dass er bei
+    // aktiviertem Auto-Speak aber fehlendem TTS-Command schweigt.
+    #[tokio::test]
+    async fn auto_speak_without_tts_emits_no_lifecycle() {
+        let app = test_app_with_abrain_and_tts(
+            "/bin/echo",
+            None,
+            true,
+            InteractionConfig {
+                enabled: true,
+                backend: "command".into(),
+                allow_open_application: true,
+                allow_focus_window: true,
+                allow_type_text: false,
+                allow_shortcuts: false,
+                require_confirmation: false,
+                open_app_cmd_template: Some("/bin/true".into()),
+                focus_window_cmd_template: Some("/bin/true".into()),
+            },
+            default_approval_config(),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = accept_loop(app, listener).await;
+        });
+        let url = format!("ws://{addr}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"submit_text","text":"hi"}"#.into(),
+        ))
+        .await
+        .unwrap();
+
+        let _planned = recv_text(&mut ws).await;
+        let _started = recv_text(&mut ws).await;
+        let _step = recv_text(&mut ws).await;
+        let _thinking = recv_text(&mut ws).await;
+        let response = recv_text(&mut ws).await;
+        assert!(response.contains(r#""type":"response""#));
+        let completed = recv_text(&mut ws).await;
+        assert!(completed.contains(r#""type":"action_completed""#));
+
+        // Mit einem kurzen Timeout nach dem `completed` dürfen keine
+        // weiteren Frames mehr folgen. Wir warten bewusst nur knapp,
+        // weil ein echter Auto-Speak-Broadcast andernfalls während
+        // dieses Fensters eintreffen würde.
+        let timeout_ms = std::time::Duration::from_millis(250);
+        let peek = tokio::time::timeout(timeout_ms, ws.next()).await;
+        assert!(peek.is_err(), "no further frame expected, got {peek:?}");
     }
 
     fn interaction_with_confirmation() -> InteractionConfig {

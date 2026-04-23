@@ -187,6 +187,19 @@ pub enum OutgoingMessage {
     /// kuratierten `class`-Tag und eine kurze, Secret-freie Meldung.
     /// Kein Binary-Pfad, kein Roh-Fehlerstring.
     SettingsProbeResult { payload: SettingsProbeResultPayload },
+    /// PR 14 — TTS-Lebenszyklus. Wird vom Core genau einmal emittiert,
+    /// wenn ein TTS-Provider tatsächlich anläuft. Kein Audio-Timing,
+    /// kein Phonem-Stream, keine Text-Payload — der Core behält den
+    /// Text bei sich und veröffentlicht nur den Source-/Provider-
+    /// Kontext. Zu jedem `speaking_started` gibt es genau ein
+    /// `speaking_ended`; ältere UIs ignorieren beide Varianten.
+    SpeakingStarted { payload: SpeakingStartedPayload },
+    /// PR 14 — Gegenstück zu [`OutgoingMessage::SpeakingStarted`].
+    /// Kommt im Erfolgs- wie im Fehlerfall (jeweils mit `ok=true` bzw.
+    /// `ok=false` + kuratierter `error_class`). Fällt die Kette in
+    /// einen Fallback, zeigt `provider` den tatsächlich aktiven Kind-
+    /// Namen; bei Start steht dort der primäre Kind-Name.
+    SpeakingEnded { payload: SpeakingEndedPayload },
 }
 
 /// Payload for the `target_selected` outgoing envelope.
@@ -211,6 +224,39 @@ pub struct ResponsePayload {
 #[derive(Debug, Clone, Serialize)]
 pub struct HeardPayload {
     pub text: String,
+}
+
+/// PR 14 — Payload für [`OutgoingMessage::SpeakingStarted`].
+///
+/// `source` trennt Nutzeranstöße (`speak_text`) vom automatischen
+/// Ausspielen nach einer `response` (`auto_speak`); die UI darf darauf
+/// unterschiedlich reagieren, muss aber nicht. `provider` ist der
+/// primäre Kind-Name aus der TTS-Kette (heute nur `command`) — nie
+/// ein Binary-Pfad, nie ein Command-String. `action_id` ist nur
+/// gesetzt, wenn der Event aus einem Action-Event-Flow stammt
+/// (`speak_text`); beim passiven `auto_speak` bleibt das Feld leer.
+#[derive(Debug, Clone, Serialize)]
+pub struct SpeakingStartedPayload {
+    pub source: String,
+    pub provider: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action_id: Option<String>,
+}
+
+/// PR 14 — Payload für [`OutgoingMessage::SpeakingEnded`]. `ok=true`
+/// heißt „Kette hat erfolgreich gesprochen" (ggf. über einen
+/// Fallback); `ok=false` trägt einen kuratierten `error_class`-Tag
+/// (`empty_chain` / `timeout` / `process_missing` / …), identisch zu
+/// den bestehenden TTS-Probe-Klassen.
+#[derive(Debug, Clone, Serialize)]
+pub struct SpeakingEndedPayload {
+    pub source: String,
+    pub provider: String,
+    pub ok: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_class: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action_id: Option<String>,
 }
 
 pub fn parse_incoming(raw: &str) -> Result<IncomingMessage, serde_json::Error> {
@@ -641,6 +687,72 @@ mod tests {
         assert_eq!(
             encoded,
             r#"{"type":"action_started","payload":{"action_id":"act_000001","phase":"started"}}"#
+        );
+    }
+
+    // PR 14 — TTS-Lebenszyklus-Encoder.
+
+    #[test]
+    fn encodes_speaking_started_with_action_id() {
+        let encoded = encode_outgoing(&OutgoingMessage::SpeakingStarted {
+            payload: SpeakingStartedPayload {
+                source: "speak_text".into(),
+                provider: "command".into(),
+                action_id: Some("act_000001".into()),
+            },
+        });
+        assert_eq!(
+            encoded,
+            r#"{"type":"speaking_started","payload":{"source":"speak_text","provider":"command","action_id":"act_000001"}}"#
+        );
+    }
+
+    #[test]
+    fn encodes_speaking_started_without_action_id() {
+        let encoded = encode_outgoing(&OutgoingMessage::SpeakingStarted {
+            payload: SpeakingStartedPayload {
+                source: "auto_speak".into(),
+                provider: "command".into(),
+                action_id: None,
+            },
+        });
+        assert_eq!(
+            encoded,
+            r#"{"type":"speaking_started","payload":{"source":"auto_speak","provider":"command"}}"#
+        );
+    }
+
+    #[test]
+    fn encodes_speaking_ended_ok() {
+        let encoded = encode_outgoing(&OutgoingMessage::SpeakingEnded {
+            payload: SpeakingEndedPayload {
+                source: "speak_text".into(),
+                provider: "command".into(),
+                ok: true,
+                error_class: None,
+                action_id: Some("act_000001".into()),
+            },
+        });
+        assert_eq!(
+            encoded,
+            r#"{"type":"speaking_ended","payload":{"source":"speak_text","provider":"command","ok":true,"action_id":"act_000001"}}"#
+        );
+    }
+
+    #[test]
+    fn encodes_speaking_ended_failure_carries_error_class() {
+        let encoded = encode_outgoing(&OutgoingMessage::SpeakingEnded {
+            payload: SpeakingEndedPayload {
+                source: "auto_speak".into(),
+                provider: "command".into(),
+                ok: false,
+                error_class: Some("exit_nonzero".into()),
+                action_id: None,
+            },
+        });
+        assert_eq!(
+            encoded,
+            r#"{"type":"speaking_ended","payload":{"source":"auto_speak","provider":"command","ok":false,"error_class":"exit_nonzero"}}"#
         );
     }
 

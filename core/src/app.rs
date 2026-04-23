@@ -28,7 +28,8 @@ use crate::interaction::{
     discover_top_level, inspect_target,
 };
 use crate::ipc::protocol::{
-    InteractionFocusTarget, OutgoingMessage, TargetClearedPayload, TargetSelectedPayload,
+    InteractionFocusTarget, OutgoingMessage, SpeakingEndedPayload, SpeakingStartedPayload,
+    TargetClearedPayload, TargetSelectedPayload,
 };
 use crate::providers::stt::{
     SttProviderChainItem, SttProviderError, SttProviderResolver,
@@ -794,6 +795,76 @@ impl App {
             .map_err(|err: TtsProviderError| anyhow::anyhow!(err))
     }
 
+    /// PR 14 — Gemeinsamer TTS-Lebenszyklus-Pfad für `speak_text`
+    /// (IPC) und `auto_speak` (nach einer `response`). Liefert die
+    /// `speaking_started` / `speaking_ended`-Events **als Vec**
+    /// zurück, damit der Aufrufer sie entweder inline in seinen
+    /// Dispatch-Response einfügen (Action-Event-Flow) oder via
+    /// [`App::broadcast`] nachreichen kann (passiver Auto-Speak-Pfad
+    /// nach dem Response-Envelope).
+    ///
+    /// Semantik:
+    ///   * Ist die Kette nicht einsatzbereit, wird **kein** Event
+    ///     emittiert — genau wie gefordert: „keine Events, wenn TTS
+    ///     gar nicht lief". Rückgabe: `(vec![], None)`.
+    ///   * Bei einsatzbereiter Kette: ein `speaking_started`-Event
+    ///     zuerst, dann der tatsächliche Provider-Aufruf, dann
+    ///     genau ein `speaking_ended`-Event (Normal- wie Fehlerfall).
+    ///     Doppelte / flatternde Events sind dadurch strukturell
+    ///     ausgeschlossen.
+    ///   * Fallback: tritt auf, wenn Kette[0] fehlschlägt und ein
+    ///     Folgeprovider spricht. `speaking_started.provider` zeigt
+    ///     dann weiter den primären Kind-Namen, `speaking_ended.provider`
+    ///     trägt den tatsächlich aktiven (Fallback-)Kind-Namen —
+    ///     ehrlich zum Status-Readout.
+    pub async fn speak_with_lifecycle_events(
+        &self,
+        text: &str,
+        source: &str,
+        action_id: Option<String>,
+    ) -> (Vec<OutgoingMessage>, Option<Result<(), TtsProviderError>>) {
+        let resolver = self.current_tts();
+        if !resolver.is_available() {
+            return (Vec::new(), None);
+        }
+        let primary = resolver
+            .chain_kinds()
+            .first()
+            .copied()
+            .unwrap_or("")
+            .to_string();
+        let mut events: Vec<OutgoingMessage> = Vec::with_capacity(2);
+        events.push(OutgoingMessage::SpeakingStarted {
+            payload: SpeakingStartedPayload {
+                source: source.to_string(),
+                provider: primary.clone(),
+                action_id: action_id.clone(),
+            },
+        });
+        let result = resolver.run(text).await;
+        let active = resolver.status().active;
+        let provider = if active.is_empty() {
+            primary
+        } else {
+            active
+        };
+        let (ok, error_class) = match &result {
+            Ok(()) => (true, None),
+            Err(TtsProviderError::EmptyChain) => (false, Some("empty_chain".to_string())),
+            Err(TtsProviderError::AllFailed(class)) => (false, Some(class.clone())),
+        };
+        events.push(OutgoingMessage::SpeakingEnded {
+            payload: SpeakingEndedPayload {
+                source: source.to_string(),
+                provider,
+                ok,
+                error_class,
+                action_id,
+            },
+        });
+        (events, Some(result))
+    }
+
     pub async fn maybe_auto_speak(&self, text: &str) {
         // Auto-Speak liest den live-Stand (PR 7); ein Settings-Write
         // wirkt also ohne Core-Neustart.
@@ -802,12 +873,24 @@ impl App {
             .lock()
             .expect("live audio mutex poisoned")
             .auto_speak;
-        let resolver = self.current_tts();
-        if !auto_speak || !resolver.is_available() {
+        if !auto_speak {
             return;
         }
-        if let Err(err) = resolver.run(text).await {
-            warn!(error = %err, "auto-speak TTS failed");
+        let (events, result) = self
+            .speak_with_lifecycle_events(text, "auto_speak", None)
+            .await;
+        for msg in events {
+            self.broadcast(msg);
+        }
+        match result {
+            None => {
+                // Resolver war nicht verfügbar — keine Events, keine
+                // Warnung. Das entspricht dem bisherigen Stillschweigen.
+            }
+            Some(Err(err)) => {
+                warn!(error = %err, "auto-speak TTS failed");
+            }
+            Some(Ok(())) => {}
         }
     }
 

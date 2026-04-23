@@ -11,8 +11,10 @@
 //!
 //! - kein Cloud-SDK,
 //! - keine Streaming-TTS-Pipeline,
-//! - keine neuen `speaking_started`/`speaking_ended`-Events
-//!   (bleiben für einen späteren Audio-UX-PR offen),
+//! - keine Audio-Timeline / Phonem-Simulation (die `speaking_started`/
+//!   `speaking_ended`-Events aus PR 14 leben eine Schicht höher in
+//!   [`crate::app::App::speak_with_lifecycle_events`]; dieses Modul
+//!   bleibt ein Resolver ohne Event-Wissen),
 //! - kein Secrets-Transport.
 
 use std::process::Stdio;
