@@ -503,25 +503,35 @@ Stufe A ist implementiert; B und C bleiben Ziel-Zustand.
   Clamping (22 Assertions PASS; Harness-Case
   `avatar-preferences-smoke`). Details siehe
   [`docs/ui_architecture.md` §8b.7](./docs/ui_architecture.md).
-- **Stufe B — Kuratierte Templates (Ist, erster kleiner Spike).**
-  Zwei zusätzliche Identity-IDs neben Smolit: `robot_head` und
-  `orb`, rein prozedural gezeichnet (keine Binärassets, keine
-  Import-Pipeline). Gleiche Eingabepfade wie Phase A
-  (`SMOLIT_AVATAR_IDENTITY` Env, gespeicherte UI-Preferences,
-  harter Default = Smolit). Unbekannte Werte fallen in allen
-  Schichten still auf Smolit zurück — nie auf eine der
-  Alternativen. Realisiert in
-  `ui/scripts/avatar/avatar_identity.gd` (Katalog) +
-  `ui/scripts/avatar/avatar_identity_visual.gd` (prozeduraler
-  `_draw`). Dev-Panel bekommt einen kleinen Identity-Picker neben
-  Theme/Profile/Intensity. Smoketest
-  `scripts/avatar_identity_smoke.gd` (36 Assertions PASS;
-  Harness-Case `avatar-identity-smoke`) deckt Default, Parser,
-  Fallback, Render-Kind/Shape/Capability ab. Details siehe
+- **Stufe B — Kuratierte Templates (Ist, gehärtet mit Capability-Contract).**
+  Drei zusätzliche Identity-IDs neben Smolit: `robot_head`,
+  `humanoid_head` und `orb`, rein prozedural gezeichnet (keine
+  Binärassets, keine Import-Pipeline). Gleiche Eingabepfade wie
+  Phase A (`SMOLIT_AVATAR_IDENTITY` Env, gespeicherte
+  UI-Preferences, harter Default = Smolit). Unbekannte Werte fallen
+  in allen Schichten still auf Smolit zurück — nie auf eine der
+  Alternativen. Realisiert in `ui/scripts/avatar/avatar_identity.gd`
+  (Katalog), `ui/scripts/avatar/avatar_identity_visual.gd`
+  (prozeduraler `_draw`) und seit dem Hardening-PR zusätzlich
+  `ui/scripts/avatar/avatar_template_capabilities.gd` (Capability-
+  Contract). Jedes Template deklariert jetzt explizit: welche
+  Avatar-States es trägt (inkl. optionalem `state_fallback`, z. B.
+  `orb.TALKING → ACTING`, weil Orb keinen Mund hat), und wie stark
+  es die fünf Ausdrucks-Achsen (Theme-Tint, Behavior-Profile,
+  State-Pulse, Wiggle, Error-Startle) umsetzt
+  (`NONE` / `REDUCED` / `FULL`). Der Avatar-Controller fragt dieses
+  Modul statt auf Identity-IDs zu verzweigen. Dev-Panel bekommt vier
+  Optionen im Identity-Picker. Smoketests
+  `scripts/avatar_identity_smoke.gd` (45 Assertions PASS;
+  Harness-Case `avatar-identity-smoke`) und
+  `scripts/avatar_template_capabilities_smoke.gd` (65 Assertions
+  PASS; Harness-Case `avatar-template-capabilities-smoke`) decken
+  Default, Parser, Fallback, Capability-Lookups und Multiplier-
+  Mapping ab. Details siehe
   [`docs/ui_architecture.md` §8b.8](./docs/ui_architecture.md).
-  Bewusst **nicht** in diesem Spike: weitere Figuren, beliebig
-  viele Themes pro Figur, animierte Prozeduralformen, alternative
-  State-Maschinen, Asset-Imports.
+  Bewusst **nicht** Teil dieses Schritts: weitere Figuren über die
+  vier hinaus, animierte Prozeduralformen, alternative State-
+  Maschinen, Asset-Imports, Plug-in-Contract-Sprache, User-Uploads.
 - **Stufe C — User-supplied Avatare (später, Ziel-Zustand).**
   Eigene Icons / Figuren, template-basiert validiert. Erst nach
   stabiler Stufe B und mit klarem Validierungspfad (Größe,

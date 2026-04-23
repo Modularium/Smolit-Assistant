@@ -290,11 +290,18 @@ aktiv, Rest Ziel-Zustand.** Default bleibt Smolit Salamander;
 Alternativen kommen additiv hinzu und ersetzen den Default nicht.
 
 Der aktuelle Phase-B-Spike (siehe
-[`ui_architecture.md` §8b.8](./ui_architecture.md)) ergänzt genau
-zwei zusätzliche, fest kuratierte Identity-IDs (`robot_head`,
-`orb`) — rein prozedural gerendert, ohne Asset-Pipeline, ohne
-User-Uploads. Unbekannte Eingaben fallen in allen Schichten auf
-Smolit zurück.
+[`ui_architecture.md` §8b.8](./ui_architecture.md)) ergänzt drei
+zusätzliche, fest kuratierte Identity-IDs (`robot_head`,
+`humanoid_head`, `orb`) — rein prozedural gerendert, ohne Asset-
+Pipeline, ohne User-Uploads. Seit der Härtung ist die Linie **kein
+reiner Identity-Katalog** mehr, sondern ein kleiner **Template-
+Capability-Contract**: jedes Template deklariert explizit, welche
+Avatar-States es trägt (`orb` etwa klappt `TALKING` deterministisch
+auf `ACTING`, weil die Figur keinen Mund hat) und wie stark es die
+Ausdrucks-Achsen Theme-Tint, Behavior-Profile, State-Pulse, Wiggle
+und Error-Startle umsetzt. Fallbacks sind damit sichtbar, nicht
+implizit. Unbekannte Eingaben fallen in allen Schichten auf Smolit
+zurück.
 
 #### Klarstellung: Avatar ≠ Assistentenlogik
 

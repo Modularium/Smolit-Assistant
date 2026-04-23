@@ -46,6 +46,7 @@ const ENV_ENABLE: String = "SMOLIT_UI_DEV_CONTROLS"
 const _IDENTITY_OPTIONS: Array = [
 	{"id": _IdentityRef.Identity.SMOLIT_SALAMANDER, "label": "Smolit Salamander"},
 	{"id": _IdentityRef.Identity.ROBOT_HEAD,        "label": "Robot Head"},
+	{"id": _IdentityRef.Identity.HUMANOID_HEAD,     "label": "Humanoid Head"},
 	{"id": _IdentityRef.Identity.ORB,               "label": "Orb"},
 ]
 

@@ -52,6 +52,7 @@ enum Identity {
 	SMOLIT_SALAMANDER,  # Default, Referenz-Avatar, PNG-basiert
 	ROBOT_HEAD,         # kleine prozedurale Robot-Skizze (rounded rect)
 	ORB,                # abstraktes Glow-Orb (Kreis mit Halo)
+	HUMANOID_HEAD,      # ruhiges menschlich gelesenes Gesicht (Kreis + Augen + Mund)
 }
 
 
@@ -77,7 +78,8 @@ enum RenderKind {
 enum Shape {
 	NONE,
 	ROUNDED_RECT,  # z. B. Robot-Kopf
-	CIRCLE,        # z. B. Orb
+	CIRCLE,        # z. B. Orb (nur Halo + Körper + Highlight)
+	HUMANOID,      # Kreis in Hauttönen + zwei Augen + kleiner Mund-Arc
 }
 
 
@@ -115,6 +117,16 @@ const _SPECS: Dictionary = {
 		"base_color": Color(0.82, 0.86, 1.00, 1.0),
 		"supports_texture_swap": false,
 	},
+	Identity.HUMANOID_HEAD: {
+		"name": "humanoid_head",
+		"label": "Humanoid Head",
+		"render_kind": RenderKind.PROCEDURAL,
+		"shape": Shape.HUMANOID,
+		# Warmer, neutraler Hautton. Theme-Tints multiplizieren auf
+		# diese Basis (z. B. "tech" schiebt leicht ins Bläuliche).
+		"base_color": Color(0.95, 0.82, 0.72, 1.0),
+		"supports_texture_swap": false,
+	},
 }
 
 
@@ -128,7 +140,12 @@ static func is_known(ident: int) -> bool:
 static func all_ids() -> Array:
 	# Reihenfolge ist Doku-relevant: Smolit bleibt erste Option in
 	# Pickern und Listen, damit der Default nicht "untergeht".
-	return [Identity.SMOLIT_SALAMANDER, Identity.ROBOT_HEAD, Identity.ORB]
+	return [
+		Identity.SMOLIT_SALAMANDER,
+		Identity.ROBOT_HEAD,
+		Identity.HUMANOID_HEAD,
+		Identity.ORB,
+	]
 
 
 static func spec(ident: int) -> Dictionary:
@@ -157,6 +174,8 @@ static func identity_from_string(value: String) -> int:
 			return Identity.ROBOT_HEAD
 		"orb", "mist", "abstract":
 			return Identity.ORB
+		"humanoid_head", "humanoid", "human":
+			return Identity.HUMANOID_HEAD
 		_:
 			return DEFAULT
 

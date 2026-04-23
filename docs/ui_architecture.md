@@ -921,24 +921,32 @@ Theme-Effekten ab (insgesamt 32 Assertions, alle PASS unter
 ### 8b.8 Phase B (kuratierter Spike, Ist-Zustand)
 
 Phase B öffnet den Identity-Punkt aus §8b.2 ausdrücklich **klein und
-kuratiert**: genau drei Identity-IDs sind Teil des MVPs —
-`smolit_salamander` (Default), `robot_head` und `orb`. Das ist kein
-Template-Marktplatz und kein User-Upload-Pfad; Stufe C aus §8b.4
-bleibt Ziel-Zustand.
+kuratiert**: vier Identity-IDs sind Teil des MVPs —
+`smolit_salamander` (Default), `robot_head`, `humanoid_head` und
+`orb`. Das ist kein Template-Marktplatz und kein User-Upload-Pfad;
+Stufe C aus §8b.4 bleibt Ziel-Zustand. Die Linie ist seit dem
+Hardening-PR kein reiner „Identity-Name-Katalog" mehr, sondern ein
+kleiner **Template-Capability-Contract**: jedes Template deklariert
+explizit, welche Avatar-States es trägt und wie stark es die fünf
+Ausdrucks-Achsen (Theme-Tint, Behavior-Profile, State-Pulse,
+Wiggle, Error-Startle) umsetzt.
 
 **Datei-Layout (erweitert):**
 
 ```text
 ui/scripts/avatar/
-├── avatar_state.gd              # (unverändert)
-├── avatar_controller.gd         # Env > Prefs > Default, Identity-Switch
-├── avatar_appearance.gd         # Themes / Profile / Overrides
-├── avatar_preferences.gd        # lokale UI-Persistenz (inkl. identity)
-├── avatar_identity.gd           # NEU: kuratierter Identity-Katalog
-└── avatar_identity_visual.gd    # NEU: prozeduraler Zweitrenderer
+├── avatar_state.gd                    # (unverändert)
+├── avatar_controller.gd               # Env > Prefs > Default, Identity-Switch,
+│                                      # State-Resolve via Capabilities
+├── avatar_appearance.gd               # Themes / Profile / Overrides
+├── avatar_preferences.gd              # lokale UI-Persistenz (inkl. identity)
+├── avatar_identity.gd                 # kuratierter Identity-Katalog
+├── avatar_identity_visual.gd          # prozeduraler Zweitrenderer
+└── avatar_template_capabilities.gd    # NEU: Capability-Contract +
+                                       # State-Fallback + Expression-Levels
 
 ui/scenes/avatar/
-└── avatar_root.tscn             # + IdentityShape (Sibling zu Body)
+└── avatar_root.tscn             # IdentityShape (Sibling zu Body)
 ```
 
 **Render-Strategie.**
@@ -947,11 +955,13 @@ ui/scenes/avatar/
   `smolit_idle.png` / `smolit_active.png` und dem Circle-Mask-Shader
   aus `avatar_root.tscn`. Genau dieses Verhalten ist Phase A und
   bleibt in Phase B byte-identisch für den Default.
-- `robot_head` und `orb` sind **Render-Kind `PROCEDURAL`**. Der
-  Avatar-Controller versteckt dann `Body` und zeigt stattdessen
-  `IdentityShape: Control` (Script `avatar_identity_visual.gd`),
-  die ihre Grundform per `_draw()` rendert:
+- `robot_head`, `humanoid_head` und `orb` sind **Render-Kind
+  `PROCEDURAL`**. Der Avatar-Controller versteckt dann `Body` und
+  zeigt stattdessen `IdentityShape: Control` (Script
+  `avatar_identity_visual.gd`), die ihre Grundform per `_draw()`
+  rendert:
   - `robot_head` → Rounded-Rect-Körper + zwei Augen + Antennen-Dot,
+  - `humanoid_head` → Hautton-Kreis + zwei Augen + sanfter Smile-Arc,
   - `orb` → drei konzentrische Kreise (Halo / Körper / Highlight).
   Keine Binärassets, keine Import-Pipeline.
 
@@ -979,12 +989,61 @@ dokumentiert das ehrlich. In der Praxis ist das unkritisch, weil
 und die Alternativen keinen eigenen Frame-Wechsel brauchen — ihr
 State-Feedback kommt vollständig aus Tint + Pulse.
 
+**Template-Capability-Contract.** Jedes Template deklariert in
+`avatar_template_capabilities.gd` explizit:
+
+- **`states_supported`** — Array über `AvatarState.State`-Werte, die
+  direkt (ohne Fallback) gerendert werden können.
+- **`state_fallback`** — optionaler Map-Eintrag
+  `{ unsupported_state: replacement_state }`. Nur konsultiert, wenn
+  der Ursprungs-State nicht `states_supported` ist. Der End-Fallback
+  ist `IDLE`, damit `resolve_state` niemals einen nicht renderbaren
+  State zurückgibt.
+- **`expression`** — Dictionary über fünf Ausdrucks-Achsen auf
+  `ExpressionLevel`-Werte:
+  - `theme_tint` — wie stark das Theme auf die State-Modulate wirkt.
+  - `behavior_profile` — wie stark Profile-Multiplier (Amplitude,
+    Tempo, Wiggle-Intervall) greifen.
+  - `state_pulse` — wie stark der Idle/Thinking/Acting/Talking-
+    Breath-Tween ausschlägt.
+  - `wiggle` — wie stark der Idle-Rotations-Cue ausschlägt; `NONE`
+    schaltet ihn aus.
+  - `error_startle` — wie stark der Error-Flinch ausschlägt.
+
+`ExpressionLevel` hat drei Werte: `NONE` (Multiplikator 0.0 → Pfad
+ausgeschaltet), `REDUCED` (0.5 → halbes Delta zur Ruhelage) und
+`FULL` (1.0 → Smolit-Referenzlinie). Der Controller übersetzt den
+Level via `capabilities.multiplier(...)` in einen Zahlenfaktor und
+skaliert damit Amplituden, Winkel und Tint-Deltas um die
+Ruhelage `Vector2.ONE` bzw. die identitätsneutrale Basis.
+
+**Aktuelle Capability-Matrix (Phase-B-Spike):**
+
+| Identity          | TALKING supported? | `state_fallback`    | wiggle  | pulse | startle | tint | profile |
+|-------------------|--------------------|---------------------|---------|-------|---------|------|---------|
+| smolit_salamander | ja                 | —                   | FULL    | FULL  | FULL    | FULL | FULL    |
+| robot_head        | ja                 | —                   | REDUCED | FULL  | FULL    | FULL | FULL    |
+| humanoid_head     | ja                 | —                   | REDUCED | FULL  | FULL    | FULL | FULL    |
+| orb               | **nein**           | `TALKING → ACTING`  | NONE    | FULL  | FULL    | FULL | FULL    |
+
+`orb` hat keinen „Mund": der Talking-State wird vor dem Rendern auf
+`ACTING` gemappt (der vorhandene Acting-Pulse + Acting-Tint trägt
+den Ausdruck). `robot_head` und `humanoid_head` dämpfen den
+Idle-Wiggle, weil ein mechanischer bzw. menschlich gelesener Kopf
+mit dem vollen Smolit-Wiggle unnatürlich wirkt. Alle anderen
+Achsen bleiben für alle Templates voll — `theme_tint` und
+`behavior_profile` sind Teil des Contract-Vokabulars, werden aber
+von keinem aktuellen Template abgesenkt (die Skalierungslogik ist
+trotzdem implementiert, damit spätere kuratierte Templates sie ohne
+Controller-Umbau nutzen können).
+
 **Eingabepfade für die Identity** (gleiche Prioritätskette wie die
 Phase-A-Felder):
 
 1. `SMOLIT_AVATAR_IDENTITY` — `smolit_salamander` / `robot_head` /
-   `orb`, plus Convenience-Aliasse (`smolit`, `salamander`,
-   `robot`). Unbekannte Werte → Smolit.
+   `humanoid_head` / `orb`, plus Convenience-Aliasse (`smolit`,
+   `salamander`, `robot`, `humanoid`, `human`). Unbekannte Werte →
+   Smolit.
 2. Gespeicherte UI-Preferences (`user://smolit_ui.cfg`, Key
    `identity` in Sektion `[avatar_appearance]`). Es werden nur
    kanonische Namen als gültig akzeptiert; Aliasse in der
@@ -1007,13 +1066,19 @@ Default-Lauf bleibt stumm und byte-kompatibel.
   später eine Ziel-ID, zeichnet `_draw()` via `Shape.NONE` gar
   nichts — der Node bleibt leer, aber der Controller crasht nicht.
 
-**Verifikation.** `scripts/avatar_identity_smoke.gd` (36 Assertions,
+**Verifikation.** `scripts/avatar_identity_smoke.gd` (45 Assertions,
 alle PASS): Default-Garantie, kanonische + Alias-Parser, Fallback-
 auf-Smolit, Render-Kind/Shape/Capability-Lookups, Name-Round-Trips,
 `all_ids`-Reihenfolge. Der Harness-Case `avatar-identity-smoke`
-läuft den Test. Zusätzlich deckt die erweiterte
-`avatar_preferences_smoke.gd` den Identity-Round-Trip, Alias-
-Rejection und invalide identity-Einträge ab.
+läuft den Test. `scripts/avatar_template_capabilities_smoke.gd`
+(65 Assertions, alle PASS) prüft den Capability-Contract:
+States-Support, `state_fallback`-Auflösung (inkl. orb TALKING →
+ACTING), Expression-Levels pro Achse, Multiplier-Mapping und das
+stille Zurückfallen unbekannter Identity-IDs auf Smolit. Der
+Harness-Case heißt `avatar-template-capabilities-smoke`. Zusätzlich
+deckt die erweiterte `avatar_preferences_smoke.gd` den Identity-
+Round-Trip (inkl. Humanoid), Alias-Rejection und invalide
+identity-Einträge ab.
 
 **Was Phase B ausdrücklich nicht tut:**
 
@@ -1068,8 +1133,8 @@ nicht verdeckt.
 **Was die Steuerung kann.** Zwei klar getrennte Bereiche.
 
 1. **Avatar-Appearance (Phase A + Phase-B-Identity-Picker).**
-   Identity-OptionButton (3 Optionen, Phase-B-kuratiert: Smolit /
-   Robot-Head / Orb), Theme-OptionButton (4 Optionen),
+   Identity-OptionButton (4 Optionen, Phase-B-kuratiert: Smolit /
+   Robot-Head / Humanoid-Head / Orb), Theme-OptionButton (4 Optionen),
    Profile-OptionButton (3 Optionen), Intensity-Slider (0.5 .. 1.5).
    Änderungen rufen `avatar_controller.set_appearance()` auf, das
    das Appearance-Dict ersetzt, die Root-Scale aktualisiert und

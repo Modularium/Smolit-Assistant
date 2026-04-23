@@ -277,3 +277,17 @@ func _check_identity_alias_not_accepted_as_stored() -> void:
 	var prefs2 := _PrefsRef.load_preferences(_path)
 	_assert(int(prefs2.get("identity", -1)) == _IdentityRef.Identity.ORB,
 		"canonical identity 'orb' → loaded as ORB")
+
+	# Phase-B-Hardening: auch das vierte kuratierte Template (humanoid_head)
+	# läuft sauber als Preference-String hin und zurück.
+	_reset_file()
+	_PrefsRef.save_preferences(
+		_AppearanceRef.ThemePreset.SOFT,
+		_AppearanceRef.BehaviorProfile.CALM,
+		1.0,
+		_IdentityRef.Identity.HUMANOID_HEAD,
+		_path,
+	)
+	var prefs_humanoid := _PrefsRef.load_preferences(_path)
+	_assert(int(prefs_humanoid.get("identity", -1)) == _IdentityRef.Identity.HUMANOID_HEAD,
+		"round-trip: identity HUMANOID_HEAD")

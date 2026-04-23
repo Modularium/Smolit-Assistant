@@ -37,6 +37,7 @@ const AvatarStateRef := preload("res://scripts/avatar/avatar_state.gd")
 const AvatarAppearanceRef := preload("res://scripts/avatar/avatar_appearance.gd")
 const AvatarPreferencesRef := preload("res://scripts/avatar/avatar_preferences.gd")
 const AvatarIdentityRef := preload("res://scripts/avatar/avatar_identity.gd")
+const AvatarTemplateCapsRef := preload("res://scripts/avatar/avatar_template_capabilities.gd")
 
 signal clicked
 signal toggle_dock
@@ -321,7 +322,14 @@ func _apply_state_visuals() -> void:
 	_body.scale = Vector2.ONE
 	_body.rotation = 0.0
 
-	match _state:
+	# Template-Capability-Contract: bevor wir den Zustand rendern, fragen
+	# wir die Capability-Schicht, welchen tatsächlich renderbaren State
+	# die aktive Identity trägt. Für Smolit ist das immer 1:1 der
+	# Eingangs-State; `orb` mappt `TALKING` → `ACTING`, weil die Figur
+	# keinen Mund hat. Siehe `avatar_template_capabilities.gd::resolve_state`.
+	var effective_state: int = AvatarTemplateCapsRef.resolve_state(_identity_id, _state)
+
+	match effective_state:
 		AvatarStateRef.State.IDLE:
 			_body.texture = IDLE_TEXTURE
 			_body.modulate = _appearance_tint(NORMAL_MODULATE)
@@ -369,12 +377,38 @@ func _stop_thinking_tween() -> void:
 ## Amplitude und Periode werden durch die Appearance (Profile +
 ## Intensity-Override) moduliert — CALM + Unity-Overrides lässt das
 ## Original-Timing unverändert (Identitätsgarantie).
+##
+## Phase-B-Hardening: die Template-Capability-Schicht skaliert die
+## Amplitude zusätzlich. `state_pulse = NONE` verzichtet komplett auf
+## den Tween (Body bleibt ruhig auf `Vector2.ONE`), `REDUCED` halbiert
+## das Delta zur Ruhelage. Für Smolit/Referenz ist der Pfad unverändert.
 func _start_breath_tween(amplitude: Vector2, half_seconds: float) -> void:
-	var resolved_amp: Vector2 = AvatarAppearanceRef.resolved_amplitude(_appearance, amplitude)
-	var resolved_half: float = AvatarAppearanceRef.resolved_half_seconds(_appearance, half_seconds)
+	var pulse_mult: float = AvatarTemplateCapsRef.multiplier(
+		_identity_id, AvatarTemplateCapsRef.EXPR_STATE_PULSE,
+	)
+	if pulse_mult <= 0.0:
+		# Template deklariert `state_pulse = NONE` — Body bleibt still.
+		# Identity-Shape wird weiterhin durch das _process-Mirror von
+		# `_body` gespiegelt und zeigt damit ebenfalls keine Bewegung.
+		_body.scale = Vector2.ONE
+		return
+	var profile_mult: float = AvatarTemplateCapsRef.multiplier(
+		_identity_id, AvatarTemplateCapsRef.EXPR_BEHAVIOR_PROFILE,
+	)
+	var resolved_amp: Vector2 = _apply_profile_vector(
+		AvatarAppearanceRef.resolved_amplitude(_appearance, amplitude),
+		amplitude,
+		profile_mult,
+	)
+	var resolved_half: float = _apply_profile_scalar(
+		AvatarAppearanceRef.resolved_half_seconds(_appearance, half_seconds),
+		half_seconds,
+		profile_mult,
+	)
+	var scaled_amp: Vector2 = _scale_around_one(resolved_amp, pulse_mult)
 	_body_scale_tween = create_tween().set_loops()
 	_body_scale_tween.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	_body_scale_tween.tween_property(_body, "scale", resolved_amp, resolved_half)
+	_body_scale_tween.tween_property(_body, "scale", scaled_amp, resolved_half)
 	_body_scale_tween.tween_property(_body, "scale", Vector2.ONE, resolved_half)
 
 
@@ -386,11 +420,22 @@ func _stop_body_scale_tween() -> void:
 
 func _start_error_startle() -> void:
 	# Short, non-looping startle: small flinch down, small rebound, settle.
+	# Phase-B-Hardening: `error_startle = NONE` unterdrückt den Tween
+	# komplett (nur der rote Tint bleibt); `REDUCED` halbiert die
+	# Auslenkungen rund um die Ruhelage `Vector2.ONE`.
+	var startle_mult: float = AvatarTemplateCapsRef.multiplier(
+		_identity_id, AvatarTemplateCapsRef.EXPR_ERROR_STARTLE,
+	)
+	if startle_mult <= 0.0:
+		return
 	_startle_tween = create_tween()
 	_startle_tween.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	_startle_tween.tween_property(_body, "scale", ERROR_STARTLE_DOWN, ERROR_STARTLE_DOWN_SECONDS)
-	_startle_tween.tween_property(_body, "scale", ERROR_STARTLE_UP, ERROR_STARTLE_UP_SECONDS)
-	_startle_tween.tween_property(_body, "scale", Vector2.ONE, ERROR_STARTLE_SETTLE_SECONDS)
+	_startle_tween.tween_property(_body, "scale",
+		_scale_around_one(ERROR_STARTLE_DOWN, startle_mult), ERROR_STARTLE_DOWN_SECONDS)
+	_startle_tween.tween_property(_body, "scale",
+		_scale_around_one(ERROR_STARTLE_UP, startle_mult), ERROR_STARTLE_UP_SECONDS)
+	_startle_tween.tween_property(_body, "scale",
+		Vector2.ONE, ERROR_STARTLE_SETTLE_SECONDS)
 
 
 func _stop_startle_tween() -> void:
@@ -406,12 +451,30 @@ func _arm_wiggle_timer() -> void:
 	# Die Bandbreite wird durch das Behavior-Profile moduliert (LIVELY
 	# häufiger, RESERVED seltener). Das Untergrenzen-Clamp in
 	# `resolved_wiggle_interval` verhindert hektische Cues.
+	#
+	# Phase-B-Hardening: deklariert ein Template `wiggle = NONE`
+	# (z. B. der abstrakte `orb`), wird der Timer gar nicht erst
+	# gestartet — kein Tick, kein versehentlicher Cue. `REDUCED` senkt
+	# nur den Winkel in `_play_wiggle`, nicht das Intervall (das Timing
+	# liefert bereits das Behavior-Profile).
 	_wiggle_timer.stop()
-	var min_s: float = AvatarAppearanceRef.resolved_wiggle_interval(
-		_appearance, WIGGLE_INTERVAL_MIN_SECONDS
+	var wiggle_mult: float = AvatarTemplateCapsRef.multiplier(
+		_identity_id, AvatarTemplateCapsRef.EXPR_WIGGLE,
 	)
-	var max_s: float = AvatarAppearanceRef.resolved_wiggle_interval(
-		_appearance, WIGGLE_INTERVAL_MAX_SECONDS
+	if wiggle_mult <= 0.0:
+		return
+	var profile_mult: float = AvatarTemplateCapsRef.multiplier(
+		_identity_id, AvatarTemplateCapsRef.EXPR_BEHAVIOR_PROFILE,
+	)
+	var min_s: float = _apply_profile_scalar(
+		AvatarAppearanceRef.resolved_wiggle_interval(_appearance, WIGGLE_INTERVAL_MIN_SECONDS),
+		WIGGLE_INTERVAL_MIN_SECONDS,
+		profile_mult,
+	)
+	var max_s: float = _apply_profile_scalar(
+		AvatarAppearanceRef.resolved_wiggle_interval(_appearance, WIGGLE_INTERVAL_MAX_SECONDS),
+		WIGGLE_INTERVAL_MAX_SECONDS,
+		profile_mult,
 	)
 	_wiggle_timer.wait_time = randf_range(min_s, max_s)
 	_wiggle_timer.start()
@@ -438,10 +501,16 @@ func _on_wiggle_timeout() -> void:
 func _play_wiggle() -> void:
 	if _wiggle_tween and _wiggle_tween.is_valid():
 		_wiggle_tween.kill()
+	# Capability-Multiplier skaliert den Ausschlag (`FULL` = 1.0, `REDUCED`
+	# = 0.5, `NONE` wurde bereits in `_arm_wiggle_timer` gefiltert).
+	var angle_mult: float = AvatarTemplateCapsRef.multiplier(
+		_identity_id, AvatarTemplateCapsRef.EXPR_WIGGLE,
+	)
+	var angle: float = WIGGLE_ANGLE_RAD * angle_mult
 	_wiggle_tween = create_tween()
 	_wiggle_tween.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	_wiggle_tween.tween_property(_body, "rotation", WIGGLE_ANGLE_RAD, 0.18)
-	_wiggle_tween.tween_property(_body, "rotation", -WIGGLE_ANGLE_RAD * 0.5, 0.22)
+	_wiggle_tween.tween_property(_body, "rotation", angle, 0.18)
+	_wiggle_tween.tween_property(_body, "rotation", -angle * 0.5, 0.22)
 	_wiggle_tween.tween_property(_body, "rotation", 0.0, 0.22)
 
 
@@ -531,14 +600,68 @@ func _on_action_cancelled(_payload: Dictionary) -> void:
 	_set_state(next)
 
 
+# --- Template-Capability-Helfer -----------------------------------------
+
+
+## Skaliert einen Puls-/Startle-Zielwert (Vector2) um den Ruhepunkt
+## `Vector2.ONE` herum. Beispiel: `_scale_around_one(Vector2(1.04,
+## 1.04), 0.5)` ergibt `Vector2(1.02, 1.02)`. Damit bleibt die Richtung
+## der Animation erhalten, nur das Delta schrumpft. Multiplier ≥ 1.0
+## heißt „unverändert oder stärker"; ≤ 0.0 heißt „keine Bewegung"
+## (wird in den Call-Sites ohnehin als Early-Return behandelt).
+func _scale_around_one(value: Vector2, multiplier: float) -> Vector2:
+	return Vector2.ONE + (value - Vector2.ONE) * multiplier
+
+
+## Lerpt einen Profile-resolvten Vector2 zwischen der Basis (kein
+## Profil-Effekt) und dem vollen Profil-Ergebnis. Multiplier == 1.0 →
+## full profile, 0.5 → halb, 0.0 → Basis. Für `behavior_profile`-
+## Downgrades in kuratierten Templates.
+func _apply_profile_vector(resolved: Vector2, base: Vector2, multiplier: float) -> Vector2:
+	if multiplier >= 0.999:
+		return resolved
+	return base.lerp(resolved, clampf(multiplier, 0.0, 1.0))
+
+
+## Wie `_apply_profile_vector`, aber für Tempo-/Intervall-Skalare.
+func _apply_profile_scalar(resolved: float, base: float, multiplier: float) -> float:
+	if multiplier >= 0.999:
+		return resolved
+	return lerpf(base, resolved, clampf(multiplier, 0.0, 1.0))
+
+
 # --- Appearance (Phase A) ------------------------------------------------
 
 
 ## Dünner Wrapper um `AvatarAppearanceRef.resolved_tint`. Vereinfacht
 ## die Call-Sites in `_apply_state_visuals` und bündelt den Default-
 ## Fallback (sicherheitshalber).
+##
+## Phase-B-Hardening: die Template-Capability-Schicht kann den Theme-
+## Effekt pro Identity abschwächen. `theme_tint = FULL` entspricht
+## dem unveränderten Phase-A-Verhalten (Themes wirken 1:1). `REDUCED`
+## lerpt die Theme-Farbe 50 % zurück zur identitätsneutralen Basis,
+## `NONE` ignoriert den Theme-Beitrag komplett und lässt nur den
+## Override-Tint wirken. Aktuelle Templates deklarieren alle `FULL` —
+## die Schicht ist als kontrollierter Fallback-Pfad vorhanden, falls
+## ein zukünftiges Template den Theme-Effekt nicht tragen kann.
 func _appearance_tint(base_color: Color) -> Color:
-	return AvatarAppearanceRef.resolved_tint(_appearance, base_color)
+	var full_tint: Color = AvatarAppearanceRef.resolved_tint(_appearance, base_color)
+	var tint_mult: float = AvatarTemplateCapsRef.multiplier(
+		_identity_id, AvatarTemplateCapsRef.EXPR_THEME_TINT,
+	)
+	if tint_mult >= 0.999:
+		return full_tint
+	# Den Theme-Beitrag lerpen wir in Richtung „nur Override-Tint auf
+	# Basis angewandt" — so bleibt ein identitätsneutraler Fallback
+	# erhalten, ohne den Override-Tint selbst zu beschädigen.
+	var neutral_identity := AvatarAppearanceRef.new_appearance()
+	var overrides: Dictionary = _appearance.get("overrides", {})
+	neutral_identity["overrides"]["primary_tint"] = overrides.get(
+		"primary_tint", Color(1, 1, 1, 1),
+	)
+	var neutral_tint: Color = AvatarAppearanceRef.resolved_tint(neutral_identity, base_color)
+	return neutral_tint.lerp(full_tint, tint_mult)
 
 
 ## Persistiert Theme / Profile / Intensity des aktuellen Appearance-

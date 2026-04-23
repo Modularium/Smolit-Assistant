@@ -61,6 +61,13 @@
 #                   (ui/scripts/avatar/avatar_identity.gd): Default,
 #                   Parser + Aliasse, Fallback-auf-Smolit, Render-
 #                   Kind / Shape / Capability-Lookups. Exit 0 = alle PASS.
+#   avatar-template-capabilities-smoke
+#                 — Führt scripts/avatar_template_capabilities_smoke.gd aus.
+#                   Prüft den Phase-B-Capability-Contract
+#                   (ui/scripts/avatar/avatar_template_capabilities.gd):
+#                   States, State-Fallback (orb.TALKING → ACTING),
+#                   Expression-Levels (wiggle/pulse/startle/tint/profile),
+#                   Multiplier-Mapping, Fallback-auf-Smolit. Exit 0 = alle PASS.
 #   resolver-wayland-mutter
 #                 — Env-Override (Wayland + GNOME) + Report. Zeigt, dass
 #                   der Resolver backend_wayland_mutter wählt und der
@@ -231,6 +238,14 @@ case "${CASE}" in
     # Kind / Shape / Capability-Lookups (Phase B, kuratiert).
     exec godot --headless --path "${UI_DIR}" \
       --script "${REPO_ROOT}/scripts/avatar_identity_smoke.gd"
+    ;;
+  avatar-template-capabilities-smoke)
+    # Spezialfall: Contract-Smoke für
+    # ui/scripts/avatar/avatar_template_capabilities.gd. Prüft
+    # State-Support / State-Fallback / ExpressionLevels / Multiplier-
+    # Mapping / Unbekannte-Identity-Clamping (Phase B hardening).
+    exec godot --headless --path "${UI_DIR}" \
+      --script "${REPO_ROOT}/scripts/avatar_template_capabilities_smoke.gd"
     ;;
   resolver-wayland-mutter)
     export SMOLIT_WINDOW_REPORT=1

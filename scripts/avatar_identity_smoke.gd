@@ -83,6 +83,9 @@ func _check_parser_canonical() -> void:
 	_assert(_IdentityRef.identity_from_string("orb")
 			== _IdentityRef.Identity.ORB,
 		"parse: canonical orb")
+	_assert(_IdentityRef.identity_from_string("humanoid_head")
+			== _IdentityRef.Identity.HUMANOID_HEAD,
+		"parse: canonical humanoid_head")
 
 
 func _check_parser_aliases() -> void:
@@ -96,6 +99,12 @@ func _check_parser_aliases() -> void:
 	_assert(_IdentityRef.identity_from_string("robot")
 			== _IdentityRef.Identity.ROBOT_HEAD,
 		"parse: alias 'robot' → ROBOT_HEAD")
+	_assert(_IdentityRef.identity_from_string("humanoid")
+			== _IdentityRef.Identity.HUMANOID_HEAD,
+		"parse: alias 'humanoid' → HUMANOID_HEAD")
+	_assert(_IdentityRef.identity_from_string("human")
+			== _IdentityRef.Identity.HUMANOID_HEAD,
+		"parse: alias 'human' → HUMANOID_HEAD")
 	# Case-Insensitivität und Whitespace-Stripping.
 	_assert(_IdentityRef.identity_from_string("  ROBOT_HEAD  ")
 			== _IdentityRef.Identity.ROBOT_HEAD,
@@ -134,6 +143,9 @@ func _check_spec_render_kinds() -> void:
 	_assert(_IdentityRef.render_kind(_IdentityRef.Identity.ORB)
 			== _IdentityRef.RenderKind.PROCEDURAL,
 		"spec: Orb uses PROCEDURAL render_kind")
+	_assert(_IdentityRef.render_kind(_IdentityRef.Identity.HUMANOID_HEAD)
+			== _IdentityRef.RenderKind.PROCEDURAL,
+		"spec: Humanoid-Head uses PROCEDURAL render_kind")
 	# Unbekannter Int muss auch hier robust auf Smolit zurückfallen.
 	_assert(_IdentityRef.render_kind(99)
 			== _IdentityRef.RenderKind.TEXTURE,
@@ -150,6 +162,9 @@ func _check_spec_shapes() -> void:
 	_assert(_IdentityRef.shape(_IdentityRef.Identity.ORB)
 			== _IdentityRef.Shape.CIRCLE,
 		"spec: Orb shape == CIRCLE")
+	_assert(_IdentityRef.shape(_IdentityRef.Identity.HUMANOID_HEAD)
+			== _IdentityRef.Shape.HUMANOID,
+		"spec: Humanoid-Head shape == HUMANOID")
 
 
 func _check_capability_texture_swap() -> void:
@@ -163,6 +178,8 @@ func _check_capability_texture_swap() -> void:
 		"capability: Robot-Head supports_texture_swap == false")
 	_assert(not _IdentityRef.supports_texture_swap(_IdentityRef.Identity.ORB),
 		"capability: Orb supports_texture_swap == false")
+	_assert(not _IdentityRef.supports_texture_swap(_IdentityRef.Identity.HUMANOID_HEAD),
+		"capability: Humanoid-Head supports_texture_swap == false")
 
 
 func _check_name_label_round_trip() -> void:
@@ -182,10 +199,12 @@ func _check_name_label_round_trip() -> void:
 
 func _check_all_ids_order() -> void:
 	var ids: Array = _IdentityRef.all_ids()
-	_assert(ids.size() == 3, "all_ids lists exactly 3 curated identities")
+	_assert(ids.size() == 4, "all_ids lists exactly 4 curated identities")
 	_assert(int(ids[0]) == _IdentityRef.Identity.SMOLIT_SALAMANDER,
 		"all_ids[0] == SMOLIT_SALAMANDER (default shown first)")
 	_assert(ids.has(_IdentityRef.Identity.ROBOT_HEAD),
 		"all_ids includes ROBOT_HEAD")
+	_assert(ids.has(_IdentityRef.Identity.HUMANOID_HEAD),
+		"all_ids includes HUMANOID_HEAD")
 	_assert(ids.has(_IdentityRef.Identity.ORB),
 		"all_ids includes ORB")

@@ -62,6 +62,8 @@ func _draw() -> void:
 			_draw_robot_face(rect)
 		_IdentityRef.Shape.CIRCLE:
 			_draw_orb(rect, color)
+		_IdentityRef.Shape.HUMANOID:
+			_draw_humanoid(rect, color)
 		_:
 			# Shape.NONE — nichts zeichnen. Smolit-TextureRect nutzt
 			# diesen Zweig im Theorie-Fall, in der Praxis ist dieser
@@ -131,4 +133,42 @@ func _draw_orb(rect: Rect2, color: Color) -> void:
 		center - Vector2(outer_r * 0.18, outer_r * 0.22),
 		outer_r * 0.28,
 		Color(1, 1, 1, 0.5),
+	)
+
+
+func _draw_humanoid(rect: Rect2, color: Color) -> void:
+	# Ruhiges menschlich gelesenes Gesicht: ein Kreis in Hauttönen
+	# plus zwei Augen und ein kleiner Mund-Arc. Bewusst flach und
+	# symmetrisch — wir wollen weder Charakterdesign noch Karikatur,
+	# nur eine deutlich vom Robot / Orb unterscheidbare Silhouette.
+	var center: Vector2 = rect.position + rect.size * 0.5
+	var outer_r: float = minf(rect.size.x, rect.size.y) * 0.5
+	# Hauptkörper (Kopf) — der Radius ist leicht unter 50 %, damit die
+	# Figur nicht an den Clip-Rand des AvatarRoot-Layout-Rects stößt.
+	draw_circle(center, outer_r * 0.94, color)
+	# Augen — leicht unterhalb der Mitte, vertikal identisch.
+	var eye_y: float = center.y - outer_r * 0.10
+	var eye_dx: float = outer_r * 0.30
+	var eye_r: float = outer_r * 0.09
+	var eye_color := Color(0.15, 0.18, 0.22, 0.95)
+	draw_circle(Vector2(center.x - eye_dx, eye_y), eye_r, eye_color)
+	draw_circle(Vector2(center.x + eye_dx, eye_y), eye_r, eye_color)
+	# Mund — ein sehr flacher Bogen, gezeichnet als `draw_arc` mit
+	# einer kleinen Linienstärke. Ein Smile ohne Übertreibung; die
+	# Neutralität erlaubt es State-Tints, die Stimmung zu tragen.
+	var mouth_center: Vector2 = center + Vector2(0, outer_r * 0.28)
+	var mouth_r: float = outer_r * 0.26
+	var mouth_color := Color(0.25, 0.20, 0.18, 0.90)
+	# Arc-Winkel in Radian: unterer Halbkreis-Ausschnitt. Godot
+	# zeichnet `draw_arc` standardmäßig gegen den Uhrzeigersinn vom
+	# Start- zum Endwinkel; ein Bereich von 0.15π bis 0.85π auf einer
+	# abwärts zeigenden Ringachse liefert ein sanftes Lächeln.
+	draw_arc(
+		mouth_center,
+		mouth_r,
+		deg_to_rad(20.0),
+		deg_to_rad(160.0),
+		24,
+		mouth_color,
+		minf(outer_r * 0.05, 3.0),
 	)
