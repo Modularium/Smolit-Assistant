@@ -1123,6 +1123,7 @@ pub enum CloudHttpScheme {
 }
 
 impl CloudHttpScheme {
+    #[allow(dead_code)] // Read by future diagnostic-logging pfade; stable API.
     pub fn is_secure(self) -> bool {
         matches!(self, Self::Https)
     }
@@ -1254,8 +1255,9 @@ impl CloudHttpProvider {
 
     /// Validator für den Header-Namen aus der Config. Blockiert
     /// CR/LF-Injektionen und leere Werte — der Rest wird wie ein
-    /// opaker Token behandelt.
-    fn validate_auth_header_name(name: &str) -> Result<&str> {
+    /// opaker Token behandelt. Seit PR 12 auch vom Probe-Pfad
+    /// genutzt, darum `pub(crate)`.
+    pub(crate) fn validate_auth_header_name(name: &str) -> Result<&str> {
         let trimmed = name.trim();
         if trimmed.is_empty() {
             bail!("cloud_http auth header name is empty");
@@ -1466,7 +1468,7 @@ async fn check_health(host: &str, port: u16, timeout_secs: u64) -> bool {
 /// dort wird nie Secret-Material aus dem Bearer-Header zitiert, weil
 /// rustls den Handshake **vor** der ersten Bytes des Application-
 /// Layers abbricht.
-async fn http_request_with_header(
+pub(crate) async fn http_request_with_header(
     scheme: CloudHttpScheme,
     host: &str,
     port: u16,
@@ -2220,14 +2222,29 @@ pub(crate) mod tests {
     }
 
     /// PR 11 — Verhalten eines Fake-HTTPS-Servers. Gibt es klein und
-    /// erweiterbar, damit Tests den Request-/Response-Pfad und den
-    /// Unauth-Pfad getrennt prüfen können.
+    /// erweiterbar, damit Tests den Request-/Response-Pfad, den
+    /// Unauth-Pfad und (seit PR 12) den authentifizierten Probe-Pfad
+    /// getrennt prüfen können.
     #[allow(dead_code)]
+    #[derive(Clone)]
     pub(crate) enum FakeHttpsMode {
-        /// `200 OK` mit `{"content":"<value>"}`.
+        /// `200 OK`. Für POST mit `{"content":"<value>"}` als Body;
+        /// für HEAD/GET kommt ein leerer Body zurück.
         Ok(&'static str),
-        /// `401 Unauthorized` mit leerem Body.
+        /// `401 Unauthorized` auf jede Request, egal ob Method oder Auth.
         Unauthorized,
+        /// PR 12 — authentifizierte Probe-Semantik: Wenn der Request
+        /// einen `Authorization`-Header trägt, der auf
+        /// `Bearer <expected>` endet → `200 OK` (HEAD: leerer Body;
+        /// POST: `{"content":"<content>"}`). Sonst → `401 Unauthorized`.
+        RequiresBearer {
+            expected: &'static str,
+            content: &'static str,
+        },
+        /// PR 12 — Server liefert immer den gegebenen HTTP-Status
+        /// (z. B. 500, 404). Body ist leer. Für Tests, die
+        /// `http_error`-Mapping prüfen.
+        HttpErrorStatus(u16),
     }
 
     /// Startet einen lokalen HTTPS-Server mit selbstsigniertem
@@ -2286,16 +2303,13 @@ pub(crate) mod tests {
 
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let port = listener.local_addr().unwrap().port();
-        let content: Option<&'static str> = match mode {
-            FakeHttpsMode::Ok(c) => Some(c),
-            FakeHttpsMode::Unauthorized => None,
-        };
         let handle = tokio::spawn(async move {
             loop {
                 let Ok((tcp, _)) = listener.accept().await else {
                     return;
                 };
                 let acceptor = acceptor.clone();
+                let mode_clone = mode.clone();
                 tokio::spawn(async move {
                     let Ok(mut tls_stream) = acceptor.accept(tcp).await else {
                         return;
@@ -2306,29 +2320,76 @@ pub(crate) mod tests {
                         return;
                     };
                     let request = String::from_utf8_lossy(&buf[..n]);
-                    let (status_line, body) = match content {
-                        Some(c) => {
-                            if request.starts_with("POST /") {
-                                (
-                                    "HTTP/1.1 200 OK",
-                                    format!(r#"{{"content":"{c}"}}"#),
-                                )
-                            } else {
-                                ("HTTP/1.1 404 Not Found", String::new())
-                            }
-                        }
-                        None => ("HTTP/1.1 401 Unauthorized", String::new()),
-                    };
-                    let response = format!(
-                        "{status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                        body.len(),
-                    );
+                    let response = fake_http_response_for(&request, &mode_clone);
                     let _ = tls_stream.write_all(response.as_bytes()).await;
                     let _ = tls_stream.shutdown().await;
                 });
             }
         });
         (port, trust_client_config, handle)
+    }
+
+    /// Baut die HTTP-Antwort aus dem Request und dem Mode. Shared
+    /// zwischen `start_fake_https_server` (PR 11) und `start_fake_http_auth_server`
+    /// (PR 12), damit die Probe-Semantik in beiden Transport-
+    /// Varianten identisch ist.
+    pub(crate) fn fake_http_response_for(request: &str, mode: &FakeHttpsMode) -> String {
+        let is_head = request.starts_with("HEAD ");
+        let is_post = request.starts_with("POST ");
+        let (status_line, body): (&str, String) = match mode {
+            FakeHttpsMode::Ok(c) => {
+                if is_head {
+                    ("HTTP/1.1 200 OK", String::new())
+                } else if is_post {
+                    ("HTTP/1.1 200 OK", format!(r#"{{"content":"{c}"}}"#))
+                } else {
+                    ("HTTP/1.1 404 Not Found", String::new())
+                }
+            }
+            FakeHttpsMode::Unauthorized => ("HTTP/1.1 401 Unauthorized", String::new()),
+            FakeHttpsMode::RequiresBearer { expected, content } => {
+                // Case-insensitive Header-Suche. Spec: HTTP-Header-
+                // Namen sind case-insensitive; einige Clients
+                // capitalisieren `Authorization` unterschiedlich.
+                let expected_line = format!("Bearer {expected}");
+                let got_bearer = request
+                    .split("\r\n")
+                    .find(|l| l.to_ascii_lowercase().starts_with("authorization:"))
+                    .map(|l| l.splitn(2, ':').nth(1).unwrap_or("").trim().to_string())
+                    .unwrap_or_default();
+                if got_bearer == expected_line {
+                    if is_head {
+                        ("HTTP/1.1 200 OK", String::new())
+                    } else if is_post {
+                        (
+                            "HTTP/1.1 200 OK",
+                            format!(r#"{{"content":"{content}"}}"#),
+                        )
+                    } else {
+                        ("HTTP/1.1 404 Not Found", String::new())
+                    }
+                } else {
+                    ("HTTP/1.1 401 Unauthorized", String::new())
+                }
+            }
+            FakeHttpsMode::HttpErrorStatus(code) => {
+                let line = match code {
+                    400 => "HTTP/1.1 400 Bad Request",
+                    404 => "HTTP/1.1 404 Not Found",
+                    405 => "HTTP/1.1 405 Method Not Allowed",
+                    429 => "HTTP/1.1 429 Too Many Requests",
+                    500 => "HTTP/1.1 500 Internal Server Error",
+                    502 => "HTTP/1.1 502 Bad Gateway",
+                    503 => "HTTP/1.1 503 Service Unavailable",
+                    _ => "HTTP/1.1 500 Internal Server Error",
+                };
+                (line, String::new())
+            }
+        };
+        format!(
+            "{status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len(),
+        )
     }
 
     /// Wie `start_fake_llama_server`, aber der Server liefert immer
@@ -2348,6 +2409,39 @@ pub(crate) mod tests {
                     "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
                 let _ = socket.write_all(response.as_bytes()).await;
                 let _ = socket.shutdown().await;
+            }
+        });
+        (port, handle)
+    }
+
+    /// PR 12 — Plaintext-Pendant zu `start_fake_https_server`. Nimmt
+    /// denselben `FakeHttpsMode` und antwortet mit derselben Semantik
+    /// (HEAD / POST / Auth-Check / Error-Statuscode), aber ohne TLS.
+    /// Wird für `cloud_http`-Probe-Tests über `http://` genutzt — die
+    /// PR-12-Aufwertung auf Application-Layer muss auch für plaintext
+    /// funktionieren.
+    pub(crate) async fn start_fake_http_auth_server(
+        mode: FakeHttpsMode,
+    ) -> (u16, JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        let handle = tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
+                let mode_clone = mode.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let Ok(n) = socket.read(&mut buf).await else {
+                        let _ = socket.shutdown().await;
+                        return;
+                    };
+                    let request = String::from_utf8_lossy(&buf[..n]);
+                    let response = fake_http_response_for(&request, &mode_clone);
+                    let _ = socket.write_all(response.as_bytes()).await;
+                    let _ = socket.shutdown().await;
+                });
             }
         });
         (port, handle)

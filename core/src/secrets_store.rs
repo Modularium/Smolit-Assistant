@@ -210,13 +210,12 @@ pub fn set_cloud_http_api_key(value: Option<String>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    /// Serialisiert alle Tests, die `SMOLIT_SETTINGS_DIR` setzen. Der
-    /// Env-Var ist Prozess-global; cargo-test läuft standardmäßig
-    /// parallel — ohne dieses Lock würde Test A's Schreibpfad in
-    /// Test B's Dir landen.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    /// Zentraler, modul-übergreifender Lock aus dem Crate-Root
+    /// (siehe [`crate::SETTINGS_DIR_ENV_LOCK`]). PR 12: wichtig, damit
+    /// `secrets_store::tests` nicht mit `settings_store::tests` und
+    /// `ipc::server::tests` um den prozess-globalen
+    /// `SMOLIT_SETTINGS_DIR`-Env-Var racet.
+    use crate::SETTINGS_DIR_ENV_LOCK as ENV_LOCK;
 
     fn fresh_env_dir(marker: &str) -> PathBuf {
         let base = std::env::temp_dir().join(format!(
@@ -230,7 +229,7 @@ mod tests {
 
     #[test]
     fn load_without_file_returns_empty() {
-        let _g = ENV_LOCK.lock().unwrap();
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = fresh_env_dir("no-file");
         unsafe {
             std::env::set_var(ENV_SETTINGS_DIR, dir.as_os_str());
@@ -244,7 +243,7 @@ mod tests {
 
     #[test]
     fn save_then_load_roundtrip_preserves_key() {
-        let _g = ENV_LOCK.lock().unwrap();
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = fresh_env_dir("roundtrip");
         unsafe {
             std::env::set_var(ENV_SETTINGS_DIR, dir.as_os_str());
@@ -262,7 +261,7 @@ mod tests {
 
     #[test]
     fn set_cloud_http_api_key_with_some_persists_value() {
-        let _g = ENV_LOCK.lock().unwrap();
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = fresh_env_dir("set-some");
         unsafe {
             std::env::set_var(ENV_SETTINGS_DIR, dir.as_os_str());
@@ -277,7 +276,7 @@ mod tests {
 
     #[test]
     fn set_cloud_http_api_key_with_none_clears_value() {
-        let _g = ENV_LOCK.lock().unwrap();
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = fresh_env_dir("set-none");
         unsafe {
             std::env::set_var(ENV_SETTINGS_DIR, dir.as_os_str());
@@ -293,7 +292,7 @@ mod tests {
 
     #[test]
     fn set_cloud_http_api_key_empty_string_is_treated_as_clear() {
-        let _g = ENV_LOCK.lock().unwrap();
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = fresh_env_dir("set-empty");
         unsafe {
             std::env::set_var(ENV_SETTINGS_DIR, dir.as_os_str());
@@ -323,7 +322,7 @@ mod tests {
     #[test]
     fn saved_file_has_0600_permissions() {
         use std::os::unix::fs::PermissionsExt;
-        let _g = ENV_LOCK.lock().unwrap();
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = fresh_env_dir("perms");
         unsafe {
             std::env::set_var(ENV_SETTINGS_DIR, dir.as_os_str());
@@ -342,7 +341,7 @@ mod tests {
 
     #[test]
     fn parse_error_does_not_panic_and_yields_empty() {
-        let _g = ENV_LOCK.lock().unwrap();
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = fresh_env_dir("bad-json");
         unsafe {
             std::env::set_var(ENV_SETTINGS_DIR, dir.as_os_str());

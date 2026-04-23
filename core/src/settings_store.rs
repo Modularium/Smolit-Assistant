@@ -569,8 +569,14 @@ mod tests {
         base
     }
 
+    // PR 12: zentraler, modul-übergreifender Lock. Verhindert Races
+    // mit `secrets_store::tests` und `ipc::server::tests` um den
+    // prozess-globalen `SMOLIT_SETTINGS_DIR`.
+    use crate::SETTINGS_DIR_ENV_LOCK as ENV_LOCK;
+
     #[test]
     fn resolve_uses_env_override_when_set() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = fresh_env_dir("resolve-env");
         // SAFETY: single-threaded test; we restore the var afterwards.
         unsafe {
@@ -586,6 +592,7 @@ mod tests {
 
     #[test]
     fn save_then_load_roundtrip_preserves_fields() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = fresh_env_dir("save-load");
         unsafe {
             std::env::set_var(ENV_SETTINGS_DIR, dir.as_os_str());
@@ -612,6 +619,7 @@ mod tests {
 
     #[test]
     fn apply_override_merges_only_present_fields() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let base = LlamafileConfig {
             enabled: false,
             path: None,
@@ -639,6 +647,7 @@ mod tests {
 
     #[test]
     fn apply_override_rejects_unknown_mode_silently() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let base = LlamafileConfig {
             enabled: false,
             path: None,
@@ -661,6 +670,7 @@ mod tests {
 
     #[test]
     fn apply_override_clears_path_when_empty_string() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let base = LlamafileConfig {
             enabled: true,
             path: Some("/old/path".into()),
@@ -683,6 +693,7 @@ mod tests {
 
     #[test]
     fn save_without_any_config_dir_errors_honestly() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Temporär alle drei möglichen Quellen entziehen.
         unsafe {
             std::env::remove_var(ENV_SETTINGS_DIR);
@@ -734,6 +745,7 @@ mod tests {
 
     #[test]
     fn stt_save_then_load_roundtrip() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = fresh_env_dir("stt-save-load");
         unsafe {
             std::env::set_var(ENV_SETTINGS_DIR, dir.as_os_str());
@@ -754,6 +766,7 @@ mod tests {
 
     #[test]
     fn tts_save_then_load_roundtrip_includes_auto_speak() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = fresh_env_dir("tts-save-load");
         unsafe {
             std::env::set_var(ENV_SETTINGS_DIR, dir.as_os_str());
@@ -776,6 +789,7 @@ mod tests {
 
     #[test]
     fn apply_stt_override_merges_only_present_fields() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let base = audio_base();
         let over = SttOverrideFile {
             enabled: Some(true),
@@ -790,6 +804,7 @@ mod tests {
 
     #[test]
     fn apply_stt_override_clears_command_when_empty_string() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let base = AudioConfig {
             stt_cmd: Some("/old/stt".into()),
             ..audio_base()
@@ -816,6 +831,7 @@ mod tests {
 
     #[test]
     fn local_http_save_then_load_roundtrip_preserves_fields() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = fresh_env_dir("lh-save-load");
         unsafe {
             std::env::set_var(ENV_SETTINGS_DIR, dir.as_os_str());
@@ -842,6 +858,7 @@ mod tests {
 
     #[test]
     fn apply_local_http_override_merges_only_present_fields() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let base = local_http_base();
         let over = LocalHttpOverrideFile {
             enabled: Some(true),
@@ -863,6 +880,7 @@ mod tests {
 
     #[test]
     fn apply_local_http_override_clears_endpoint_when_empty_string() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let base = local_http_base();
         let over = LocalHttpOverrideFile {
             enabled: None,
@@ -875,6 +893,7 @@ mod tests {
 
     #[test]
     fn apply_local_http_override_rejects_zero_timeout_silently() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let base = local_http_base();
         let over = LocalHttpOverrideFile {
             enabled: None,
@@ -888,6 +907,7 @@ mod tests {
 
     #[test]
     fn apply_tts_override_merges_auto_speak_and_command() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let base = audio_base();
         let over = TtsOverrideFile {
             enabled: Some(false),
@@ -906,6 +926,7 @@ mod tests {
 
     #[test]
     fn text_chain_save_then_load_roundtrip() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = fresh_env_dir("tc-save-load");
         unsafe {
             std::env::set_var(ENV_SETTINGS_DIR, dir.as_os_str());
@@ -926,6 +947,7 @@ mod tests {
 
     #[test]
     fn text_chain_save_rejects_empty_chain() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = fresh_env_dir("tc-empty");
         unsafe {
             std::env::set_var(ENV_SETTINGS_DIR, dir.as_os_str());
@@ -938,6 +960,7 @@ mod tests {
 
     #[test]
     fn text_chain_clear_removes_file_if_present_and_is_idempotent() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = fresh_env_dir("tc-clear");
         unsafe {
             std::env::set_var(ENV_SETTINGS_DIR, dir.as_os_str());
@@ -957,6 +980,7 @@ mod tests {
 
     #[test]
     fn text_chain_load_without_file_returns_none() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = fresh_env_dir("tc-missing");
         unsafe {
             std::env::set_var(ENV_SETTINGS_DIR, dir.as_os_str());

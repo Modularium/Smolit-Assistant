@@ -1381,6 +1381,50 @@ und Nicht-Ziele.
       UI `settings-shell-smoke` +3 Assertions (`http://`-Hint
       erscheint, verweist auf `https://`, bleibt bei `https://`
       leer). Alle übrigen UI-Smokes grün; Headless-Boot sauber.
+- [x] PR 12: authentifizierter `cloud_http`-Probe-Roundtrip. Die
+      Probe wertet sich von einer Transport-/TLS-Prüfung zu
+      einer echten Application-Layer-Probe auf. Der Core sendet
+      einen `HEAD`-Request gegen den konfigurierten Endpoint
+      mit `Authorization: Bearer <key>` (Header-Name aus Config,
+      Key aus dem Secrets-Store). **Kein** Completion-Request,
+      **kein** Prompt, **kein** Nutzer-Inhalt auf der Leitung —
+      HEAD reicht, weil Auth-Middleware den Bearer genauso
+      validiert wie bei POST. Die Probe kann jetzt ehrlich
+      zwischen `ok` (HTTP 2xx → Auth akzeptiert, Endpoint
+      erreichbar), `unauthorized` (HTTP 401/403 → Server lehnt
+      den gespeicherten Key explizit ab) und `http_error`
+      (sonstige Non-2xx, mit numerischem Status in der Meldung)
+      unterscheiden. Die PR-11-only-Klasse `ok_http` (TCP-
+      Connect-only für `http://`) **entfällt**; beide Transporte
+      gehen jetzt durch denselben authentifizierten HEAD-Pfad.
+      Die `fake-server`-Infrastruktur in
+      [`providers/text.rs::tests`](./core/src/providers/text.rs)
+      bekam einen neuen `FakeHttpsMode::RequiresBearer`-Modus,
+      einen `HttpErrorStatus(u16)`-Modus, und einen neuen
+      `start_fake_http_auth_server`-Helper (Plaintext-Pendant zu
+      `start_fake_https_server`). **Bewusst nicht Teil von
+      PR 12:** kein End-to-End-Happy-Path über echtes TLS durch
+      den Probe-Pfad (der Probe nutzt fest die Produktions-
+      `default_cloud_http_tls_config`; der TLS-Trust-Pfad wird
+      stattdessen auf Provider-Ebene via
+      `CloudHttpProvider::new_with_tls_config` getestet). Kein
+      Streaming / Function-Calling / messages-Array, kein
+      Anbieter-Zoo, kein Client-Cert / mTLS, keine Custom-CA-
+      Bundle-UX, kein Secret-Rotation-Pfad, keine Stage-C-/
+      Avatar-Kopplung, keine Approval-/Interaction-/Desktop-
+      Automation-Änderung, keine TLS-Abschwächung oder
+      `accept_invalid_certs`-Abkürzung. Details in
+      [docs/provider_fallback_and_settings_architecture.md §9 + §11](./docs/provider_fallback_and_settings_architecture.md),
+      [docs/api.md §2.10d](./docs/api.md). Tests: Core 272 PASS
+      (+4 vs. PR 11 — vier neue IPC-Ende-zu-Ende-Tests: `ok`
+      über plaintext-HTTP mit `RequiresBearer`-Fake-Server,
+      `unauthorized` bei Mismatched Bearer, `http_error` bei
+      Server-500, Cert-Pfad über HTTPS bestätigt, dass
+      untrusted cert auch mit Auth im Spiel sauber blockiert;
+      alle vier tragen aktive Secret-Leak-Guards). UI-Smokes
+      unverändert grün; Headless-Boot sauber. UI: Probe-Button-
+      Tooltip aktualisiert (weist jetzt auf authentifizierten
+      HEAD hin, keine neue Button-Oberfläche).
 
 ---
 

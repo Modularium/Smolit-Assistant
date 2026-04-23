@@ -2146,7 +2146,7 @@ impl App {
             );
         }
 
-        let (scheme, host, port, _path) =
+        let (scheme, host, port, path) =
             match crate::providers::text::CloudHttpProvider::parse_endpoint(endpoint_value) {
                 Ok(parsed) => parsed,
                 Err(err) => {
@@ -2167,105 +2167,140 @@ impl App {
                 }
             };
 
-        let timeout_secs = cfg.request_timeout_seconds.max(1).min(30);
-        let addr = format!("{host}:{port}");
-        let connect_result = tokio::time::timeout(
-            std::time::Duration::from_secs(timeout_secs),
-            tokio::net::TcpStream::connect(&addr),
-        )
-        .await;
-        let tcp = match connect_result {
+        // PR 12: Auth-Header-Namen validieren (blockiert CR/LF-
+        // Injektion). Produktionspfade haben das bereits in der Config
+        // validiert, aber eine zweite Sicherheitsschleife ist billig.
+        let auth_header = match crate::providers::text::CloudHttpProvider::validate_auth_header_name(
+            &cfg.auth_header,
+        ) {
+            Ok(h) => h.to_string(),
             Err(_) => {
                 return build(
                     false,
-                    "timeout",
-                    "tcp connect to configured endpoint timed out",
+                    "not_configured",
+                    "cloud_http auth header name is invalid",
                 );
             }
-            Ok(Err(_)) => {
+        };
+        // Key aus dem Secret-Store holen. `secret_present` wurde oben
+        // schon geprüft; falls der Wert zwischenzeitlich verschwindet,
+        // fallen wir defensiv auf `secret_missing` zurück.
+        let api_key = match self
+            .cloud_http_api_key
+            .lock()
+            .expect("cloud_http api key mutex poisoned")
+            .clone()
+        {
+            Some(k) => k,
+            None => {
                 return build(
                     false,
-                    "http_connect_failed",
-                    "tcp connect to configured endpoint failed",
+                    "secret_missing",
+                    "cloud_http is enabled but no api key is stored",
                 );
             }
-            Ok(Ok(s)) => s,
         };
+        // Bearer-Wert bauen; lebt **nur** bis zum Ende dieses
+        // `probe_cloud_http`-Frames. Der Wert geht direkt in
+        // `http_request_with_header` (siehe Secret-Disziplin dort).
+        let auth_value = format!("Bearer {api_key}");
 
-        // PR 11: für `https://` wird nach dem TCP-Connect der
-        // TLS-Handshake als weiterer ehrlicher Preflight-Schritt
-        // gemacht. Fehler werden in kuratierte Klassen abgebildet —
-        // weder Endpoint noch Key tauchen dabei im Response auf.
-        match scheme {
-            crate::providers::text::CloudHttpScheme::Http => {
-                // Keine weiteren Side-Effects (wie vor PR 11): ehrliches
-                // „TCP reachable, request not sent".
-                drop(tcp);
-                build(
-                    true,
-                    "ok_http",
-                    "cloud_http endpoint reachable over plaintext http:// (tcp connect succeeded, request not sent)",
-                )
-            }
-            crate::providers::text::CloudHttpScheme::Https => {
-                let tls_config =
-                    crate::providers::text::default_cloud_http_tls_config();
-                let server_name = match rustls_pki_types::ServerName::try_from(host.clone()) {
-                    Ok(name) => name,
-                    Err(_) => {
-                        return build(
-                            false,
-                            "endpoint_unparseable",
-                            "endpoint host is not a valid TLS server name",
-                        );
-                    }
-                };
-                let connector = tokio_rustls::TlsConnector::from(tls_config);
-                let handshake = tokio::time::timeout(
-                    std::time::Duration::from_secs(timeout_secs),
-                    connector.connect(server_name, tcp),
-                )
-                .await;
-                match handshake {
-                    Err(_) => build(
-                        false,
-                        "timeout",
-                        "tls handshake to configured endpoint timed out",
-                    ),
-                    Ok(Err(err)) => {
-                        let msg = format!("{err}").to_ascii_lowercase();
-                        let (class, human): (&str, &str) = if msg.contains("unknownissuer")
-                            || msg.contains("unknown issuer")
-                        {
-                            (
-                                "cert_untrusted",
-                                "tls server certificate is not trusted by the configured root store",
-                            )
-                        } else if msg.contains("expired")
-                            || msg.contains("notvalidyet")
-                            || msg.contains("badsignature")
-                            || msg.contains("invalidcertificate")
-                            || msg.contains("notvaliddns")
-                            || msg.contains("revoked")
-                        {
-                            (
-                                "cert_invalid",
-                                "tls server certificate failed validation (expired / not yet valid / hostname mismatch / bad signature)",
-                            )
-                        } else {
-                            (
-                                "tls_handshake_failed",
-                                "tls handshake to configured endpoint failed",
-                            )
-                        };
-                        build(false, class, human)
-                    }
-                    Ok(Ok(_tls_stream)) => build(
+        let timeout_secs = cfg.request_timeout_seconds.max(1).min(30);
+        let tls_cfg = crate::providers::text::default_cloud_http_tls_config();
+
+        // PR 12: echter authentifizierter HEAD-Request. HEAD reicht
+        // für eine ehrliche Application-Layer-Probe:
+        //   * Auth-Middleware validiert den Bearer genauso wie bei POST.
+        //   * Kein Body, kein Modell-Inferieren, keine Tokens verbraucht.
+        //   * 200-299 → auth ok, endpoint erreichbar.
+        //   * 401/403 → Server hat den Key explizit zurückgewiesen.
+        //   * Anderer Status (400/404/405/5xx) → `http_error` mit
+        //     numerischem Status in der Meldung (Status-Code ist kein
+        //     Secret).
+        // TLS- und Transport-Fehler werden über
+        // `TextProviderImpl::classify_error` in die bekannten Klassen
+        // gemappt (timeout / http_connect_failed / tls_handshake_failed
+        // / cert_untrusted / cert_invalid). Der Bearer-Wert taucht in
+        // **keiner** der Fehlermeldungen auf — rustls bricht vor dem
+        // ersten Data-Record ab, und der HTTP-Helfer elidiert den
+        // Header-Wert in seinen Context-Strings.
+        let result = crate::providers::text::http_request_with_header(
+            scheme,
+            &host,
+            port,
+            "HEAD",
+            &path,
+            None,
+            timeout_secs,
+            &auth_header,
+            &auth_value,
+            tls_cfg,
+        )
+        .await;
+
+        match result {
+            Ok((status, _body)) => {
+                if (200..300).contains(&status) {
+                    build(
                         true,
                         "ok",
-                        "cloud_http endpoint reachable over https:// (tls handshake succeeded, no completion request sent)",
-                    ),
+                        "cloud_http endpoint reachable and auth accepted (HEAD returned 2xx)",
+                    )
+                } else if status == 401 || status == 403 {
+                    build(
+                        false,
+                        "unauthorized",
+                        "cloud_http endpoint rejected the stored api key (HEAD returned 401/403)",
+                    )
+                } else {
+                    // Status-Code ist kein Secret — wir reichen ihn
+                    // als kurze Zahl in die Meldung, damit Operator
+                    // sieht, was der Server gesagt hat. **Kein**
+                    // Response-Body, **kein** Endpoint in der Meldung.
+                    build(
+                        false,
+                        "http_error",
+                        &format!("cloud_http endpoint returned HTTP status {status}"),
+                    )
                 }
+            }
+            Err(err) => {
+                // Reuse des bestehenden Klassifikators — er kennt
+                // `timeout` / `http_connect_failed` / `tls_handshake_failed`
+                // / `cert_untrusted` / `cert_invalid`. Wir mappen auf
+                // kuratierte, Secret-freie Meldungen; der Roh-Fehler
+                // wandert **nicht** in das Response-Objekt.
+                let class =
+                    crate::providers::text::TextProviderImpl::classify_error(&err);
+                let (class_out, human): (&str, &str) = match class {
+                    "timeout" => (
+                        "timeout",
+                        "cloud_http request to configured endpoint timed out",
+                    ),
+                    "http_connect_failed" => (
+                        "http_connect_failed",
+                        "tcp connect to configured endpoint failed",
+                    ),
+                    "tls_handshake_failed" => (
+                        "tls_handshake_failed",
+                        "tls handshake to configured endpoint failed",
+                    ),
+                    "cert_untrusted" => (
+                        "cert_untrusted",
+                        "tls server certificate is not trusted by the configured root store",
+                    ),
+                    "cert_invalid" => (
+                        "cert_invalid",
+                        "tls server certificate failed validation (expired / not yet valid / hostname mismatch / bad signature)",
+                    ),
+                    // Alles andere (z. B. `invalid_response`,
+                    // `empty_response`) bei einer HEAD-Probe ist
+                    // effektiv ein Protokoll-/Endpoint-Bruch — wir
+                    // falten es in `http_error`, damit die UI eine
+                    // bekannte Kategorie sieht.
+                    _ => ("http_error", "cloud_http probe request failed"),
+                };
+                build(false, class_out, human)
             }
         }
     }

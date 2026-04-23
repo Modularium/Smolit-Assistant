@@ -1159,7 +1159,7 @@ Die UI muss Auswahl-Zustand in mindestens diesen Fällen aktiv verwerfen:
   hier, Execution läuft weiterhin über das bestehende Interaction-
   Backend inkl. Approval.
 
-### 2.10 Settings-Schreib-/Probe-Pfad (Ist-Zustand, PR 5 + PR 7 + PR 8 + PR 9 + PR 10 + PR 11)
+### 2.10 Settings-Schreib-/Probe-Pfad (Ist-Zustand, PR 5 + PR 7 + PR 8 + PR 9 + PR 10 + PR 11 + PR 12)
 
 Kleine, kuratierte Schreib-/Diagnose-Oberfläche für die Settings-
 Shell. Additiv zum bestehenden Protokoll, keine neue
@@ -1167,8 +1167,9 @@ Nachrichtenfamilie. Der heutige Scope umfasst `llamafile_local`-Felder
 (PR 5), STT-/TTS-Command-Provider (PR 7), den lokalen HTTP-
 Text-Provider `local_http` (PR 8), die Text-Provider-Fallback-
 Kette (PR 9), den ersten Cloud-/Remote-Text-Provider `cloud_http`
-mit dediziertem Secret-Pfad (PR 10) und seit PR 11 sicheres
-HTTPS/TLS für `cloud_http`.
+mit dediziertem Secret-Pfad (PR 10), sicheres HTTPS/TLS für
+`cloud_http` (PR 11) und seit PR 12 einen authentifizierten
+Application-Layer-Probe-Roundtrip (HEAD mit Bearer-Header).
 
 **Eingang:** `settings_set_llamafile_config`.
 
@@ -1381,7 +1382,7 @@ antwortet mit einem frischen `status`-Envelope. `text_provider_chain`
 spiegelt sofort die neue Reihenfolge, `llamafile_in_chain` /
 `local_http_in_chain` werden entsprechend aktualisiert.
 
-#### 2.10d Cloud-HTTP-Schreib-/Probe-Pfad + Secret-Pfad (PR 10 + PR 11)
+#### 2.10d Cloud-HTTP-Schreib-/Probe-Pfad + Secret-Pfad (PR 10 + PR 11 + PR 12)
 
 PR 10 führt den **ersten Cloud-/Remote-Text-Provider** `cloud_http`
 ein — mit einem **dedizierten Secret-Pfad**. Sensitive Werte (API-
@@ -1432,15 +1433,20 @@ mit genau einem neuen Feld:
 in der Antwort niemals auf, auch nicht in einer gekürzten oder
 gehashten Form.**
 
-**Probe:** `settings_probe_cloud_http`. Für `http://`-Endpoints
-ein reiner TCP-Connect (wie in PR 10); für `https://`-Endpoints
-seit PR 11 zusätzlich ein echter TLS-Handshake gegen den
+**Probe:** `settings_probe_cloud_http`. **Seit PR 12** ist der
+Probe-Pfad ein **authentifizierter Application-Layer-Roundtrip**:
+der Core sendet einen `HEAD`-Request mit
+`Authorization: Bearer <key>` (Key aus dem Secrets-Store, Header-
+Name aus `SMOLIT_CLOUD_HTTP_AUTH_HEADER`). Für `http://`-
+Endpoints läuft der Request direkt über TCP; für `https://`
+zusätzlich durch den TLS-Handshake gegen den
 `default_cloud_http_tls_config` (webpki-roots). **Kein**
-Completion-Request, **kein** Bearer-Header auf der Leitung. Der
-Handshake-Fehler wird ehrlich klassifiziert — keine stillen
-Fallbacks, keine „accept invalid certs"-Abkürzung.
+Completion-Request, **kein** Prompt, **kein** Nutzer-Inhalt
+auf der Leitung. Der Bearer-Wert verlässt den Core ausschließlich
+in genau diesem HEAD-Request und wird **niemals** in Logs,
+Response-Bodies, Fehlermeldungen oder StatusPayload gespiegelt.
 
-Kuratierte Klassen (PR 10 + PR 11):
+Kuratierte Klassen (PR 10 + PR 11 + PR 12):
 
 - `"not_in_chain"` / `"disabled"` / `"not_configured"` —
   Config-Stufen.
@@ -1460,17 +1466,28 @@ Kuratierte Klassen (PR 10 + PR 11):
   Gültigkeit (expired / not-yet-valid), hat eine ungültige
   Signatur, einen nicht passenden Hostnamen oder wurde aus einem
   anderen `InvalidCertificate(…)`-Grund abgelehnt.
-- `"ok"` — für `https://`: TLS-Handshake erfolgreich; für
-  `http://`: TCP-Connect erfolgreich (dann `"ok_http"`, siehe
-  unten). Es wurde **kein** Completion-Roundtrip gemacht.
-- `"ok_http"` (PR 11) — TCP-Connect über Plaintext erfolgreich;
-  Probe kennzeichnet bewusst, dass der konfigurierte Pfad kein
-  TLS anbietet und nur über ein vertrauenswürdiges Netz sicher
-  nutzbar ist.
+- `"unauthorized"` (seit PR 12 auch von der Probe erreichbar) —
+  HEAD-Response war `401 Unauthorized` oder `403 Forbidden`. Der
+  Server ist erreichbar (TLS/TCP ok), hat aber den gespeicherten
+  Key explizit abgelehnt.
+- `"http_error"` (seit PR 12 auch von der Probe erreichbar) —
+  HEAD-Response hatte einen Status außerhalb von `200..300`
+  **und** außerhalb von `{401, 403}`. Die Meldung enthält den
+  numerischen Status-Code (kein Secret), z. B. „cloud_http
+  endpoint returned HTTP status 500".
+- `"ok"` — HEAD-Response hatte einen Status im Bereich `200..300`:
+  Server erreichbar, TLS (für https://) vertraut, Key akzeptiert.
+  Es wurde **kein** Completion-Roundtrip gemacht und **kein**
+  Prompt gesendet.
 
 Antwort: `settings_probe_result` mit `axis="cloud_http"`.
 `message` und `class` sind kuratiert; **weder Endpoint noch Key
 tauchen im Response auf — auch nicht im Fehlerpfad.**
+
+**Entfallen seit PR 12:** die PR-11-only-Klasse `"ok_http"`
+(nur-TCP-Connect für `http://`). Der Probe läuft jetzt für beide
+Transporte über denselben authentifizierten HEAD — ein Erfolg
+heißt immer `"ok"`, unabhängig vom Scheme.
 
 **Eingang:** `settings_reset_text_provider_chain`.
 

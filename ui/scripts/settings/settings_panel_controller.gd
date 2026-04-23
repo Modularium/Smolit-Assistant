@@ -1697,7 +1697,11 @@ func _build_cloud_http_editor_block() -> Control:
 	actions_row.add_child(_cloud_http_apply_button)
 	_cloud_http_probe_button = Button.new()
 	_cloud_http_probe_button.text = "Probe"
-	_cloud_http_probe_button.tooltip_text = "TCP-Connect gegen den Endpoint; kein Completion-Request, kein Bearer-Header."
+	# PR 12: Probe ist jetzt ein authentifizierter HEAD-Roundtrip —
+	# Auth-Header geht mit, aber es wird kein Completion-Request und
+	# kein Prompt gesendet. Der Bearer-Wert verlässt die UI nicht
+	# (der Core liest ihn aus dem Secrets-Store).
+	_cloud_http_probe_button.tooltip_text = "Authentifizierter HEAD-Request gegen den Endpoint (TLS bei https://, Auth-Header aus dem Core-Secret-Store). Kein Completion-Request, kein Prompt."
 	_cloud_http_probe_button.pressed.connect(_on_cloud_http_probe_pressed)
 	actions_row.add_child(_cloud_http_probe_button)
 

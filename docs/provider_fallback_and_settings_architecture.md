@@ -1015,6 +1015,48 @@ gegen einen lokalen Fake-HTTP-Server plus ein Shell-Skript als
   Handshake ist erstmal die Grenze; ein `unauthorized`-Tag in
   `classify_error` existiert schon für den Run-Pfad, wird in der
   Probe aber erst mit dem nächsten Ausbau erreichbar).
+- **PR 12 — authentifizierter `cloud_http`-Probe-Roundtrip (Ist).**
+  Die Probe wertet sich von einer Transport-/TLS-Prüfung zu einer
+  echten Application-Layer-Probe auf. Der Core sendet einen
+  `HEAD`-Request gegen den konfigurierten Endpoint mit
+  `Authorization: Bearer <key>` (Header-Name aus Config,
+  Key aus dem Secrets-Store). **Kein** Completion-Request,
+  **kein** Prompt, **kein** Nutzer-Inhalt auf der Leitung —
+  HEAD reicht, weil Auth-Middleware den Bearer genauso
+  validiert wie bei POST. Die Probe kann jetzt ehrlich
+  unterscheiden: `ok` (Status 2xx → Auth ok, Endpoint
+  erreichbar), `unauthorized` (Status 401/403 → Server lehnt
+  den gespeicherten Key explizit ab), `http_error` (Status
+  außerhalb 2xx/401/403 → numerischer Status in der Meldung),
+  plus die bereits bestehenden Transport-/TLS-/Config-Klassen.
+  Die PR-11-only-Klasse `ok_http` (TCP-Connect-only für
+  `http://`) entfällt — beide Transporte gehen jetzt durch
+  denselben authentifizierten HEAD-Pfad. Der Probe-Code sitzt
+  in `App::probe_cloud_http` und ruft das bestehende
+  `http_request_with_header(scheme, …, "HEAD", …)` auf; der
+  existierende Secret-Disziplin-Pfad im Helfer (kuratierte
+  Kontext-Strings, kein Header-Echo) trägt damit direkt in den
+  Probe-Ergebnispfad durch. Tests: vier neue IPC-Ende-zu-Ende-
+  Tests — `ok` über plaintext-HTTP gegen Fake-Server mit
+  Bearer-Check, `unauthorized` bei Mismatched Bearer,
+  `http_error` bei Server-500, Cert-Pfad über HTTPS-Fake-Server
+  (bestätigt weiterhin, dass untrusted cert den Probe-Pfad
+  sauber blockiert, auch mit Auth im Spiel). Alle vier Tests
+  tragen aktive **Secret-Leak-Guards**: weder Bearer-Marker
+  noch Endpoint-Host im Response. Die fake-Server-Infrastruktur
+  bekam einen neuen `FakeHttpsMode::RequiresBearer`-Modus und
+  einen `HttpErrorStatus(u16)`-Modus; ein neuer
+  `start_fake_http_auth_server`-Helper erlaubt die gleiche
+  Semantik über plain HTTP. Gesamttests: Core 272 PASS (+4 vs.
+  PR 11); UI-Smokes unverändert grün; Headless-Boot sauber.
+  **Bewusste Restschuld:** kein End-to-End-Happy-Path-Test über
+  echtes TLS mit injiziertem Test-Trust-Store durch den
+  Probe-Pfad (der Unit-Test auf Provider-Ebene deckt die
+  TLS-Kette ab; die Probe verwendet fest die Produktions-
+  `default_cloud_http_tls_config`, damit kein Test-Footgun in
+  Produktion aktiv werden kann). Sobald ein Admin-UX für
+  Custom-CA-Bundles kommt, kann der Probe-Trust-Store
+  konfigurierbar werden.
 
 Zwischenprinzipien:
 
@@ -1062,7 +1104,7 @@ aufgehoben werden.
 
 ---
 
-## 11. Secrets- und Sensitive-Config-Kategorien (Ist, PR 5 + PR 7 + PR 8 + PR 9 + PR 10 + PR 11)
+## 11. Secrets- und Sensitive-Config-Kategorien (Ist, PR 5 + PR 7 + PR 8 + PR 9 + PR 10 + PR 11 + PR 12)
 
 Ab PR 5 existiert in
 [`core/src/settings_store.rs`](../core/src/settings_store.rs) ein
@@ -1161,8 +1203,15 @@ aber wie eine sensitive-lite-Ressource behandelt:
   Mikrofon oder Audio-Output zu; der `local_http`-Probe macht
   einen TCP-Connect auf `host:port`, aber **keinen**
   Completion-Request und sendet keine Prompt-Daten. Der
-  `cloud_http`-Probe macht seit PR 11 für `https://` zusätzlich
-  einen echten TLS-Handshake (dann kuratierte Klassen
-  `tls_handshake_failed` / `cert_untrusted` / `cert_invalid` vs.
-  `ok`), aber **weiterhin keinen** Completion-Request und
-  **keinen** Bearer-Header auf der Leitung.
+  `cloud_http`-Probe sendet seit PR 12 einen authentifizierten
+  HEAD-Request (Bearer-Header aus dem Secrets-Store), bei
+  `https://` nach erfolgreichem TLS-Handshake. Sie kann jetzt
+  ehrlich zwischen `ok` (2xx), `unauthorized` (401/403) und
+  `http_error` (sonstige Non-2xx) unterscheiden. **Weiterhin
+  keinen** Completion-Request, **kein** Prompt und **kein**
+  Nutzer-Inhalt auf der Leitung — HEAD reicht für die
+  Application-Layer-Validierung. Der Bearer-Wert verlässt den
+  Core ausschließlich in dieser einen HEAD-Request-Geometrie
+  und wird nirgendwo zurückgespiegelt; die Probe-Response
+  trägt nur die kuratierten Klassen und numerische Status-
+  Codes.
