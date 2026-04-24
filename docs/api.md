@@ -1152,6 +1152,17 @@ Ausdrücklicher Scope:
 - **Kein RPC.** Das Spike spricht **nicht** mit dem AT-SPI-Registry;
   der echte RPC-Pfad (zbus/atspi) ist ausdrücklich Folgearbeit.
 
+> **PR 37 — Decision only:** Der Rahmen für einen späteren RPC-Pfad
+> ist seit 2026-04-24 in [`ADR-0002`](./adr/ADR-0002-accessibility-rpc-readonly.md)
+> entschieden (Docs/ADR-only, keine Code-Implementation): read-only
+> `GetChildren` am Registry-Root, `atspi`+`zbus` hinter einem
+> `accessibility_rpc`-Feature-Flag (default-off), keine Input-
+> Injection, kein `DoAction`, kein Baum-Walk über eine Tiefe hinaus,
+> keine Passwort-/Secret-Felder, kein Approval-Bypass. Das
+> Wire-Schema in diesem Abschnitt bleibt unverändert; der RPC-Pfad
+> füllt bestehende Felder. `confidence: verified` bleibt exklusiv
+> für Items mit Registry-Evidenz.
+
 #### Eingehend
 
 - `{"type":"interaction_probe_accessibility"}` — startet die

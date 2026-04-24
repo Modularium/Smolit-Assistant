@@ -294,7 +294,12 @@ Stand: kleiner, read-only Spike in
 
 - `verified` ist **reserviert** für einen späteren Pfad, der ein
   Target über einen echten AT-SPI-Registry-Zugriff bestätigt. Der
-  aktuelle Spike emittiert `verified` **nie**.
+  aktuelle Spike emittiert `verified` **nie**. Seit PR 37
+  ([`ADR-0002`](./adr/ADR-0002-accessibility-rpc-readonly.md)) ist
+  `verified` ausdrücklich an Registry-Evidenz gebunden: der RPC-Pfad
+  darf `verified` nur setzen, wenn der Aufruf über das echte
+  AT-SPI-RPC ging, das Item aus `GetChildren` am Registry-Root kommt
+  und Rolle/Name direkt aus AT-SPI-Attributen gelesen wurden.
 - `discovered` ist heute die einzige produktive Klasse.
 
 **Was der Spike *nicht* tut** (und wofür er *nie gedacht* war):
@@ -355,7 +360,13 @@ Design-Entscheidung (ADR, ggf. Policy-Update) vor dem Code.
 - **AT-SPI-Registry-Zugriff (zbus/atspi).** Erst damit kann die
   `items`-Liste des Discovery-Pfads inhaltlich gefüllt werden und
   `confidence: "verified"` einen Sinn bekommen. Eigener Spike,
-  separater Scope.
+  separater Scope — Rahmen ist seit PR 37 in
+  [`ADR-0002`](./adr/ADR-0002-accessibility-rpc-readonly.md)
+  entschieden: read-only `GetChildren` auf Registry-Root,
+  `atspi`+`zbus` hinter `accessibility_rpc`-Feature-Flag (default-off),
+  kein Input-Injection-Pfad, kein Baum-Walk über eine Tiefe hinaus,
+  keine Passwort-/Secret-Felder, kein Approval-Bypass. Die
+  Implementation selbst ist FA-1-Future-Work.
 - **Wayland-Fokus-Pfad.** Braucht ein Compositor-natives Protokoll
   (Portal / wlroots-spezifischer Pfad) oder eine explizite
   Aufgabe-Trennung. Offen, blockiert durch fehlendes generisches
