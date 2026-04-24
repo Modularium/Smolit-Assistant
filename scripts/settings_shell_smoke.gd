@@ -86,6 +86,13 @@ func _init() -> void:
 	_check_audio_chain_editor_empty_guard("tts")
 	_check_audio_chain_editor_shows_single_kind_info_hint()
 	_check_audio_provider_lines_render_chain_field()
+	# --- PR 27: whisper_cpp STT ---
+	_check_stt_chain_editor_exposes_whisper_cpp_kind()
+	_check_stt_chain_editor_renders_whisper_cpp_then_command_order()
+	_check_stt_lines_whisper_cpp_in_chain_shows_env_hint_when_unconfigured()
+	_check_stt_lines_whisper_cpp_in_chain_configured_hides_env_hint()
+	_check_stt_lines_whisper_cpp_not_in_chain_is_muted_note()
+	_check_stt_lines_legacy_core_without_whisper_cpp_fields_is_silent()
 	# --- PR 26: Provider-Onboarding ---
 	_check_onboarding_pure_logic()
 	_check_onboarding_block_renders_primary_and_chain()
@@ -1180,8 +1187,8 @@ func _check_audio_chain_editor_builds_and_syncs_from_status(axis: String) -> voi
 	# Core liefert die Chain über `stt_provider_chain` / `tts_provider_chain`.
 	# Der Editor muss die genaue Reihenfolge aus dem Status ziehen und
 	# bekannte Kinds, die nicht in der Chain stehen, als disabled
-	# anhängen. Heute gibt es pro Achse nur `command`, also ist die
-	# Row-Zahl = 1.
+	# anhängen. Seit PR 27 hat die STT-Whitelist zwei Kinds
+	# (command + whisper_cpp); TTS hat weiterhin ein einziges.
 	var panel := _spawn_panel()
 	var status := {}
 	status["%s_provider_chain" % axis] = ["command"]
@@ -1191,12 +1198,19 @@ func _check_audio_chain_editor_builds_and_syncs_from_status(axis: String) -> voi
 	_assert(bool(snap.get("built", false)),
 		"%s-chain-editor: Widgets sind gebaut nach open_panel" % axis)
 	var rows: Array = snap.get("rows", [])
-	_assert(rows.size() == 1,
-		"%s-chain-editor: bekannte Kinds werden gerendert (heute nur `command`)" % axis)
+	var expected_rows := 2 if axis == "stt" else 1
+	_assert(rows.size() == expected_rows,
+		"%s-chain-editor: bekannte Kinds werden gerendert (erwartet %d)" % [axis, expected_rows])
 	_assert(
 		String(rows[0].get("kind", "")) == "command"
 			and bool(rows[0].get("in_chain", false)),
-		"%s-chain-editor: Status-Kette wird gespiegelt (command aktiv)" % axis)
+		"%s-chain-editor: Status-Kette wird gespiegelt (command aktiv als Row 0)" % axis)
+	if axis == "stt":
+		# whisper_cpp ist nicht in der Chain → Row folgt als disabled.
+		_assert(
+			String(rows[1].get("kind", "")) == "whisper_cpp"
+				and not bool(rows[1].get("in_chain", false)),
+			"stt-chain-editor (PR 27): whisper_cpp erscheint als Row 1 mit in_chain=false")
 	_despawn_panel(panel)
 
 
@@ -1218,16 +1232,22 @@ func _check_audio_chain_editor_empty_guard(axis: String) -> void:
 
 
 func _check_audio_chain_editor_shows_single_kind_info_hint() -> void:
-	# Heute gibt es pro Achse nur `command`. Der Editor muss einen
-	# ehrlichen Hinweis zeigen, damit Nutzer nicht glauben, es wäre
-	# nur ein „UI-Bug".
+	# TTS hat weiterhin nur `command`. Der Editor muss für Single-
+	# Kind-Achsen einen ehrlichen Info-Hint zeigen; für STT (seit PR 27
+	# zwei Kinds) bleibt der Hint bewusst leer, damit keine stale
+	# „nur command"-Aussage sichtbar ist.
 	var panel := _spawn_panel()
-	panel.apply_status({"stt_provider_chain": ["command"]})
+	panel.apply_status({
+		"stt_provider_chain": ["command"],
+		"tts_provider_chain": ["command"],
+	})
 	panel.open_panel()
-	var snap: Dictionary = panel.audio_chain_editor_snapshot("stt")
-	var info := String(snap.get("info_hint", ""))
-	_assert(info.find("command") >= 0 or info.find("vorbereitet") >= 0,
-		"stt-chain-editor: Single-Kind-Hinweis ist sichtbar")
+	var tts_info := String(panel.audio_chain_editor_snapshot("tts").get("info_hint", ""))
+	_assert(tts_info.find("command") >= 0 or tts_info.find("vorbereitet") >= 0,
+		"tts-chain-editor: Single-Kind-Hinweis ist sichtbar (TTS hat weiterhin nur `command`)")
+	var stt_info := String(panel.audio_chain_editor_snapshot("stt").get("info_hint", ""))
+	_assert(stt_info == "",
+		"stt-chain-editor (PR 27): Info-Hint ist leer, weil zwei Kinds verfügbar sind")
 	_despawn_panel(panel)
 
 
@@ -1559,3 +1579,140 @@ func _check_onboarding_empty_status_renders_dashes() -> void:
 	_assert(String(snap.get("chain", "")) == "—",
 		"onboarding: leerer Status rendert chain als dash, ohne Crash")
 	_despawn_panel(panel)
+
+
+# --- PR 27: whisper_cpp STT --------------------------------------------
+
+
+func _check_stt_chain_editor_exposes_whisper_cpp_kind() -> void:
+	# Der Chain-Editor muss beide STT-Kinds (command + whisper_cpp) als
+	# Rows zeigen, auch wenn die aktive Chain nur `command` ist.
+	# whisper_cpp wird dann als disabled-Row angehängt.
+	var panel := _spawn_panel()
+	panel.apply_status({"stt_provider_chain": ["command"]})
+	panel.open_panel()
+	var snap: Dictionary = panel.audio_chain_editor_snapshot("stt")
+	_assert(bool(snap.get("built", false)),
+		"stt-chain-editor (PR 27): Widgets gebaut")
+	var rows: Array = snap.get("rows", [])
+	var kinds_found: Array = []
+	for row in rows:
+		if typeof(row) == TYPE_DICTIONARY:
+			kinds_found.append(String(row.get("kind", "")))
+	_assert("command" in kinds_found,
+		"stt-chain-editor (PR 27): command ist als Row sichtbar")
+	_assert("whisper_cpp" in kinds_found,
+		"stt-chain-editor (PR 27): whisper_cpp ist als Row sichtbar")
+	_despawn_panel(panel)
+
+
+func _check_stt_chain_editor_renders_whisper_cpp_then_command_order() -> void:
+	# Wenn die aktive Chain `["whisper_cpp", "command"]` ist, muss der
+	# Editor diese Reihenfolge (whisper_cpp oben, command darunter)
+	# spiegeln — in-Chain-Kinds vor nicht-in-Chain-Kinds.
+	var panel := _spawn_panel()
+	panel.apply_status({
+		"stt_provider_chain": ["whisper_cpp", "command"],
+		"stt_whisper_cpp_in_chain": true,
+		"stt_whisper_cpp_configured": true,
+	})
+	panel.open_panel()
+	var snap: Dictionary = panel.audio_chain_editor_snapshot("stt")
+	var rows: Array = snap.get("rows", [])
+	_assert(rows.size() >= 2,
+		"stt-chain-editor (PR 27): beide Kinds werden als Rows gerendert")
+	var first_kind := String((rows[0] as Dictionary).get("kind", ""))
+	var second_kind := String((rows[1] as Dictionary).get("kind", ""))
+	_assert(first_kind == "whisper_cpp",
+		"stt-chain-editor (PR 27): whisper_cpp ist Row 0, wenn primary in Chain")
+	_assert(second_kind == "command",
+		"stt-chain-editor (PR 27): command ist Row 1 im Fallback-Setup")
+	_assert(bool((rows[0] as Dictionary).get("in_chain", false)),
+		"stt-chain-editor (PR 27): whisper_cpp-Row trägt in_chain=true")
+	_assert(bool((rows[1] as Dictionary).get("in_chain", false)),
+		"stt-chain-editor (PR 27): command-Row trägt in_chain=true (beide aktiv)")
+	_despawn_panel(panel)
+
+
+func _check_stt_lines_whisper_cpp_in_chain_shows_env_hint_when_unconfigured() -> void:
+	# stt_lines rendert beim in-chain + unconfigured-Fall einen
+	# expliziten SMOLIT_STT_WHISPER_CPP_CMD-Hinweis.
+	var lines: Array = _SectionsRef.stt_lines({
+		"stt_enabled": true,
+		"stt_available": false,
+		"stt_provider_configured": "whisper_cpp",
+		"stt_provider_active": "",
+		"stt_provider_availability": "unavailable",
+		"stt_provider_last_error": "not_configured",
+		"stt_provider_cloud": false,
+		"stt_provider_chain": ["whisper_cpp"],
+		"stt_whisper_cpp_in_chain": true,
+		"stt_whisper_cpp_configured": false,
+	})
+	var values := _row_map(lines)
+	_assert(values.has("whisper_cpp"),
+		"stt_lines (PR 27): whisper_cpp-Block wird gerendert, wenn in Chain")
+	_assert(String(values.get("whisper_cpp", "")) == "in Chain",
+		"stt_lines (PR 27): whisper_cpp-Row markiert 'in Chain'")
+	_assert(String(values.get("  configured (command set)", "")) == "no",
+		"stt_lines (PR 27): configured=no, wenn SMOLIT_STT_WHISPER_CPP_CMD nicht gesetzt ist")
+	_assert(String(values.get("  hint", "")).find("SMOLIT_STT_WHISPER_CPP_CMD") >= 0,
+		"stt_lines (PR 27): env-Hinweis nennt SMOLIT_STT_WHISPER_CPP_CMD explizit")
+
+
+func _check_stt_lines_whisper_cpp_in_chain_configured_hides_env_hint() -> void:
+	# Wenn whisper_cpp in Chain UND configured ist, darf der Hint nicht
+	# mehr erscheinen — nur die Configured-Yes-Zeile.
+	var lines: Array = _SectionsRef.stt_lines({
+		"stt_enabled": true,
+		"stt_available": true,
+		"stt_provider_configured": "whisper_cpp",
+		"stt_provider_active": "",
+		"stt_provider_availability": "available",
+		"stt_provider_cloud": false,
+		"stt_provider_chain": ["whisper_cpp"],
+		"stt_whisper_cpp_in_chain": true,
+		"stt_whisper_cpp_configured": true,
+	})
+	var values := _row_map(lines)
+	_assert(String(values.get("  configured (command set)", "")) == "yes",
+		"stt_lines (PR 27): configured=yes, wenn SMOLIT_STT_WHISPER_CPP_CMD gesetzt ist")
+	_assert(not values.has("  hint"),
+		"stt_lines (PR 27): env-Hinweis entfällt, wenn configured=yes")
+
+
+func _check_stt_lines_whisper_cpp_not_in_chain_is_muted_note() -> void:
+	# Kind in der Whitelist, aber nicht in der aktiven Chain.
+	var lines: Array = _SectionsRef.stt_lines({
+		"stt_enabled": true,
+		"stt_available": true,
+		"stt_provider_configured": "command",
+		"stt_provider_active": "command",
+		"stt_provider_availability": "available",
+		"stt_provider_cloud": false,
+		"stt_provider_chain": ["command"],
+		"stt_whisper_cpp_in_chain": false,
+		"stt_whisper_cpp_configured": false,
+	})
+	var values := _row_map(lines)
+	var whisper_row := String(values.get("whisper_cpp", ""))
+	_assert(whisper_row.find("nicht in der Chain") >= 0,
+		"stt_lines (PR 27): whisper_cpp-Row markiert 'nicht in der Chain' als muted")
+
+
+func _check_stt_lines_legacy_core_without_whisper_cpp_fields_is_silent() -> void:
+	# Ältere Cores, die die beiden PR-27-Booleans nicht kennen, dürfen
+	# **keine** whisper_cpp-Zeile rendern — sonst würde die UI einen
+	# Zustand implizieren, den der Core nicht bestätigt.
+	var lines: Array = _SectionsRef.stt_lines({
+		"stt_enabled": true,
+		"stt_available": true,
+		"stt_provider_configured": "command",
+		"stt_provider_active": "command",
+		"stt_provider_availability": "available",
+		"stt_provider_cloud": false,
+		"stt_provider_chain": ["command"],
+	})
+	var values := _row_map(lines)
+	_assert(not values.has("whisper_cpp"),
+		"stt_lines (PR 27): ältere Cores ohne stt_whisper_cpp_* bleiben still")

@@ -248,7 +248,9 @@ static func text_provider_lines(status: Dictionary) -> Array:
 ## STT: Legacy-Feature-Flags (enabled/available) **plus** die neuen
 ## `stt_provider_*`-Felder aus PR 6. Die Resolver-Sicht rendert sich
 ## nur, wenn das Core-Vokabular bekannt ist — alte Cores landen
-## stillschweigend auf dem Legacy-Minimalpfad.
+## stillschweigend auf dem Legacy-Minimalpfad. Seit PR 27
+## zusätzlich eine dreistufige whisper_cpp-Sichtbarkeit (analog zu
+## llamafile_local / local_http in der Text-Achse).
 static func stt_lines(status: Dictionary) -> Array:
 	var lines: Array = []
 	lines.append(_row("Enabled", _bool_label(status, "stt_enabled"),
@@ -261,6 +263,38 @@ static func stt_lines(status: Dictionary) -> Array:
 		lines.append(_row("Provider",
 			"Core liefert keine stt_provider_*-Felder (alter Build).",
 			true))
+	# PR 27 — whisper_cpp-Sichtbarkeit. Dreistufig, wie bei
+	# llamafile_local in der Text-Achse:
+	#   * `stt_whisper_cpp_in_chain` fehlt → alter Core, kein Hinweis.
+	#   * `stt_whisper_cpp_in_chain = false` → ehrlich „nicht in Chain".
+	#   * `stt_whisper_cpp_in_chain = true` → configured-Flag + env-Hinweis
+	#     bei Bedarf.
+	if status.has("stt_whisper_cpp_in_chain"):
+		var wc_in_chain := _bool_or_default(status, "stt_whisper_cpp_in_chain", false)
+		if wc_in_chain:
+			lines.append(_row("whisper_cpp", "in Chain"))
+			var wc_configured := _bool_or_default(
+				status, "stt_whisper_cpp_configured", false,
+			)
+			lines.append(_row("  configured (command set)",
+				"yes" if wc_configured else "no",
+				not wc_configured))
+			if not wc_configured:
+				lines.append(_row("  hint",
+					"command not set — configure via SMOLIT_STT_WHISPER_CPP_CMD",
+					true))
+		else:
+			var wc_configured := _bool_or_default(
+				status, "stt_whisper_cpp_configured", false,
+			)
+			if wc_configured:
+				lines.append(_row("whisper_cpp",
+					"configured (via SMOLIT_STT_WHISPER_CPP_CMD), aber nicht in der Chain.",
+					true))
+			else:
+				lines.append(_row("whisper_cpp",
+					"nicht in der Chain (set SMOLIT_STT_WHISPER_CPP_CMD and add to chain to enable).",
+					true))
 	return lines
 
 

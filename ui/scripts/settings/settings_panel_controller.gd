@@ -175,7 +175,11 @@ const _KNOWN_TEXT_KINDS: Array[String] = ["abrain", "llamafile_local", "local_ht
 ## PR 13 — Whitelists für die Audio-Chain-Editoren. Heute pro Achse
 ## nur ein Kind. Der Chain-Editor lebt trotzdem, damit spätere Kinds
 ## ohne UI-Refactor dazukommen können.
-const _KNOWN_STT_KINDS: Array[String] = ["command"]
+## PR 27 — STT-Whitelist um `whisper_cpp` erweitert. Muss mit
+## [`crate::providers::stt::KNOWN_STT_KINDS`] übereinstimmen.
+## whisper.cpp ist command-basiert (externer Binary via
+## `SMOLIT_STT_WHISPER_CPP_CMD`), nicht als Library gebunden.
+const _KNOWN_STT_KINDS: Array[String] = ["command", "whisper_cpp"]
 const _KNOWN_TTS_KINDS: Array[String] = ["command"]
 
 ## PR 13 — State-Spiegel der STT-/TTS-Chain-Editoren. Analog zum
