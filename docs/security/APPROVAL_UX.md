@@ -1,4 +1,9 @@
-# Approval UX v1 — Prinzipien und Grenzen (PR 17)
+# Approval UX — Prinzipien und Grenzen (PR 17 + PR 18)
+
+> Scope: die Approval-UX (PR 17) und ihre Gating-Verdrahtung durch
+> den Demo-Action-Planner (PR 18). Der Core bleibt bei allen hier
+> beschriebenen Pfaden auf Mock-only; es gibt **keine echte
+> Tool-/Desktop-/Shell-/AdminBot-Ausführung**.
 
 ## Leitprinzip
 

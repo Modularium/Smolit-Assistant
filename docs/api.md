@@ -49,13 +49,19 @@ Geplant (Ziel-Zustand):
 
 ### 2.1 Eingehend (UI → Core)
 
-| `type`        | Felder         | Semantik                                                        |
-|---------------|----------------|-----------------------------------------------------------------|
-| `ping`        | —              | Health-Check. Core antwortet mit `pong`.                        |
-| `get_status`  | —              | Fragt Feature-Status ab. Core antwortet mit `status`.           |
-| `submit_text` | `text: string` | Freitext-Query an ABrain. Löst `thinking` + `response`/`error`. |
-| `speak_text`  | `text: string` | Direkte TTS-Ausgabe ohne ABrain. Bei Fehler: `error`.           |
-| `voice_once`  | —              | Einmal STT aufnehmen, Ergebnis als `heard`, dann ABrain-Flow.   |
+| `type`                   | Felder                        | Semantik                                                                                  |
+|--------------------------|-------------------------------|-------------------------------------------------------------------------------------------|
+| `ping`                   | —                             | Health-Check. Core antwortet mit `pong`.                                                  |
+| `get_status`             | —                             | Fragt Feature-Status ab. Core antwortet mit `status`.                                     |
+| `submit_text`            | `text: string`                | Freitext-Query an ABrain. Löst `thinking` + `response`/`error`.                           |
+| `speak_text`             | `text: string`                | Direkte TTS-Ausgabe ohne ABrain. Emittiert `speaking_started`/`_ended` (2.11). Bei Fehler: `error`. |
+| `voice_once`             | —                             | Einmal STT aufnehmen, Ergebnis als `heard`, dann ABrain-Flow.                             |
+| `approval_response`      | `approval_id`, `decision`     | Unified Approval-Antwort (siehe 2.7).                                                     |
+| `approval_approve`       | `approval_id`                 | PR 17 — schmale Variante, wire-äquivalent zu `approval_response(..., "approved")`.        |
+| `approval_deny`          | `approval_id`                 | PR 17 — schmale Variante für `decision="denied"`.                                         |
+| `request_approval_demo`  | `title?`, `summary?`, `risk?` | PR 17 — harmloser Demo-Auslöser. Keine Aktion folgt.                                      |
+| `plan_demo_action`       | `title?`, `summary?`, `risk?`, `kind?`, `requires_approval?` | PR 18 — Approval-Gated Demo-Action-Planner. Mock-Executor, keine Systemaktion. |
+| `audit_recent`           | `limit?`                      | PR 19 — Read-only Abfrage des lokalen Audit-Ring-Buffers.                                 |
 
 Zusätzlich nimmt der Core Interaction-Nachrichten des Desktop
 Interaction Layer MVP entgegen (Details in Abschnitt 2.6):
@@ -184,6 +190,7 @@ Beispiele:
 | `settings_probe_result`          | `payload: SettingsProbeResult`    | Antwort auf `settings_probe_{llamafile,stt,tts}` (2.10).           |
 | `speaking_started`               | `payload: SpeakingStarted`        | PR 14 — TTS-Lebenszyklus, Start. Siehe 2.11.                       |
 | `speaking_ended`                 | `payload: SpeakingEnded`          | PR 14 — TTS-Lebenszyklus, Ende. Siehe 2.11.                        |
+| `audit_recent`                   | `payload: AuditRecentPayload`     | PR 19 — Antwort, Liste sanitisierter Audit-Events (2.7).           |
 
 Zusätzlich emittiert der Core **Action Events** (Action Event Model v1).
 Sie sind additiv; ältere UIs, die sie nicht kennen, dürfen sie
@@ -482,18 +489,35 @@ Grundprinzipien:
 |-----------------------|--------------------------------------------------------------|
 | `action_planned`      | Eine Aktion ist erkannt und grob beschrieben.                |
 | `action_started`      | Die Aktion beginnt.                                          |
-| `action_progress`     | Fortschrittsindikator (optional, derzeit nicht emittiert).   |
+| `action_progress`     | **Reserviert**, heute nicht emittiert.                       |
 | `action_step`         | Einzelschritt innerhalb der Aktion.                          |
-| `action_verification` | Verifikationsphase (Modell für spätere Automation).          |
+| `action_verification` | Verifikationsphase (nur Interaction-Executor).               |
 | `action_completed`    | Aktion erfolgreich abgeschlossen.                            |
 | `action_failed`       | Aktion fehlgeschlagen.                                       |
-| `action_cancelled`    | Aktion abgebrochen (Modell für spätere Automation).          |
+| `action_cancelled`    | Aktion abgebrochen (Approval-Deny, Timeout, System-Cancel).  |
 
-In v1 emittieren die bestehenden Flows aktiv: `action_planned`,
-`action_started`, `action_step`, `action_completed`, `action_failed`.
-`action_progress`, `action_verification` und `action_cancelled` sind
-als Schema und Outgoing-Typ bereits vorgesehen, werden von v1-Handlern
-aber (noch) nicht emittiert.
+Ist-Zustand der tatsächlich emittierenden Pfade (Stand PR 14–19):
+
+- `submit_text`: `action_planned` → `action_started` →
+  `action_step` → (`thinking` → `response` →) `action_completed`
+  bzw. `action_failed`.
+- `voice_once`: wie `submit_text` plus `heard`-Envelope nach dem
+  STT-Schritt.
+- `speak_text`: `action_planned` → `action_started` → `action_step`
+  → (bei aktiver TTS-Kette) `speaking_started` → `speaking_ended`
+  → `action_completed`/`action_failed`.
+- `plan_demo_action` (PR 18): `action_planned` → optional
+  `approval_requested` → `approval_resolved` → (bei Approve)
+  `action_started` → `action_step` → `action_completed`; sonst
+  `action_cancelled` mit sprechender `message`.
+- Interaction (`open_application`): `action_planned` →
+  (`approval_requested`/`_resolved` bei aktivem
+  `require_confirmation`) → `action_started` → `action_step` →
+  `action_verification` → `action_completed` bzw.
+  `action_cancelled`.
+
+`action_progress` ist im Enum reserviert, wird heute aber von
+**keinem** Emitter genutzt. UIs müssen die Variante tolerieren.
 
 #### Action Kinds (`action_kind`)
 

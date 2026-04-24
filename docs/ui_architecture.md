@@ -1,13 +1,46 @@
 # Smolit Assistant – UI- und Avatar-Architektur
 
-Dieses Dokument beschreibt den **heutigen Stand** der UI nach Phase 3.1 sowie
-den geplanten Ausbau. Alles, was noch nicht implementiert ist, ist explizit
-als Ziel-Zustand markiert.
+Dieses Dokument beschreibt den **heutigen Stand** der UI nach PR 19
+sowie den geplanten Ausbau. Alles, was noch nicht implementiert ist,
+ist explizit als Ziel-Zustand markiert.
 
 Für das übergeordnete Zielbild von Smolit als sichtbare Desktop-Präsenz
 und für das Zusammenspiel mit echter Desktop-Automation siehe
 [`docs/presence_desktop_interaction.md`](./presence_desktop_interaction.md).
 Dieses Dokument hier bleibt auf die **UI-/Godot-Ebene** fokussiert.
+
+**Terminologie (PR 20 Reality Check).** Diese Datei verwendet zwei
+disjunkte Phasen-Vokabulare. Das ist historisch gewachsen; sie
+kollidieren nur in der Wortwahl, nicht im Scope:
+
+- **Produkt-Roadmap-Phasen (`Phase 0–10`):** siehe
+  [`ROADMAP.md`](../ROADMAP.md). Wenn in dieser Datei z. B. „Phase
+  3.1", „Phase 3.2", „Phase 3.3 Presence MVP" oder „Phase 4
+  Behavioral Layer" steht, ist die Produkt-Phase gemeint.
+- **Avatar-interne Rendering-Stufen (`Phase A / B / B+ / B++ /
+  C`):** siehe §7 weiter unten. Diese Stufen beziehen sich
+  ausschließlich auf die Avatar-Identitäts- und Render-Pipeline.
+  Eine Avatar-„Phase B" hat **nichts** mit einer Produkt-„Phase 4"
+  zu tun.
+
+Die **Behavioral Expression Layer v1** aus PR 15 lebt technisch in
+der Avatar-Pipeline (siehe §8.4b), ist aber ein Produkt-Ergebnis
+der Roadmap-Phase 4 — sie wird deshalb an beiden Stellen referenziert.
+
+**Zwei Workflow-Overlays koexistieren.** Der Code trägt **zwei**
+Workflow-Overlay-Komponenten parallel — beide aktiv im `main.tscn`:
+
+1. **Workflow-Overlay (MVP-Spike, Phase 3.1):** drei-Knoten-
+   Kurzprojektion (Trigger / Action / Result). Siehe §6a und §8a.
+2. **Workflow Visibility Overlay v1 (PR 16):** lineare
+   Kartenliste über neun Schritt-Kategorien inkl. `APPROVAL`
+   (aus PR 17). Siehe §8.4c.
+
+Die Koexistenz ist bewusst: der ältere Overlay bleibt für Action-
+Event-Kurzprojektionen, der neuere deckt die vollständige
+Lifecycle-Reihe (inkl. Approval/Audit) ab. Ein zukünftiger PR
+kann die Konsolidierung beider Komponenten angehen — siehe
+[`docs/OPEN_WORK.md`](./OPEN_WORK.md) Workstream A.
 
 ---
 
@@ -530,7 +563,7 @@ neues Protokoll, kein Emotion-Feld, kein Audio-/Lip-Sync.
   tiefere Zustandsfeinheit im Core-Protokoll — das ist nicht Teil
   des Expression-Layers.
 - Speech-Sync mit TTS-Lebenszyklus — **MVP gelandet (PR 14).** Der
-  Core meldet `speaking_started` / `speaking_ended` (siehe §8.5);
+  Core meldet `speaking_started` / `speaking_ended` (siehe §8.4a);
   tieferer Sync (Phonem-/Lip-Sync, Audio-Timeline) bleibt bewusst
   offen.
 - Optional höher aufgelöste 2.5D/3D-Darstellung.

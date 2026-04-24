@@ -1,4 +1,15 @@
-# Smolit AI Assistant – ROADMAP
+# Smolit AI Assistant — Vision (historischer Snapshot)
+
+> **Status (Stand PR 20):** Dieser Text ist ein **historischer
+> Vision-Snapshot**, nicht die aktuelle Roadmap. Die kanonische
+> Roadmap lebt in [`ROADMAP.md`](../ROADMAP.md); offene Arbeiten
+> pro Workstream in [`docs/OPEN_WORK.md`](./OPEN_WORK.md).
+>
+> Diese Datei enthält ältere Formulierungen der Vision und der
+> Phasen 0–10, plus eine frühe Godot-UI-Architektur-Skizze. Sie
+> wird bewusst nicht laufend gepflegt — für aktuelle
+> Implementationsstände siehe die Dateien in `docs/` (insbesondere
+> `ui_architecture.md`, `api.md`, `provider_fallback_and_settings_architecture.md`).
 
 ## Vision
 
