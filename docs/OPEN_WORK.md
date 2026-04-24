@@ -46,18 +46,26 @@ ROADMAP war 1 811 Zeilen PR-Log. Siehe
 ## B — Window / Overlay / Click-through / AOT Reality
 
 **Status:** MVP gelandet (Overlay + Click-through + X11-AOT); echte
-Wayland-Messungen offen.
+Wayland-Messungen offen. PR 22 (2026-04-24) hat bestätigt, dass
+dieser Dev-Host weiterhin GNOME/X11 ist und kein nested Wayland-
+Compositor (`weston` / `cage` / `labwc` / `sway` / `hyprland` /
+`kwin_wayland`) installiert ist — echte Wayland-Messung bleibt ein
+externer Messauftrag; der Refusal-Pfad ist per Env-Override-
+Simulation am 2026-04-24 erneut reproduziert.
 **Warum wichtig:** Die Versprechen der UI gegenüber dem User
 („Overlay möglich", „AOT nur X11") müssen auf realen Compositoren
 verifiziert bleiben; Dev-Host ist GNOME/X11.
 **Blocker:** separater Host mit Wayland-Compositor (Mutter /
-wlroots) für Live-Messung.
+wlroots) für Live-Messung. 2026-04-24 nochmals bestätigt — kein
+nested-Wayland-Tool auf diesem Host verfügbar.
 **Nächster kleinster PR:**
 
-- **PR 22 B-Wayland-Live-Messung:** ein Messlauf auf einem realen
-  Wayland/GNOME-Host; Ergebnisse in
+- **PR 22 B-Wayland-Live-Messung:** erledigt als ehrlicher
+  Hostinventur-Eintrag in
   [`docs/wayland_always_on_top_refusal_results.md`](./wayland_always_on_top_refusal_results.md)
-  ergänzen (nicht simulativ).
+  §4.4 (2026-04-24). Ein realer Wayland-Messlauf bleibt als
+  externer Messauftrag ausstehend und wird in §4 desselben
+  Dokuments als neuer Block ergänzt, sobald ein Host verfügbar ist.
 
 **Nicht-Ziele:**
 

@@ -298,6 +298,50 @@ Prozess vs. GDExtension).
 
 ---
 
+## 6a. Dev-Host-Inventur 2026-04-24 (PR 22)
+
+Für PR 22 wurde geprüft, ob auf diesem Dev-Host eine echte
+Wayland/GNOME-Messung möglich ist. Befund: **nein** — ehrlich
+dokumentiert statt als X11-Messung getarnt.
+
+**Host-Signale:**
+
+- OS: Ubuntu 24.04.4 LTS, GNOME Shell 46.0
+- `XDG_SESSION_TYPE=x11`, `DESKTOP_SESSION=ubuntu-xorg`
+- `WAYLAND_DISPLAY` unset, `DISPLAY=:0`
+- Godot 4.6.2.stable.official.71f334935
+
+**Keine nested Wayland-Compositoren installiert:** `weston`, `cage`,
+`labwc`, `sway`, `hyprland`, `mutter`-nested, `kwin_wayland` sind
+alle nicht auf dem `PATH`.
+
+**Baseline-Report auf diesem X11-Host (Referenz, nicht Wayland-
+Nachweis):**
+
+```text
+[report] session_type        = x11
+[report] display_driver      = headless
+[report] desktop_environment = ubuntu:GNOME
+[report]   XDG_SESSION_TYPE    = x11
+[report]   DISPLAY             = :0
+[report] capability.transparency   = available — X11 + Compositing: ARGB-Visual typischerweise verfügbar
+[report] capability.click_through  = available — X11: XShape-basiertes Input-Region-Shaping ist etabliert
+[report] capability.always_on_top  = available — X11: _NET_WM_STATE_ABOVE wird von gängigen WMs respektiert
+[report] backend.id                 = x11
+[report] backend.description        = real X11 session — delegates to existing controllers
+```
+
+Das ist die *aktuelle Erwartung für Baseline §5.1* auf diesem
+Host — X11, kein Overlay, keine Opt-ins, keine AOT-Anfrage. Kein
+Anspruch auf Wayland-Aussagekraft.
+
+Die vollständigen Wayland-Env-Override-Simulationen (Refusal-Pfad
+plus `backend_id = wayland-mutter`) sind in
+[`wayland_always_on_top_refusal_results.md`](./wayland_always_on_top_refusal_results.md)
+§4.1 und §4.4 dokumentiert.
+
+---
+
 ## 7. Abgrenzung — was dieser Lauf *nicht* beantwortet
 
 - Keine Aussage über Stabilität über längere Zeit (Stunden).

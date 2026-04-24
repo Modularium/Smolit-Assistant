@@ -219,6 +219,9 @@ und die Login-Session ist GNOME/X11. Eine echte
 Wayland-Messung gegen Mutter, KWin (Wayland) oder einen wlroots-
 Compositor bleibt als offener Messauftrag.
 
+Stand 2026-04-24 (PR 22 B-Wayland-Live-Messung): unverändert
+ausstehend. Siehe §4.4 unten für die Host-Inventur.
+
 Vorschlag für den Real-Test, sobald Hardware/Session verfügbar:
 
 ```bash
@@ -233,6 +236,90 @@ SMOLIT_UI_ALWAYS_ON_TOP=1 SMOLIT_WINDOW_REPORT=1 \
 
 Erwartung: `display_driver=wayland`, sonst identisch zur Simulation
 oben. Ergebnis bitte als neuer Block hier anhängen.
+
+### 4.4 Host-Inventur 2026-04-24 (PR 22 B-Wayland-Live-Messung)
+
+PR 22 hatte als Ziel einen echten Wayland/GNOME-Messlauf. Auf dem
+Dev-Host ist dieser Lauf **weiterhin nicht möglich** — ehrlich
+dokumentiert statt als X11-Messung getarnt.
+
+**Host-Signale (ermittelt durch Inspektion der Login-Session):**
+
+| Signal                 | Wert                              |
+|------------------------|-----------------------------------|
+| OS                     | Ubuntu 24.04.4 LTS (Noble Numbat) |
+| Desktop                | `ubuntu:GNOME`, GNOME Shell 46.0  |
+| `XDG_SESSION_TYPE`     | `x11`                             |
+| `WAYLAND_DISPLAY`      | (unset)                           |
+| `DISPLAY`              | `:0`                              |
+| `DESKTOP_SESSION`      | `ubuntu-xorg`                     |
+| Godot                  | 4.6.2.stable.official.71f334935   |
+
+**Verfügbarkeit nested Wayland-Compositoren (alle `command -v`):**
+
+- `weston` — absent
+- `cage` — absent
+- `labwc` — absent
+- `sway` — absent
+- `hyprland` — absent
+- `mutter` — absent (nur als Login-Compositor unter einer Wayland-
+  Session startbar, nicht als nested binary auf diesem Host)
+- `kwin_wayland` — absent
+
+Konsequenz: weder eine reale Wayland-Login-Session noch ein nested
+Wayland-Compositor stehen zur Verfügung. Ein Start mit
+`godot --display-driver wayland` würde auf diesem Host wie in §4.2
+gezeigt auf X11 zurückfallen — das ist kein Wayland-Beweis.
+
+**Re-Run der Env-Override-Simulation, 2026-04-24.** Als Kontrolle,
+dass der Refusal-Pfad (§4.1) nach PR 17–21 Docs-/Code-Arbeiten
+unverändert greift, wurde die Simulation erneut gefahren:
+
+```bash
+scripts/run_overlay_verification.sh --headless aot-wayland-refusal
+```
+
+Beobachteter Controller-Log:
+
+```text
+[always-on-top] requested=true session=wayland driver=headless candidate=false applied=false observed=false active=false
+[always-on-top] capability=unsupported (Wayland (GNOME/Mutter): kein protokollweiter Always-on-top-Pfad für reguläre Toplevels)
+[always-on-top] reason: always-on-top special path is X11-only; current session=wayland — no-op by design (see docs/linux_always_on_top_decision.md)
+```
+
+Report-Auszug:
+
+```text
+[report] session_type        = wayland
+[report] display_driver      = headless
+[report] desktop_environment = ubuntu:GNOME
+[report] always_on_top.capability        = unsupported (Wayland (GNOME/Mutter): kein protokollweiter Always-on-top-Pfad für reguläre Toplevels)
+[report] always_on_top.active            = false
+[report] always_on_top.scope             = X11-only special path; GNOME/Wayland intentionally not targeted
+[report] always_on_top.reason            = always-on-top special path is X11-only; current session=wayland — no-op by design (see docs/linux_always_on_top_decision.md)
+```
+
+Zusätzlich wurde `resolver-wayland-mutter` gefahren — der Resolver
+wählt korrekt `backend.id = wayland-mutter`, Capability-Tabelle
+zeigt `transparency=available`, `click_through=experimental`,
+`always_on_top=unsupported`. Das ist konsistent mit §4.1 und dem
+Zielbild aus [`linux_window_overlay_architecture.md`](./linux_window_overlay_architecture.md)
+§B.
+
+**Honest outcome:**
+
+- Refusal-Pfad bleibt reproduzierbar — der Controller verweigert
+  AOT bei Erkennung `session_type=wayland`, unabhängig vom realen
+  Compositor.
+- Real-Wayland-Messung bleibt ausstehend. Produktaussage ändert
+  sich nicht: unter GNOME/Wayland kein AOT, klare Ablehnung,
+  Overlay + Click-through als reguläre Presence-Mittel verfügbar.
+- Für echte Mutter-Wayland-/KWin-Wayland-Daten wird ein
+  dedizierter Messtermin auf einem Host mit Wayland-Login-Session
+  benötigt. Die Frage ist nicht „geht es?" (Simulation belegt den
+  Code-Pfad), sondern „wie reagiert der echte Compositor auf das
+  ausbleibende Flag-Set?" — letzteres ist nur gegen einen echten
+  Mutter messbar.
 
 ---
 
