@@ -2050,6 +2050,14 @@ projiziert.
 
 ---
 
+> **OceanData ist kein Teil des IPC-Protokolls.** Weder heute (kein
+> Provider-Kind, keine IPC-Commands, keine `StatusPayload`-Felder)
+> noch in der skizzierten Zukunft. Der Proposed-Rahmen für eine
+> spätere Data-/Kontext-Anbindung lebt in
+> [`docs/adr/ADR-0004-oceandata-data-layer-integration.md`](./adr/ADR-0004-oceandata-data-layer-integration.md);
+> der ADR beschreibt ausdrücklich **keine** Wire-Form am heutigen
+> IPC-Kanal.
+
 ## 5. Core ↔ ABrain: natives API (Ziel-Zustand)
 
 Geplant, **noch nicht implementiert**. Sobald ABrain als Bibliothek oder

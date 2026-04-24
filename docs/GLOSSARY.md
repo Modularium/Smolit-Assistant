@@ -202,26 +202,48 @@ Siehe [`docs/adr/ADR-0001-smolitux-design-contract.md`](./adr/ADR-0001-smolitux-
 liegt **außerhalb** dieses Repos und ist **kein** Teil des
 Smolit-Assistant-Stacks — weder heute noch in absehbarer PR-Linie.
 
-**Was OceanData ausdrücklich nicht ist** (rein negative
-Abgrenzung, konsistent zu ADR-0001 und
-[`README.md`](../README.md) §11–§12):
+**Was OceanData ausdrücklich nicht ist** (konsistent zu ADR-0001,
+ADR-0003 und ADR-0004):
 
 - **Keine UI-Library.** OceanData liefert keine Komponenten,
   keine Widgets, keine Scenes.
+- **Nicht Smolitux-UI.** Smolitux-UI ist die Web-/React-
+  Komponentenbibliothek des Ökosystems; OceanData nicht.
 - **Kein Design-System.** OceanData liefert keine Design-Tokens,
-  keine Theme-Definitionen, keine Styling-Quelle.
-- **Keine Smolit-Assistant-Runtime-Abhängigkeit.** Weder Core,
-  UI noch ABrain-Adapter nehmen OceanData in Anspruch.
+  keine Theme-Definitionen, keine Styling-Quelle. Die cross-
+  runtime Token-Quelle lebt in smolitux-ui
+  ([Smolitux Token Contract](https://github.com/Modularium/smolitux-ui/blob/main/docs/design/SMOLITUX_TOKEN_CONTRACT.md),
+  PR 35), nicht in OceanData.
+- **Kein Text-LLM-Provider.** OceanData wird nie als
+  `text_provider`-Kind eingereiht — es lebt auf einer separaten
+  (zukünftigen) Context-Provider-Achse.
+- **Keine Smolit-Assistant-Runtime-Abhängigkeit heute.** Weder
+  Core, UI noch ABrain-Adapter nehmen OceanData in Anspruch;
+  keine IPC-Commands, kein Provider-Kind, keine Persistenz.
 
-Eine *zukünftige* Anbindung (z. B. als optionaler Persistenz-/
-Sync-Layer) wäre eine eigene Design-Entscheidung. PR 40
-([OPEN_WORK.md Workstream K](./OPEN_WORK.md)) ist als
-**ADR-Vorlauf** vorgesehen, bevor Code entsteht. Bis dahin
-erscheint OceanData in der Docs-Landschaft ausschließlich als
-Abgrenzungs-Marker.
+**Zukünftige Rolle (Proposed in
+[ADR-0004](./adr/ADR-0004-oceandata-data-layer-integration.md)):**
+OceanData ist als optionaler **Data-/Kontext-Provider** skizziert,
+der strukturierte Kontext-/Retrieval-Einträge liefert
+(`query_context` / `list_available_contexts` /
+`fetch_context_summary`). Erste Integration ist strikt read-only,
+lokal-first (Unix-Socket / Loopback), kein Cloud-Default, kein
+UI-Komponentenimport, kein Tool-/Desktop-/AdminBot-Bypass. Jede
+Action, die aus Kontext abgeleitet würde, läuft durch den
+bestehenden Approval-/Policy-/Audit-Gate. ABrain bekommt **keinen**
+unrestrictierten OceanData-Zugriff — nur indirekt, als redacted
+Summary über den Core.
+
+Der ADR ist Docs-only; es existiert kein Code, keine IPC-
+Commands, kein Context-Provider-Trait. Alle Folgearbeiten stehen
+unter FA-1 bis FA-6 (OceanData-side contract doc,
+Context-provider-SPI-ADR, Spike, Sensitivity-Schema,
+Privacy-/Redaction-Layer, ABrain-Context-Handoff-ADR).
 
 Siehe [`docs/adr/ADR-0001-smolitux-design-contract.md`](./adr/ADR-0001-smolitux-design-contract.md)
-(Abschnitt *Non-goals*) und
+(Smolitux-UI-Abgrenzung),
+[`docs/adr/ADR-0003-abrain-native-integration.md`](./adr/ADR-0003-abrain-native-integration.md)
+(ABrain ≠ OceanData, kein Transit-Pfad) und
 [`docs/OPEN_WORK.md`](./OPEN_WORK.md) Workstream K.
 
 ## Smolitux Design Contract

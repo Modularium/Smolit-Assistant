@@ -415,4 +415,8 @@ spätere Release-Line braucht einen eigenen ADR, bevor Code landet.
 - **smolitux-ui-Integration** — per ADR-0001 ausgeschlossen; Smolit
   bleibt Godot-nativ.
 - **OceanData-Anbindung** — OceanData ist Data-Layer im Smolitux-
-  Ökosystem, kein Teil dieses Repos.
+  Ökosystem, kein Teil dieses Repos. Ein zukünftiger Rahmen
+  existiert als Proposed-ADR
+  ([`docs/adr/ADR-0004-oceandata-data-layer-integration.md`](./adr/ADR-0004-oceandata-data-layer-integration.md));
+  dieser Setup-Guide dokumentiert keine OceanData-Installation, weil
+  es keine gibt.

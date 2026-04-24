@@ -616,46 +616,81 @@ machbar.
 
 ---
 
-## K — OceanData Data-Layer Boundary *(neu, rein ADR-Vorlauf)*
+## K — OceanData Data-Layer Boundary
 
 **Status:** **Kein** Berührungspunkt zu Smolit-Assistant heute.
-OceanData wird an mehreren Stellen (ADR-0001 / PR 24,
-[`README.md`](../README.md) §11–§12, [`GLOSSARY.md`](./GLOSSARY.md)
-Smolitux-UI-Eintrag) konsequent als **Data-Layer / Datenplattform
-im Smolitux-Ökosystem** abgegrenzt — ausdrücklich **keine**
-UI-Library, **kein** Design-System, **kein** UI-Komponenten-
-Lieferant.
-**Warum wichtig:** Die Abgrenzung ist heute rein negativ
-(„OceanData ist *nicht* …"). Sobald OceanData-seitig ein
-konsumierbares Data-Layer-Interface existiert, das Smolit-
-Assistant sinnvoll nutzen könnte (lokale Persistenz,
-sync-Hooks, Notification-Stream o. ä.), braucht es einen ADR
-*vor* Code — nicht ein Spike, nicht ein „wir probieren mal".
+OceanData bleibt Data-Layer / Datenplattform im Smolitux-
+Ökosystem — **keine** UI-Library, **kein** Design-System,
+**kein** UI-Komponenten-Lieferant, **kein** Token-Quellen-Repo.
+Seit PR 40 existiert der Rahmen für eine zukünftige Anbindung als
+Proposed ADR.
+**Warum wichtig:** Ohne schriftlich fixierten Rahmen könnte eine
+spätere OceanData-seitige Designwahl Smolit-Assistant zu einer
+Anpassung zwingen, die die Lokal-first-Linie oder die
+Gate-Pfade (Approval, Audit, Secret-Store, Policy) umgeht.
 **Blocker:** OceanData-seitiges Interface / Scope-Definition
-liegt außerhalb dieses Repos. Vor ADR nichts zu entscheiden.
-**Nächster kleinster PR:**
+liegt außerhalb dieses Repos. Vor dem Gegenstück-ADR auf
+OceanData-Seite (FA-1) entsteht kein Smolit-Assistant-Code.
+**Erledigt (Decision only):**
 
-- **PR 40 K-OceanData-Integration-ADR** *(cross-repo, falls
-  nötig)*. Beschreibt *hypothetisch* den Anbindungsweg eines
-  OceanData-Data-Layers an Smolit-Assistant: welche IPC-/Core-
-  Grenze, welches Persistenz-Modell, wie die
-  Smolit-Assistant-Invarianten (lokal-first, Approval vor
-  Ausführung, in-memory Audit) vor einer Data-Layer-Abhängigkeit
-  geschützt werden. **Rein ADR, keine Implementation**, keine
-  Abhängigkeit in diesem Repo.
+- **PR 40 K-OceanData-Data-Layer-Integration-ADR**
+  *(2026-04-24, gelandet, Docs/ADR-only, Status **Proposed**)*.
+  [`ADR-0004`](./adr/ADR-0004-oceandata-data-layer-integration.md)
+  formt aus der bisherigen rein-negativen Abgrenzung einen aktiven
+  Designrahmen. Kernaussagen: OceanData wird als **Data-/Kontext-
+  Provider** betrachtet (nicht als Text-LLM-Provider); erste
+  Integration ist **read-only** (`query_context` /
+  `list_available_contexts` / `fetch_context_summary`), lokal-
+  first (Unix-Socket / Loopback), **kein** Cloud-Default,
+  **kein** UI-Komponentenimport, **kein** Token- oder
+  Design-System-Bezug, **kein** Tool-/Desktop-/AdminBot-Bypass
+  über OceanData. Jede Action, die aus Kontext abgeleitet wird,
+  läuft durch Approval/Policy/Audit (PR 25 / PR 19 / PR 32).
+  ABrain bekommt **keinen** unrestrictierten OceanData-Zugriff —
+  nur indirekt, als redacted Summary über den Core. Ein
+  Privacy-/Redaction-Layer ist bindende Voraussetzung, bevor
+  OceanData-Kontext an externe Provider geht. Heute **keine**
+  Code-Änderung, **keine** IPC-Commands, **keine** neue
+  Abhängigkeit.
 
-**Nicht-Ziele:**
+**Nächster kleinster PR (Future Work, nicht priorisiert):**
 
-- **Keine OceanData-Code-Integration** vor dem ADR.
+- **FA-1 — OceanData-side contract doc** *(cross-repo)*. OceanData-
+  Repo spiegelt ADR-0004 §6 als verbindliches Wire-Schema
+  (Versionierung, Auth-Modell, Rate-Limits, Sensitivity-Semantik).
+- **FA-2 — Context-provider SPI ADR** *(Smolit-Assistant)*. Legt
+  die neue **Context-Provider-Achse** (parallel zu text/stt/tts)
+  als Trait / Config-Namespace / Audit-Integration fest. Keine
+  Implementation, nur Interface.
+- **FA-3 — Read-only local endpoint spike** *(Smolit-Assistant)*.
+  Erster Client hinter Feature-Flag, Unix-Socket / Loopback,
+  Wire-Schema aus §6 geprüft.
+- **FA-4 — Sensitivity-/Provenance-Schema** als eigener ADR.
+- **FA-5 — Privacy/Redaction-Layer** vor externer Weitergabe
+  (Cloud-fähige ABrain, `cloud_http`).
+- **FA-6 — ABrain-context handoff ADR** *(cross-repo)*. Format
+  des redacted Summaries, niemals OceanData-Handle-Pass-Through.
+
+**Nicht-Ziele (unverändert):**
+
+- **Keine OceanData-Code-Integration** vor FA-1/FA-2.
 - **Keine Uminterpretation** von OceanData als UI-/Design-System.
 - **Keine neuen Kern-Abhängigkeiten** auf OceanData-Pakete.
+- **Kein Cloud-Default**, kein Auto-Aktivieren.
+- **Kein Schreib-Pfad** in v1 (read-only first).
+- **Kein direct-Transit** von OceanData zu ABrain.
 
 **Tests / Verifikation:**
 
 - `rg "OceanData"` im gesamten Repo darf **nie** OceanData als
   UI-Library, Design-System-Quelle oder Smolit-Assistant-
-  Backend beschreiben. Heute erfüllt.
+  Backend beschreiben. Mit ADR-0004 aktiv eingehalten —
+  alle Treffer sind entweder Abgrenzung oder Future-Work-
+  Verweis.
 - Markdown-Links bleiben konsistent.
+- PR 40 ist Docs/ADR-only, keine neuen Tests: bestehende
+  `cargo test` (398 pass) und `settings-shell-smoke` (PASS)
+  bleiben unverändert grün.
 
 ---
 

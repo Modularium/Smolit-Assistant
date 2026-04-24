@@ -287,7 +287,7 @@ PR 31 selbst ist dieser Roadmap-Checkpoint (Docs-only).
 | 37 | F | **Accessibility RPC Spike Decision (AT-SPI read-only)** (2026-04-24, gelandet, **Docs/ADR-only**): [`ADR-0002`](./docs/adr/ADR-0002-accessibility-rpc-readonly.md) entscheidet den Rahmen vor Code. Read-only `GetChildren` auf Registry-Root; `atspi`+`zbus` hinter einem `accessibility_rpc`-Feature-Flag (default-off); **keine** Input-Injection, **kein** `DoAction`, **kein** Baum-Walk über eine Tiefe hinaus, **keine** Passwort-/Secret-Felder, **keine** Wayland-Compositor-Aktion, **kein** Approval-Bypass. `confidence: verified` bleibt exklusiv für Items mit Registry-Evidenz — Hint-Echos bleiben `discovered`. Wire-Schema (`docs/api.md` §2.8) unverändert, keine neuen IPC-Commands. |
 | 38 | I | **Release/CI Foundation** (2026-04-24, gelandet): GitHub-Actions-Workflow [`ci.yml`](./.github/workflows/ci.yml) mit zwei Jobs — `core-test` (`cargo test --manifest-path core/Cargo.toml --locked` auf `ubuntu-latest`, Rust stable) und `ui-smoke` (Godot 4.6 headless, pinned via `GODOT_VERSION`, fünf Smokes: `settings-shell-smoke`, `avatar-render-polish-smoke`, `workflow-visibility-smoke`, `approval-card-smoke`, `audit-panel-smoke`). Beide Jobs laufen mit `HOME` / `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` unterhalb `runner.temp` — damit sind stray `~/.config/smolit-assistant/`-Dev-Artefakte strukturell ausgeschlossen. Lokaler Parity-Helper: [`scripts/ci_verify.sh`](./scripts/ci_verify.sh). **Kein** Packaging-Format, **keine** Signing-Stufe, **kein** Artifact-Upload, **kein** Release-Tagging, **kein** Docker-Image, **keine** Secrets, **keine** Provider-Endpunkte, **keine** echten TTS/STT-Binaries. |
 | 39 | H | **ABrain Native Integration ADR** (2026-04-24, gelandet, **Docs/ADR-only**, Status **Proposed**): [`ADR-0003`](./docs/adr/ADR-0003-abrain-native-integration.md) fixiert den Rahmen vor Code. Native-Pfad kommt als **zusätzlicher** Text-Provider-Kind (Arbeitsname `abrain_native`, Default-Chain bleibt `["abrain"]`), nicht als Ersatz; typed request/response; lokal-first (Unix-Socket / Loopback); jede ABrain-induzierte Action läuft durch Approval/Policy/Audit (PR 25 / PR 19 / PR 32); **kein** AdminBot-/Shell-/Desktop-Bypass, **kein** Streaming, **keine** Tool-Call-Execution in der ersten Version, **kein** Cloud-Default, **keine** Änderung an `ABRAIN_CMD`. Status bleibt Proposed, bis ABrain-Seite einen Gegenvorschlag publiziert hat. |
-| 40 | — | **OceanData Data-Layer Integration ADR** (cross-repo falls nötig). Beschreibt einen *hypothetischen* Anbindungsweg eines Data-Layers an Smolit-Assistant. OceanData bleibt explizit **kein** UI-/Design-System. Nur ADR, keine Implementation. |
+| 40 | K | **OceanData Data-Layer Integration ADR** (2026-04-24, gelandet, **Docs/ADR-only**, Status **Proposed**): [`ADR-0004`](./docs/adr/ADR-0004-oceandata-data-layer-integration.md) formt aus der bisherigen rein-negativen Abgrenzung einen aktiven Designrahmen. OceanData ist **Data-/Kontext-Provider** (nicht Text-LLM); erste Integration ist **read-only** (`query_context` / `list_available_contexts` / `fetch_context_summary`), lokal-first (Unix-Socket / Loopback), **kein** Cloud-Default, **kein** UI-Komponentenimport, **kein** Token-/Design-System-Bezug, **kein** Tool-/Desktop-/AdminBot-Bypass. Jede daraus abgeleitete Action läuft durch Approval/Policy/Audit (PR 25 / PR 19 / PR 32). ABrain bekommt **keinen** unrestrictierten OceanData-Zugriff — nur indirekt, als redacted Summary über den Core. Privacy-/Redaction-Layer ist bindende Voraussetzung vor externer Weitergabe. **Keine** Code-Änderung, **keine** IPC-Commands, **keine** Persistenz, **keine** Auth-Implementation. Nachbar-ADRs: ADR-0001 (Smolitux Design Contract), ADR-0003 (ABrain Native). |
 
 ---
 
@@ -338,7 +338,13 @@ davon würde eine eigene Design-Entscheidung brauchen:
 - **OceanData-Integration.** OceanData ist Data-Layer /
   Datenplattform im Smolitux-Ökosystem, **keine** UI-Library und
   **kein** Design-System. Heute ohne Berührungspunkt zu
-  Smolit-Assistant. Vor Code / Abhängigkeit kommt ein ADR (PR 40).
+  Smolit-Assistant. Rahmen mit PR 40 entschieden
+  ([`ADR-0004`](./docs/adr/ADR-0004-oceandata-data-layer-integration.md),
+  Proposed, Docs/ADR-only): read-only erster Pfad, lokal-first,
+  kein Cloud-Default, kein Tool-Execution-Bypass, kein
+  Transit-Pfad ABrain → OceanData. Code weiterhin hinter
+  FA-1 (OceanData-side contract doc) und FA-2 (Context-provider
+  SPI ADR) aufgeschoben.
 
 ---
 

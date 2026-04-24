@@ -253,7 +253,10 @@ PR 24) gegenüber der Web-Komponenten-Bibliothek
 - **OceanData ist nicht Teil dieses Projekts.** OceanData ist ein
   Data-Layer im Smolitux-Ökosystem, **kein** UI-/Design-System und
   **kein** Smolit-Assistant-Backend. Keine OceanData-Integration in
-  diesem Repo.
+  diesem Repo. Ein zukünftiger Anbindungs-Pfad ist als Proposed-ADR
+  in [`docs/adr/ADR-0004-oceandata-data-layer-integration.md`](docs/adr/ADR-0004-oceandata-data-layer-integration.md)
+  skizziert — Docs/ADR-only, kein Code, kein Provider-Kind, keine
+  IPC-Commands.
 
 Vollständiger ADR:
 [`docs/adr/ADR-0001-smolitux-design-contract.md`](docs/adr/ADR-0001-smolitux-design-contract.md).
