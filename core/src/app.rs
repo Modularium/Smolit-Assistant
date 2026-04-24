@@ -32,6 +32,10 @@ use crate::ipc::protocol::{
     InteractionFocusTarget, OutgoingMessage, SpeakingEndedPayload, SpeakingStartedPayload,
     TargetClearedPayload, TargetSelectedPayload,
 };
+use crate::audit::{
+    RESULT_APPROVED, RESULT_CANCELLED, RESULT_COMPLETED, RESULT_DENIED, RESULT_EXPIRED,
+    RESULT_FAILED, SOURCE_CORE, SOURCE_UI,
+};
 use crate::providers::stt::{
     SttProviderChainItem, SttProviderError, SttProviderResolver,
 };
@@ -1328,10 +1332,51 @@ impl App {
         action: InteractionAction,
     ) -> Vec<OutgoingMessage> {
         let mut out = Vec::with_capacity(3);
+        // PR 32 — Audit: IPC-Command-Received for real interaction
+        // actions. Summary carries only the interaction kind name
+        // (`open_application` / `focus_window` / …) plus the Action-
+        // Title (e.g. "Open calendar"); no command templates, no
+        // secrets, no env fragments. The action_id stays linked
+        // across the whole lifecycle.
+        self.audit.record(
+            crate::audit::AuditKind::IpcCommandReceived,
+            crate::audit::AuditFields::new()
+                .with_action_id(&action.action_id)
+                .with_source(SOURCE_UI)
+                .with_summary(format!(
+                    "interaction_{}: {}",
+                    action.kind().as_str(),
+                    action.title,
+                )),
+        );
+
         out.push(self.interaction.plan_event(&action));
+        // PR 32 — Audit: ActionPlanned mirrors the outgoing envelope.
+        // Source is `core` because the plan event is emitted by the
+        // core-side executor, not by the UI.
+        self.audit.record(
+            crate::audit::AuditKind::ActionPlanned,
+            crate::audit::AuditFields::new()
+                .with_action_id(&action.action_id)
+                .with_source(SOURCE_CORE)
+                .with_summary(&action.title),
+        );
 
         if let Err(err) = self.interaction.policy().allows(action.kind()) {
             out.extend(self.interaction.refusal_events(&action.action_id, &err));
+            // PR 32 — Audit: refusal is observed as ActionFailed with
+            // result=failed; the error string is already a short,
+            // curated class (`layer_disabled` / `kind_not_allowed`,
+            // see `InteractionExecutor`). The policy error never
+            // carries user input or secrets.
+            self.audit.record(
+                crate::audit::AuditKind::ActionFailed,
+                crate::audit::AuditFields::new()
+                    .with_action_id(&action.action_id)
+                    .with_result(RESULT_FAILED)
+                    .with_source(SOURCE_CORE)
+                    .with_summary(&action.title),
+            );
             return out;
         }
 
@@ -1339,7 +1384,9 @@ impl App {
             action.requires_confirmation && self.interaction.policy().require_confirmation;
 
         if !needs_approval {
-            out.extend(self.interaction.run_approved(action).await);
+            let run_events = self.interaction.run_approved(action.clone()).await;
+            self.record_interaction_lifecycle_audit(&action, &run_events);
+            out.extend(run_events);
             return out;
         }
 
@@ -1363,6 +1410,19 @@ impl App {
         };
         let rx = self.pending_approvals.register(&approval_id);
         out.push(OutgoingMessage::ApprovalRequested { payload: request });
+        // PR 32 — Audit: ApprovalRequested links approval_id to
+        // action_id and persists the risk class (medium for real
+        // interaction approvals, see PR 17). The source is `core`
+        // because the core-side executor opens the gate.
+        self.audit.record(
+            crate::audit::AuditKind::ApprovalRequested,
+            crate::audit::AuditFields::new()
+                .with_action_id(&action.action_id)
+                .with_approval_id(&approval_id)
+                .with_risk(RISK_MEDIUM)
+                .with_source(SOURCE_CORE)
+                .with_summary(&action.title),
+        );
 
         let app = Arc::clone(self);
         tokio::spawn(async move {
@@ -1409,13 +1469,38 @@ impl App {
                 approval_id: approval_id.clone(),
                 action_id: action.action_id.clone(),
                 decision: decision.as_str().to_string(),
-                source,
+                source: source.clone(),
             },
         });
+        // PR 32 — Audit: ApprovalResolved mirrors decision + source.
+        // Decision string goes into the audit `result` field via the
+        // canonical constants so the whitelist in
+        // `crate::audit::event::sanitize_result` stays authoritative.
+        let resolved_result = match decision {
+            ApprovalDecision::Approved => RESULT_APPROVED,
+            ApprovalDecision::Denied => RESULT_DENIED,
+            ApprovalDecision::Cancelled => RESULT_CANCELLED,
+            ApprovalDecision::TimedOut => RESULT_EXPIRED,
+        };
+        self.audit.record(
+            crate::audit::AuditKind::ApprovalResolved,
+            crate::audit::AuditFields::new()
+                .with_action_id(&action.action_id)
+                .with_approval_id(&approval_id)
+                .with_risk(RISK_MEDIUM)
+                .with_result(resolved_result)
+                .with_source(&source)
+                .with_summary(&action.title),
+        );
 
         match decision {
             ApprovalDecision::Approved => {
-                let msgs = self.interaction.run_approved(action).await;
+                let msgs = self.interaction.run_approved(action.clone()).await;
+                // PR 32 — Audit: record the real backend lifecycle
+                // (started / step / verification / completed / failed)
+                // before broadcasting, so a crash in `broadcast` never
+                // leaves audit blind on actions that already ran.
+                self.record_interaction_lifecycle_audit(&action, &msgs);
                 for msg in msgs {
                     self.broadcast(msg);
                 }
@@ -1436,6 +1521,97 @@ impl App {
                         message: Some(message.to_string()),
                     },
                 });
+                // PR 32 — Audit: cancel branch trägt den kuratierten
+                // Grund (denied / cancelled / expired) und die
+                // Herkunft aus dem Wartepfad (user / system / timeout).
+                let cancel_result = match decision {
+                    ApprovalDecision::Denied => RESULT_DENIED,
+                    ApprovalDecision::Cancelled => RESULT_CANCELLED,
+                    ApprovalDecision::TimedOut => RESULT_EXPIRED,
+                    ApprovalDecision::Approved => unreachable!(),
+                };
+                self.audit.record(
+                    crate::audit::AuditKind::ActionCancelled,
+                    crate::audit::AuditFields::new()
+                        .with_action_id(&action.action_id)
+                        .with_result(cancel_result)
+                        .with_source(&source)
+                        .with_summary(&action.title),
+                );
+            }
+        }
+    }
+
+    /// PR 32 — Audit helper: walks the event sequence produced by
+    /// `InteractionExecutor::run_approved` and records one audit
+    /// event per lifecycle-visible outgoing message. Keeps the
+    /// executor decoupled from `AppState`; the audit side lives
+    /// entirely on the app layer.
+    ///
+    /// Emits audit for:
+    ///   * `ActionStarted`   → AuditKind::ActionStarted, source=core
+    ///   * `ActionCompleted` → AuditKind::ActionCompleted, result
+    ///     from the payload status (completed/failed/cancelled)
+    ///   * `ActionFailed`    → AuditKind::ActionFailed, result=failed
+    ///   * `ActionCancelled` → AuditKind::ActionCancelled, result=cancelled
+    ///
+    /// Step and verification events do **not** get their own audit
+    /// entries — the audit axis stays focused on life-cycle
+    /// boundaries, not on every intermediate frame. Summaries carry
+    /// only the action title (no command templates, no user
+    /// payloads).
+    fn record_interaction_lifecycle_audit(
+        &self,
+        action: &InteractionAction,
+        messages: &[OutgoingMessage],
+    ) {
+        for msg in messages {
+            match msg {
+                OutgoingMessage::ActionStarted { .. } => {
+                    self.audit.record(
+                        crate::audit::AuditKind::ActionStarted,
+                        crate::audit::AuditFields::new()
+                            .with_action_id(&action.action_id)
+                            .with_source(SOURCE_CORE)
+                            .with_summary(&action.title),
+                    );
+                }
+                OutgoingMessage::ActionCompleted { payload } => {
+                    let result = match payload.status {
+                        ActionStatus::Completed => RESULT_COMPLETED,
+                        ActionStatus::Failed => RESULT_FAILED,
+                        ActionStatus::Cancelled => RESULT_CANCELLED,
+                    };
+                    self.audit.record(
+                        crate::audit::AuditKind::ActionCompleted,
+                        crate::audit::AuditFields::new()
+                            .with_action_id(&action.action_id)
+                            .with_result(result)
+                            .with_source(SOURCE_CORE)
+                            .with_summary(&action.title),
+                    );
+                }
+                OutgoingMessage::ActionFailed { .. } => {
+                    self.audit.record(
+                        crate::audit::AuditKind::ActionFailed,
+                        crate::audit::AuditFields::new()
+                            .with_action_id(&action.action_id)
+                            .with_result(RESULT_FAILED)
+                            .with_source(SOURCE_CORE)
+                            .with_summary(&action.title),
+                    );
+                }
+                OutgoingMessage::ActionCancelled { .. } => {
+                    self.audit.record(
+                        crate::audit::AuditKind::ActionCancelled,
+                        crate::audit::AuditFields::new()
+                            .with_action_id(&action.action_id)
+                            .with_result(RESULT_CANCELLED)
+                            .with_source(SOURCE_CORE)
+                            .with_summary(&action.title),
+                    );
+                }
+                _ => {}
             }
         }
     }
