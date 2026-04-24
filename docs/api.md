@@ -985,7 +985,8 @@ sie eindeutig einem `action_id` zuordnen.
   nicht ein zweites Mal. **Nicht** erlaubt: echte Aktionen, Shell,
   Desktop-Automation, Provider-Mutationen, Dateioperationen.
 
-- `audit_recent` (PR 19) — **read-only** Abfrage des lokalen
+- `audit_recent` (PR 19, seit PR 32 mit Coverage für reale
+  Interaction-Actions) — **read-only** Abfrage des lokalen
   In-Memory-Audit-Ringbuffers. Felder:
   - `limit: integer` (optional, auf `1000` hart geklemmt).
     Standardmäßig liefert der Core den vollen Ringbuffer-Inhalt.
@@ -1006,8 +1007,23 @@ sie eindeutig einem `action_id` zuordnen.
     `summary: string` (hart auf 80 Zeichen gekürzt, Whitespace
     gestrippt). Felder ohne Wert werden nicht serialisiert.
 
-  **Keine** Persistenz, **kein** Export, **keine** Schreib-Variante.
-  Siehe [`docs/security/AUDIT_TRAIL.md`](./security/AUDIT_TRAIL.md)
+  Seit PR 32 (2026-04-24) erfasst der Ring-Buffer **zusätzlich zum
+  `plan_demo_action`-Pfad** den echten
+  `interaction_open_application` / `interaction_focus_window`-
+  Lifecycle (IPC-Command-Received → Action-Planned → optional
+  Approval-Requested / Approval-Resolved → Action-Started →
+  Action-Completed / Action-Cancelled / Action-Failed). Der
+  Summary-Text der Real-Interaction-Pfade ist von der Form
+  `interaction_<kind>: <action_title>` — **kein** Command-Template,
+  **kein** Env-Name, **kein** Secret aus dem
+  Secrets-Store (siehe
+  [`docs/security/AUDIT_TRAIL.md`](./security/AUDIT_TRAIL.md)
+  Abschnitt „Coverage für reale Interaction-Actions (PR 32)").
+
+  **Keine** Persistenz, **kein** Export, **keine** Schreib-Variante,
+  **kein** `audit_clear` — PR 32 erweitert die Coverage, aber nicht
+  die Oberfläche. Siehe
+  [`docs/security/AUDIT_TRAIL.md`](./security/AUDIT_TRAIL.md)
   für Datenschutz-Grenzen und Zukunftsüberlegungen.
 
 #### Ausgehend (Core → UI)

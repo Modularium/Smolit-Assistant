@@ -1,4 +1,4 @@
-# Local Audit Trail v1 — Prinzipien und Grenzen (PR 19)
+# Local Audit Trail v1 — Prinzipien und Grenzen (PR 19 + PR 32)
 
 ## Zweck
 
@@ -6,17 +6,37 @@ Der Audit-Store protokolliert, **was passiert ist**, damit jemand es
 später nachvollziehen kann — lokal, in-memory, klein. Er ist ein
 Dev-/Debug-Hilfsmittel, kein Produkt-Feature.
 
-Konkret erfasst er den Lifecycle der Approval-Gated Demo-Actions aus
-PR 18 (plus ein paar IPC-Grenzfälle):
+Seit PR 19 wird der Lifecycle der Approval-Gated Demo-Actions aus
+PR 18 erfasst (plus ein paar IPC-Grenzfälle). **Seit PR 32**
+(2026-04-24) deckt der Audit-Store zusätzlich die **echte
+Interaction-Action-Kette** (`interaction_open_application` und
+`interaction_focus_window`) ab — dieselbe Kind-Sequenz, derselbe
+kuratierte Vokabular-Satz, dieselben Redaction-Regeln. Kein
+Persistenz-Pfad, keine neuen IPC-Commands.
 
-- `plan_demo_action` kam an → `ipc_command_received`
+Erfasste Kinds in beiden Pfaden:
+
+- IPC-Command kam an → `ipc_command_received`
+  (Demo: `plan_demo_action`; real: `interaction_open_application` /
+  `interaction_focus_window`, Summary formatiert als
+  `interaction_<kind>: <title>` — nur der Action-Titel, **nie** das
+  Command-Template aus `SMOLIT_INTERACTION_OPEN_APP_CMD` /
+  `SMOLIT_INTERACTION_FOCUS_WINDOW_CMD`).
 - `action_planned` emittiert → `action_planned`
 - `approval_requested` emittiert → `approval_requested`
-- `approval_resolved` emittiert → `approval_resolved` (+ `result` / `source`)
-- `action_started` / `action_completed` / `action_cancelled` →
-  passender `action_*`-Eintrag
+  (`risk=medium` für reale Interaction-Approvals, seit PR 17).
+- `approval_resolved` emittiert → `approval_resolved`
+  (`result` ∈ `approved` / `denied` / `cancelled` / `expired`,
+  `source` ∈ `user` / `system` / `timeout`).
+- `action_started` / `action_completed` / `action_cancelled` /
+  `action_failed` → passender `action_*`-Eintrag mit
+  kuratiertem `result`.
+- Policy-Refusal (`layer_disabled` / `kind_not_allowed`) →
+  `action_failed` mit `result=failed`, ohne Freitext aus der
+  Policy-Error-Kette.
 - Idempotenter Fehlschlag (unbekannte / bereits aufgelöste
-  `approval_id`) → `ipc_command_rejected`
+  `approval_id`, Double-Approve) → `ipc_command_rejected` mit
+  `result=rejected`.
 
 ## Leitprinzip: *accountability without surveillance*
 
@@ -110,6 +130,76 @@ Sichtbarkeit:
 - **Kein Kopieren / Speichern** in PR 19. Eine spätere Variante
   müsste das als eigene Design-Entscheidung rechtfertigen (welche
   Daten, welche Vertraulichkeit, welche Speicherform).
+
+## Coverage für reale Interaction-Actions (PR 32)
+
+PR 32 weitet die Audit-Kette auf den **produktiv verdrahteten**
+Interaction-Pfad aus (`interaction_open_application`,
+`interaction_focus_window`). Beide Aktionen teilen sich seit PR 25
+(Policy v0) den Approval-Pfad; PR 32 schließt die ehrliche Lücke aus
+dem PR-25-Review, wo Audit nur den `plan_demo_action`-Lifecycle
+abdeckte.
+
+### Wo der Audit-Pfad ansetzt
+
+- **`App::dispatch_interaction`** (`core/src/app.rs`) — die
+  gemeinsame Einstiegsfunktion beider Interaction-Kinds — schreibt:
+  - `IpcCommandReceived` (Summary `interaction_<kind>: <title>`)
+  - `ActionPlanned`
+  - Optional `ActionFailed` (bei Policy-Refusal)
+  - `ApprovalRequested` (falls `require_confirmation=true`)
+  - Beim Direkt-Run (No-Confirmation-Pfad, heute **nicht** Default
+    unter Policy v0) zusätzlich die Lifecycle-Events per
+    `record_interaction_lifecycle_audit`.
+- **`App::await_and_continue`** — der Approval-Warte-Task —
+  schreibt:
+  - `ApprovalResolved` mit `result ∈ approved / denied / cancelled
+    / expired`.
+  - Auf Approved: ruft `record_interaction_lifecycle_audit` auf
+    dem vom Executor zurückgegebenen Event-Vektor auf; schreibt
+    `ActionStarted` + `ActionCompleted` (oder `ActionFailed` /
+    `ActionCancelled` je nach `ActionStatus`).
+  - Auf Denied / Cancelled / TimedOut: direkter
+    `ActionCancelled`-Audit-Eintrag mit passendem `result`.
+
+### Was garantiert **nicht** in den Store geht
+
+- Command-Templates (`wmctrl -a {name}`, `xdg-open {name}`, …) —
+  der Audit-Summary nutzt ausschließlich den menschenlesbaren
+  Action-Titel.
+- Env-Variablen-Namen (`SMOLIT_INTERACTION_OPEN_APP_CMD` etc.).
+- User-Prompts oder ABrain-Antworten.
+- Secrets aus dem Secrets-Store (`cloud_http`-API-Key).
+- Audio-Bytes / STT-Transkripte / TTS-Texte.
+
+Tests locken dieses Verhalten: u. a.
+`audit_recent_records_open_application_approved_full_chain`,
+`audit_recent_records_open_application_denied_chain`,
+`audit_recent_records_open_application_timeout_chain`,
+`audit_recent_records_focus_window_approved_chain_generic`,
+`audit_recent_open_application_double_approve_does_not_double_complete`
+in [`core/src/ipc/server.rs`](../../core/src/ipc/server.rs). Die
+Tests prüfen aktiv, dass weder `/bin/true`, `wmctrl` noch Env-
+Variablen-Namen in der Audit-Antwort auftauchen.
+
+### Was bewusst **nicht** Teil von PR 32 ist
+
+- **Keine Persistenz** — der Store bleibt in-memory, Ring-Buffer
+  (siehe §Speicherung).
+- **Kein Export** — keine neue `audit_*`-IPC-Route.
+- **Kein `audit_clear`** — Read-only bleibt die einzige externe
+  Oberfläche.
+- **Keine kryptografische Signatur** — der Store ist weiterhin
+  nicht manipulationssicher.
+- **Keine Step-/Verification-Audit-Einträge** — der Audit-Pfad
+  fokussiert sich auf Lifecycle-Grenzen (Start / Abschluss), nicht
+  auf Zwischen-Frames. Das Workflow Visibility Overlay (PR 16) ist
+  der Ort, an dem Steps für die UI sichtbar werden.
+- **Keine Erweiterung der `sanitize_*`-Whitelists** —
+  `source` / `result` / `risk` bleiben wie in PR 19 definiert.
+- **Keine neuen Interaction-Kinds** — `type_text` und
+  `send_shortcut` bleiben `BackendUnsupported`, werden also nie
+  in einen Audit-Lifecycle eintreten.
 
 ## Nicht-Ziele (PR 19)
 

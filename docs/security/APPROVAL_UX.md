@@ -294,13 +294,18 @@ Werte flippt.
   `focus_window` ohne generisches Protokoll-Primitiv; der Core
   verspricht keinen Fokuswechsel.
 - **Kein AdminBot, keine Shell.** Nicht im Scope.
-- **Keine Audit-Erweiterung auf den Real-Interaction-Pfad.** Die
-  Audit-Ring-Buffer-Senke (PR 19) deckt heute nur die
-  `plan_demo_action`-Lifecycle-Events ab. Der reale
-  `open_application`-Approval-Flow ist **nicht** auditiert. Eine
-  Ausweitung ist bewusst nicht Teil von PR 25 — sie würde eine
-  eigene Design-Entscheidung brauchen (welche Felder, welche
-  Redaction, welche Interaktion mit der `source`-Axt aus PR 17).
+- **Audit-Abdeckung des Real-Interaction-Pfads — mit PR 32
+  geschlossen.** Die in PR 25 ehrlich dokumentierte Lücke („Audit
+  deckt nur `plan_demo_action`") ist mit PR 32 (2026-04-24)
+  beseitigt: `interaction_open_application` und
+  `interaction_focus_window` laufen jetzt durch denselben
+  Audit-Lifecycle wie der Demo-Pfad, mit denselben Redaction-
+  Regeln. Details:
+  [`docs/security/AUDIT_TRAIL.md`](./AUDIT_TRAIL.md) Abschnitt
+  „Coverage für reale Interaction-Actions (PR 32)" und
+  [`docs/reviews/PR32_AUDIT_INTERACTION_LIFECYCLE.md`](../reviews/PR32_AUDIT_INTERACTION_LIFECYCLE.md).
+  Weiterhin **kein** Persistenz-Pfad — der Ring-Buffer bleibt
+  in-memory.
 
 ### Konfigurations-Leitfaden
 

@@ -202,21 +202,33 @@ Pfad mehr. Der Tripwire-Test `policy_v0_defaults_are_locked` in
 [`core/src/config.rs`](../core/src/config.rs) schlägt an, wenn
 jemand die Baseline flippt.
 **Blocker:** keine.
-**Nächster kleinster PR:**
+**Nächster kleinster PR:** kein zwingender E-PR in der nahen Reihe.
+PR 32 (2026-04-24, gelandet) hat den Audit-Ring-Buffer generisch
+auf beide Real-Interaction-Pfade (`open_application` und
+`focus_window`) erweitert — kein Persistenz-Pfad, keine neuen
+IPC-Commands, keine Erweiterung des `sanitize_*`-Whitelist-
+Vokabulars. Details:
+[`PR32_AUDIT_INTERACTION_LIFECYCLE.md`](./reviews/PR32_AUDIT_INTERACTION_LIFECYCLE.md)
+und [`docs/security/AUDIT_TRAIL.md`](./security/AUDIT_TRAIL.md)
+Abschnitt „Coverage für reale Interaction-Actions (PR 32)".
 
-- **PR 32 E-Audit-Coverage-Real-Interaction.** Erweitert den
-  bestehenden Audit-Ring-Buffer (PR 19, bisher nur
-  `plan_demo_action`-Pfad) auf den **realen
-  `open_application`-Lifecycle**:
-  `IpcCommandReceived → ActionPlanned → ApprovalRequested →
-  ApprovalResolved → ActionStarted → ActionStep →
-  ActionVerification → ActionCompleted / ActionCancelled`.
-  Felder defensiv redacted (analog zum bestehenden `summary ≤
-  80`-Kürzen), `source` und `risk` wie in PR 17. **Kein
-  Persistenz-Pfad**, kein Export. Tripwire-Test für die neue
-  Kette. Schließt die ehrliche Lücke aus PR 25 (siehe
-  [`PR25_POLICY_V0_APPROVAL_DEFAULT.md`](./reviews/PR25_POLICY_V0_APPROVAL_DEFAULT.md)
-  §3).
+**Erledigt in PR 32:**
+
+- Generisches Audit-Tracing im geteilten `dispatch_interaction` +
+  `await_and_continue`-Pfad (`core/src/app.rs`).
+- Neuer Helper `record_interaction_lifecycle_audit`, der aus dem
+  vom `InteractionExecutor` zurückgegebenen Event-Vektor die
+  Lifecycle-Grenzen (`ActionStarted` / `ActionCompleted` /
+  `ActionFailed` / `ActionCancelled`) in den Audit-Store schreibt.
+- Fünf neue IPC-Integrationstests:
+  `audit_recent_records_open_application_approved_full_chain`,
+  `audit_recent_records_open_application_denied_chain`,
+  `audit_recent_records_open_application_timeout_chain`,
+  `audit_recent_records_focus_window_approved_chain_generic`,
+  `audit_recent_open_application_double_approve_does_not_double_complete`.
+- Aktive Leak-Checks: `/bin/true`, `wmctrl`,
+  `SMOLIT_INTERACTION_OPEN_APP_CMD` tauchen **nicht** in der
+  Audit-Antwort auf.
 
 **Nicht-Ziele:**
 
