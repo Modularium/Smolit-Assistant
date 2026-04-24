@@ -1,1811 +1,258 @@
-# Smolit AI Assistant – Developer ROADMAP
+# Smolit AI Assistant — Developer Roadmap
 
-## Vision
-
-Ein leichtgewichtiger, persistenter KI-Assistent mit eigener Präsenz auf dem
-Desktop:
-
-- **Rust Core** — Runtime, Orchestrierung, Adapter.
-- **Godot UI** — Avatar, Interaktion, Rendering.
-- **ABrain** — Reasoning, Lernen.
-
-Siehe [docs/VISION.md](./docs/VISION.md) für die Produktperspektive,
-[docs/ui_architecture.md](./docs/ui_architecture.md) /
-[docs/api.md](./docs/api.md) für die technische Detailebene,
-[docs/presence_desktop_interaction.md](./docs/presence_desktop_interaction.md)
-für das Presence- und Desktop-Interaction-Modell (Avatar-Präsenz,
-Automation-Schicht, Modusachsen, Sicherheits- und Performancegrenzen)
-und
-[docs/linux_window_overlay_architecture.md](./docs/linux_window_overlay_architecture.md)
-für die Linux-spezifische Fenster-/Overlay-Architektur (Wayland/X11,
-Compositor-Abhängigkeiten, Capability-Matrix, Window-Behavior-
-Abstraktion).
+> Stand: 2026-04-24 (nach PR 20 Docs Reality Check). Diese Datei ist
+> eine **Roadmap**, kein PR-Changelog. Detailhistorie pro PR lebt in
+> [`docs/reviews/`](./docs/reviews/).
 
 ---
 
-## Stack
+## 1. Vision
 
-- Core: Rust (tokio, tokio-tungstenite, tracing).
-- UI: Godot 4.x (GDScript, WebSocketPeer).
-- IPC: WebSocket (lokal, `127.0.0.1:8787`).
-- ABrain: heute CLI-Adapter, Ziel natives API.
-- Audio: externe STT/TTS-Commands (pluggable).
+Smolit ist ein lokal-first AI-Assistent für den Linux-Desktop:
+Sprache, Text, Desktop-Präsenz, sichtbarer Action-Flow, Approval-
+Gating. Ziel ist ein Assistent, der **sichtbar, kontrolliert und
+ehrlich** handelt, nicht ein Autonomie-Maximierer.
 
----
+Leitlinien:
 
-## Ist-Zustand (Stand Phase 3.3 MVP)
+- **Control > Autonomy.** Gefährliche Aktionen laufen durch einen
+  expliziten Approval-Pfad.
+- **Lokal vor Cloud.** Cloud-Provider sind opt-in und additiv.
+- **Sichtbarkeit statt Surveillance.** Audit-Trail in-memory,
+  klein, sanitisiert — keine Persistenz als Default.
+- **Additive Protokolle.** IPC-Envelopes wachsen rückwärts-
+  kompatibel; kein bestehender Kanal wird ersetzt.
+- **Core = Source of Truth.** UI spiegelt, entscheidet nichts
+  sicherheitsrelevantes.
 
-Produktiv im Repo vorhanden und durch Tests gedeckt:
-
-- Rust-Daemon mit CLI-Loop (`core/src/event_loop.rs`).
-- ABrain-CLI-Adapter (`core/src/abrain.rs`, `adapters/abrain/`).
-- STT/TTS-Command-Adapter (`core/src/audio/`), CLI-Befehle `voice`,
-  `speak`, `audio-status`.
-- Lokale WebSocket-Bridge mit geteilten Handlern (`core/src/ipc/`,
-  `core/src/app.rs`).
-- Godot-UI-Bootstrap (`ui/`) mit Autoloads `EventBus` + `IpcClient`,
-  Status-/Event-Log, Reconnect 500 ms → 5 s.
-- Avatar-MVP (`ui/scenes/avatar/`, `ui/scripts/avatar/`) mit
-  State-Mapping `idle` / `thinking` / `talking` / `acting`
-  (+ `disconnected` / `error`), deterministischem Rückfall auf `idle`
-  und Platzhalter-Rendering (ColorRect-Body, Gesicht, Mouth-Tween,
-  Thinking-Indicator).
-- Presence-MVP (`ui/scripts/presence/`) mit Modi
-  `docked` / `expanded` / `action` / `disconnected`, manuellem Toggle,
-  automatischem Wechsel bei Action Events und Action-Banner mit
-  symbolischem Target-Text. Orthogonal zum Avatar-State geführt.
-
-Was noch **nicht** existiert: echte Charakteranimation, Always-on-top /
-transparenter Hintergrund, Emotion-Mapping, Personality, natives
-ABrain-API, Multimodalität, Tool-Orchestrierung.
-
-Zusätzlich im Core: **Action Event Model v1** (siehe
-[docs/api.md](./docs/api.md), §2.5; `core/src/actions/`). Der Core
-emittiert standardisierte Action Events (`action_planned`,
-`action_started`, `action_step`, `action_completed`, `action_failed`)
-parallel zu den bestehenden `thinking`/`response`/`heard`/`error`-
-Nachrichten. Dieses Modell ist die gemeinsame Grundlage für spätere
-Avatar-Synchronisierung, Logs/Replay und die Desktop-Interaction-
-Linie.
-
-Ebenfalls im Core: **Desktop Interaction Layer MVP**
-(`core/src/interaction/`, siehe [docs/api.md](./docs/api.md) §2.6 und
-[docs/presence_desktop_interaction.md](./docs/presence_desktop_interaction.md)
-§14b). Der Layer modelliert Interaction-Aktionen
-(`InteractionAction` / `InteractionKind` / `InteractionPayload`),
-exekutiert über ein `InteractionBackend`-Trait (MVP: `CommandBackend`
-mit `open_application`), kennt Verifikation (`VerificationResult`,
-Confidence `verified`/`uncertain`/`failed`) und klassifiziert
-Fehler über `RecoveryHint` (`retry` / `abort` / `ask_user` /
-`fallback_unavailable`). Integration verläuft ausschließlich über
-Action Events; das Protokoll kennt zusätzlich
-`interaction_open_application` als eingehende Nachricht. `type_text`,
-`send_shortcut` und `focus_window` sind als Hooks modelliert, liefern
-aber `BackendUnsupported`.
-
-**Workflow-Overlay / Visual Action Flow (MVP-Spike, Ist-Zustand).**
-Ein erster kleiner MVP-Spike ist eingebaut. Unter
-`ui/scripts/workflow_overlay/` liegen die vier Scripts (State,
-Controller, Node-View, Edge-View), unter
-`ui/scenes/workflow_overlay/` die Szene
-`workflow_overlay_root.tscn`. Der Overlay ist in `main.tscn`
-unterhalb des Avatars eingebettet (x=18..346, y=162..210,
-z_index=40) und konsumiert ausschließlich die bestehenden Action
-Events (`action_planned` / `action_started` / `action_step` /
-`action_completed` / `action_failed`) über den `EventBus`. Er ist
-read-only, sendet keine neuen IPC-Nachrichten, ist mouse-pass-through
-(fängt keine Klicks), versteckt sich standardmäßig und zeigt sich
-erst, wenn ein Flow läuft. Drei feste Rollen (Trigger → Action →
-Result) — **kein** Workflow-Builder, **kein** Desktop-Executor,
-**keine** zweite Wahrheit neben dem Core. Details: siehe
-Subeinheit 3.4 unten sowie
-[docs/ui_architecture.md §6a/§8a](./docs/ui_architecture.md) und
-[docs/api.md „UI-Projektion: Workflow Overlay"](./docs/api.md).
+Detaillierte Begriffswelt: siehe
+[`docs/VISION.md`](./docs/VISION.md) (historischer Snapshot),
+[`docs/presence_desktop_interaction.md`](./docs/presence_desktop_interaction.md).
 
 ---
 
-## Phase 0 – Core Foundation (V0.1) ✅
+## 2. Architekturprinzipien
 
-- [x] Rust-Daemon
-- [x] ABrain CLI-Adapter
-- [x] Async CLI-Loop
-- [x] Config (.env)
-- [x] Logging (tracing)
-- [x] Timeout- und Fehlerbehandlung
-
----
-
-## Phase 1 – Voice Interface (V0.2) ✅
-
-- [x] STT-Command-Adapter
-- [x] TTS-Command-Adapter
-- [x] `voice`-Befehl (einmaliges STT → ABrain)
-- [x] `speak <text>`-Befehl
-- [x] `audio-status`-Befehl
-- [x] `auto-speak`-Config
-- [x] sicheres Fallback-Verhalten bei fehlenden Commands
-
-### Offen (Phase 1)
-
-- [ ] Push-to-Talk
-- [ ] Wake-Word
-- [ ] Streaming-Audio
-- [ ] Engine-Presets (Piper, Whisper.cpp, Vosk, …)
+- **Rust-Core** (`core/src/`) hält Protokoll, Provider-Abstraktion,
+  Approval-Engine, Audit-Store, Interaction-Executor. Keine UI-
+  Logik im Core.
+- **Godot-UI** (`ui/`) ist Renderer plus Thin-Client. Kein Core-
+  Ersatz, keine parallelen State-Maschinen.
+- **IPC:** lokaler WebSocket auf `127.0.0.1:8787` (Default),
+  JSON-Text-Frames, additive Envelopes, keine Persistenz des
+  Transports. Siehe [`docs/api.md`](./docs/api.md).
+- **Provider-Achsen:** text / stt / tts. Jede Achse hat eine
+  kuratierte Whitelist und eine geordnete Kette mit Fallback.
+- **Approval:** `PendingApprovalRegistry` enforced Idempotenz
+  (Double-Approve → `error`-Frame). Kein Persistenz-Layer, keine
+  Policy-Engine, keine Multi-Seat-Semantik.
+- **Audit:** bounded Ring-Buffer, sanitisiert, in-memory. Read-
+  only Wire-Endpoint `audit_recent`. Siehe
+  [`docs/security/AUDIT_TRAIL.md`](./docs/security/AUDIT_TRAIL.md).
 
 ---
 
-## Phase 2 – IPC Bridge (V0.3) ✅
+## 3. Current Stable Baseline
 
-- [x] WebSocket-Server (lokal, additiv zum CLI-Loop)
-- [x] JSON-Protokoll (`core/src/ipc/protocol.rs`)
-- [x] Geteilte Handler (CLI und IPC nutzen denselben Code)
-- [x] Events: `thinking`, `response`, `heard`, `error`
-- [x] `get_status`-Endpoint
-- [x] Robuste Fehlerbehandlung (kein Crash bei ungültigem JSON)
-- [x] **Action Event Model v1** (`core/src/actions/`,
-      `action_planned` / `action_started` / `action_step` /
-      `action_completed` / `action_failed` additiv in
-      `submit_text` / `voice_once` / `speak_text`)
+### Core
 
-### Offen (Phase 2)
+- `core/src/app.rs` Orchestrator, broadcast-basierter
+  Outgoing-Kanal.
+- `core/src/actions/` Action-Event-Modell v1 + Demo-Plan-Modell
+  (PR 18).
+- `core/src/approvals/` ApprovalRequest/Resolved mit `risk` +
+  `source`, PendingApprovalRegistry (idempotent).
+- `core/src/audit/` AuditStore (Ring-Buffer; Default 100 / Hard
+  1000 / Env `SMOLIT_AUDIT_MAX_EVENTS`).
+- `core/src/interaction/` InteractionExecutor + CommandBackend.
+  Nur `open_application` ist real verdrahtet; `focus_window` /
+  `type_text` / `send_shortcut` sind `BackendUnsupported`.
+- `core/src/providers/` text (abrain / llamafile_local /
+  local_http / cloud_http), stt (command), tts (command).
+- `core/src/settings_store.rs` + `secrets_store.rs` JSON-
+  Persistenz pro Achse; Secrets separat 0600.
 
-- [ ] Server-seitige Reconnect-/Keepalive-Politik ausbauen
-- [x] Event-Erweiterungen (TTS-Start/-Ende) — PR 14, MVP:
-      `speaking_started` / `speaking_ended` additiv im bestehenden
-      `OutgoingMessage`-Enum; Pairing und Error-Klassen siehe
-      [`docs/api.md` §2.11](docs/api.md). **Nicht enthalten:**
-      Streaming-Audio, Phonem-/Lip-Sync, Audio-Timeline.
-- [ ] Streaming-Support
-- [ ] aktive Emission von `action_progress` / `action_verification` /
-      `action_cancelled` (Typen sind bereits vorgesehen)
-- [ ] strukturierte Targets (derzeit emittieren alle Flows
-      `target: unknown`)
+### IPC
 
----
+- 34 Incoming-Commands (inkl. PR 17 `approval_approve` /
+  `approval_deny` / `request_approval_demo`, PR 18
+  `plan_demo_action`, PR 19 `audit_recent`).
+- 24 Outgoing-Envelopes (inkl. PR 14 `speaking_started` /
+  `speaking_ended`, PR 17 `risk` / `source`-Felder additiv, PR 19
+  `audit_recent`). `action_progress` ist reserviert, wird heute
+  nicht emittiert.
 
-## Phase 3 – Avatar UI (V0.4)
+### UI
 
-### Subeinheit 3.1 – Bootstrap + IPC-Client MVP ✅
+- 3 Autoloads (EventBus / IpcClient / MCPRuntime).
+- 9 Scenes (Avatar, Utterance, Workflow-Overlay-alt, Workflow-
+  Visibility-Panel, Approval-Card, Audit-Panel, Settings-Shell,
+  Dev-Controls, Main).
+- Behavioral Expression Layer v1 (PR 15) als Multiplier-/Tint-
+  Patch oberhalb der bestehenden Avatar-State-Maschine.
+- Workflow Visibility Overlay v1 (PR 16) linear über acht
+  Schritt-Kategorien + `APPROVAL` (PR 17).
+- Approval-Card (PR 17) + Dev-only Audit-Panel (PR 19, nur bei
+  `SMOLIT_UI_DEV_CONTROLS=1` sichtbar).
 
-- [x] Godot-4-Projekt (`ui/project.godot`)
-- [x] WebSocket-Client (`ui/autoload/ipc_client.gd`, `WebSocketPeer`)
-- [x] Verbindung zu Core-IPC (`ws://127.0.0.1:8787`)
-- [x] Basis-Eingabe (Text + Buttons, noch kein Voice-Trigger)
-- [x] Textanzeige (log-artig, farbcodiert via RichTextLabel)
-- [x] Reconnect- und Lifecycle-Handling (500 ms → 5 s Backoff,
-      automatisches `get_status` nach Connect)
+### Audio
 
-### Subeinheit 3.2 – Avatar + Zustandsrendering (MVP ✅)
+- TTS/STT nur command-basiert; Provider-Chain existiert mit
+  einem Kind (`command`).
+- TTS-Lebenszyklus `speaking_started` / `speaking_ended` (PR 14)
+  wird vom Avatar und der Utterance-Bubble konsumiert.
+- **Kein** Streaming-Audio. **Kein** Phonem-/Lip-Sync.
 
-- [x] Avatar-Szene (`ui/scenes/avatar/avatar_root.tscn`) mit eigener
-      Node-Struktur und State-Controller
-      (`ui/scripts/avatar/avatar_controller.gd`)
-- [x] State-Mapping auf bestehenden EventBus-Signalen
-      (`idle` / `thinking` / `talking` / `disconnected` / `error`)
-- [x] Deterministischer Rückfall `talking → idle` via Timer
-- [x] Platzhalter-Rendering (ColorRect-Body, Gesicht, Mouth-Tween,
-      Thinking-Indicator)
+### Provider / Settings
 
-### Offen (Phase 3.2)
+- 4 Text-Kinds wählbar; `cloud_http` mit Bearer-API-Key aus
+  `secrets_store` (0600).
+- Settings-Shell (Phase 8c) rendert status-read-only; Schreib-
+  pfade gehen über dedizierte IPC-Commands.
 
-- [~] Echte Sprite-/Charakteranimation statt Platzhalter — Phase 3.2
-      Render-Polish gelandet: geteilter prozeduraler **Rim-Accent-Ring**
-      an der Silhouette (`ui/scripts/avatar/avatar_rim_accent.gd`,
-      `$AvatarRoot/RimAccent`), der Smolit und die drei kuratierten
-      Alternativen identitätsneutral mit state-farbigem Silhouetten-
-      Akzent versorgt (`IDLE` / `THINKING` / `TALKING` / `ACTING` /
-      `DISCONNECTED` / `ERROR`); dazu kleiner prozeduraler Polish in
-      `avatar_identity_visual.gd` für Robot (Face-Plate + Pupillen +
-      Antennen-Stalk), Humanoid (Wangen + Pupillen-Highlights +
-      Kinn-Schatten) und Orb (vierstufiger Halo-Verlauf +
-      Sekundär-Highlight). Smolit-`TEXTURE`-Pfad unverändert; Rim
-      profitiert auch den Default. Rein prozedural, keine Asset-
-      Imports, keine neue State-Maschine, kein Capability-Contract-
-      Eingriff. Verifiziert durch 19-Assertions-Smoke
-      `scripts/avatar_render_polish_smoke.gd` (Harness-Case
-      `avatar-render-polish-smoke`). **Restschuld:** echte
-      Sprite-/Charakteranimation im Sinn einer animierten Figur
-      (z. B. Blink, Idle-Breath auf Asset-Ebene, Acting-Geste) ist
-      weiterhin offen und nicht Teil dieses Schritts. Details in
-      [docs/ui_architecture.md §7 „Phase B Render Polish"](./docs/ui_architecture.md).
-- [x] Speech-Bubble für `response` und `heard` — kleiner Utterance-MVP
-      (`ui/scripts/utterance/`, `ui/scenes/utterance/utterance_bubble.tscn`)
-      neben dem Avatar. Rein rendernd, EventBus-getrieben
-      (`heard_received` / `response_received` / `ipc_disconnected`),
-      genau ein aktiver Slot (kein Konversationsverlauf, kein
-      Transcript), deterministisches Text-Shaping (strip + Ellipsis bei
-      `MAX_CHARS = 240`), Kill-and-replace-Timer/-Tween. Keine IPC-
-      /Protokolländerung, kein TTS-Sync, keine Interaktion, keine
-      Stage-C-/Appearance-Kopplung. Verifiziert durch 52-Assertions-
-      Smoke `scripts/utterance_bubble_smoke.gd` (Harness-Case
-      `utterance-bubble-smoke`). Details in
-      [docs/ui_architecture.md §8.4](./docs/ui_architecture.md).
-- [x] Speech-Sync via TTS-Lebenszyklus-Events — PR 14, konservativer
-      MVP. Core emittiert `speaking_started` / `speaking_ended`
-      genau dann, wenn TTS wirklich läuft (sowohl `speak_text` als
-      auch `auto_speak`), mit stabilem Pairing und kuratierten
-      Error-Klassen im Fehlerfall. UI spiegelt das in zwei minimalen
-      Hooks: Avatar nimmt den Core-Lifecycle als Taktgeber statt des
-      alten fixen `TALK_HOLD_SECONDS`-Timers (`TALK_SETTLE_SECONDS =
-      0.35` bei `ok`, bestehender ERROR-Pfad bei `!ok`) und die
-      Utterance-Bubble verlängert den Display-Timer einer aktiven
-      `response`-Bubble einmal, damit die Antwort nicht ausfadet,
-      während Smolit noch spricht. Verifiziert durch neue
-      Core-Tests in `core/src/ipc/server.rs` /
-      `core/src/ipc/protocol.rs` sowie den 19-Assertions-Smoke
-      `scripts/speech_sync_smoke.gd` (Harness-Case
-      `speech-sync-smoke`). **Bewusste Restschuld:** kein
-      Streaming-Audio, kein Phonem-/Lip-Sync, keine Audio-Timeline,
-      keine Stage-C-Ausdrucksstufen — diese Pfade bleiben in
-      [docs/ui_architecture.md §7 „Phase C"](./docs/ui_architecture.md)
-      geparkt. Details in
-      [docs/api.md §2.11](./docs/api.md) und
-      [docs/ui_architecture.md §8.4a](./docs/ui_architecture.md).
-- [x] Avatar-State-Mapping auf Action Events (neuer `acting`-State,
-      `action_started` / `action_step` / `action_completed` /
-      `action_failed` / `action_cancelled` respektieren bestehende
-      `thinking` / `talking`-Zustände)
+### Approval / Gating / Audit
 
-### Subeinheit 3.3 – Presence & Overlay MVP ✅
+- Approval-Kette für `open_application` (Interaction), für
+  `request_approval_demo` und für `plan_demo_action` (alle PR 17 /
+  PR 18).
+- **Keine** reale Policy-Engine; die Gating-Kette ist verdrahtet,
+  aber kein Core-Feature ist dadurch *gesperrt*.
+- Audit erfasst IPC-Command-Received, Action-Planned,
+  Approval-Requested/Resolved, Action-Started/Completed/Cancelled,
+  IPC-Command-Rejected. Ein Core-Restart leert den Store.
 
-- [x] Presence-State-Modell (`ui/scripts/presence/presence_state.gd`)
-      mit den Modi `docked` / `expanded` / `action` / `disconnected`
-- [x] Presence-Controller (`ui/scripts/presence/presence_controller.gd`)
-      als EventBus-Konsument; Hold-Timer für Completed/Failed/Cancelled,
-      automatischer Übergang in den Action-Modus bei `action_started` /
-      `action_step`
-- [x] Main-Layout mit Header (Status + Presence-Label + Toggle),
-      Action-Banner (Titel / Step / symbolisches Target / Status) und
-      docked/expanded-Umschaltung von Log und Eingabezeile
-- [x] Separation Presence-State (UI-Umfang) vs. Avatar-State
-      (visueller Ausdruck) — zwei unabhängige Achsen
-- [x] Symbolisches Target-Mapping (`→ Anwendung` / `→ Fenstertitel` /
-      `→ Label (Rolle)` / `→ Region`) — keine Pixelgeometrie
-- [x] Angereichertes Target-/Mapping-Rendering im Action-Banner:
-      Kind-Chip (`[application]` / `[window]` / `[ui_element]` /
-      `[region]` / `[unknown]`), Primärname + Sekundärdetail,
-      Mapping-Zeile mit `space`, `hint` und optionalem Fensterbezug;
-      stille Fallbacks, wenn Target- oder Mapping-Felder fehlen
-- [x] Symbolische Avatar-Tint-Variante je Target-Kind im ACTING-State
-      (rein farblich, keine Bewegung, keine Koordinaten)
-- [x] Compact Input UX am Icon (Docked-Presence): Klick auf den Avatar
-      öffnet ein leichtes Eingabepanel mit Text/Send, Voice, Add-Files-
-      Hook (Placeholder), Mini-Commands-Hilfe und Close/Escape. Nutzt
-      denselben `submit_text`- / `voice_once`-Pfad wie die Expanded-
-      Eingabe und schließt kontrolliert beim Wechsel nach Expanded/
-      Disconnected. Siehe
-      [docs/ui_architecture.md §8.3](./docs/ui_architecture.md).
+### Window / Overlay
 
-### Offen (Phase 3.3)
+- Overlay-MVP (transparent + optional click-through) als opt-in,
+  detaillierte Matrix in
+  [`docs/linux_window_overlay_architecture.md`](./docs/linux_window_overlay_architecture.md).
+- X11-only Always-on-top als eigenständiger opt-in Pfad
+  (`SMOLIT_UI_ALWAYS_ON_TOP=1`). Auf GNOME/Wayland ist AOT
+  bewusst verweigert.
 
-- [ ] Randloses, always-on-top Fenster (native) — randlos ist mit dem
-      opt-in Overlay-MVP (Phase B) bereits Teil der transparenten
-      Presence-Schicht; Always-on-top bleibt unter Wayland
-      (GNOME/Mutter) **nicht** über Standard-Toplevel-Hints machbar,
-      siehe
-      [docs/linux_window_overlay_architecture.md](./docs/linux_window_overlay_architecture.md)
-      §C.1 / §D
-- [~] Transparenter Hintergrund / echter Desktop-Overlay — opt-in über
-      `SMOLIT_UI_OVERLAY=1` mit ehrlichem Fallback; siehe
-      [docs/linux_window_overlay_architecture.md §F.2](./docs/linux_window_overlay_architecture.md)
-- [ ] Click-through-Modus (togglebar) — X11 via XShape, Wayland via
-      `wl_surface.set_input_region`, braucht zusätzlich definierte
-      interaktive Zonen (Passthrough-Polygone), damit Avatar und Banner
-      klickbar bleiben; siehe
-      [docs/linux_window_overlay_architecture.md](./docs/linux_window_overlay_architecture.md)
-      §C.3
-- [ ] Snap-to-Edge, Screen-Positionierung, Multi-Monitor-Heuristik —
-      unter Wayland nicht client-seitig; frühestens in Phase C der
-      Overlay-Strategie
-- [~] Visual Action Modes (minimal feedback / guided / theatrical) als
-      Benutzerpräferenz — Phase-3.3-MVP gelandet: UI-Staging-Achse
-      mit vier Modi (`none` / `minimal_feedback` / `guided_movement` /
-      `full_theatrical`), die rein innerhalb der Presence-Hülle das
-      Action-Banner und das Workflow-Overlay gaten und in der Deckkraft
-      modulieren. Realisiert in `ui/scripts/presence/visual_action_mode.gd`
-      und `ui/scripts/presence/visual_action_preferences.gd`; Integration
-      im `main.gd` (Resolver `Env > Preferences > Default`, Staging-Push
-      auf Banner + Overlay) und in der env-gated Dev-Steuerung
-      (`SMOLIT_UI_DEV_CONTROLS=1`, Vier-Stufen-Picker + „Save as
-      default"). Env-Flag `SMOLIT_UI_VISUAL_ACTION_MODE` (kanonische
-      Namen plus Aliasse `off` / `min` / `guide` / `demo`). Persistenz
-      in `user://smolit_ui.cfg` Sektion `[presence]`. Verifiziert durch
-      41-Assertions-Smoke `scripts/visual_action_mode_smoke.gd`
-      (Harness-Case `visual-action-mode-smoke`). Default bleibt
-      `minimal_feedback` — reproduziert den bisherigen Ist-Stand.
-      **Restschuld (bewusst):** Die Endausprägung aus
-      [docs/presence_desktop_interaction.md §7.3 / §7.4](./docs/presence_desktop_interaction.md)
-      — Avatar zeigt Zielobjekt, Bewegungspfad, Gestik über Fremd-
-      fenster — ist **nicht** implementiert und bleibt offen. Der
-      heutige Schritt benennt die vier Produktstufen ehrlich, liefert
-      aber nur eine In-Place-Intensitätsachse; keine Pixel-Geometrie,
-      keine Desktop-Automation, keine Core-/IPC-Änderung. Details in
-      [docs/ui_architecture.md §8.5](./docs/ui_architecture.md) und
-      [docs/presence_desktop_interaction.md §7.5](./docs/presence_desktop_interaction.md).
-- [ ] Kill-Switch / Stop-Aktion im Banner (setzt Core-seitige
-      Cancel-API voraus)
+### Desktop Interaction
 
-### Subeinheit 3.4 – Workflow Overlay / Visual Action Flow (MVP-Spike, PR 2)
-
-MVP-Spike aus PR 1 bleibt die Basis (drei feste Knoten Trigger →
-Action → Result, zwei Kanten, read-only, core-driven, keine neue
-IPC, kein Builder). PR 2 schärft die bestehende Kurzprojektion
-nach, ohne den Scope zu vergrößern:
-
-- **Zweistufige Darstellung.** Automatischer Wechsel zwischen
-  `COLLAPSED` (bei `PLANNED`) und `EXPANDED` (bei `ACTIVE` /
-  Terminal). Keine Interaktion, kein Nutzerschalter, keine zweite
-  Presence-State-Maschine — der Modus ist eine reine Funktion der
-  aktuellen Phase.
-- **Bessere Node-Semantik.** Klare Fallback-Ketten pro Rolle (
-  `trigger_label_from_payload`, `action_label_from_payload`,
-  `step_label_from_payload`, `result_label_from_payload`,
-  `cancel_label_from_payload`) als pure Helper in
-  `workflow_overlay_state.gd`. Leere Labels zeigen den
-  Rollennamen + einen neutralen Default („Start", „Working…",
-  „Done") statt leerer Kapseln.
-- **Robustere Event-Rekonstruktion.** Step-Counter liefert einen
-  optionalen Hint („Step 3") im EXPANDED-Modus; leere
-  `action_step`-Payloads überschreiben bestehende Labels nicht
-  mehr; ein `action_step` vor `action_planned` promotet den Flow
-  still auf `ACTIVE`.
-- **Ruhigerer visueller Rhythmus.** Kantenpuls von 1.1 s → 1.45 s,
-  Linien- und Padding-Werte zwischen den Modi differenziert,
-  leisere Aktivitätsfarbe.
-- **Harness-Integration.** Neuer Case `workflow-state-smoke` in
-  `scripts/run_overlay_verification.sh` läuft
-  `scripts/workflow_overlay_state_smoke.gd` (47 Assertions, alle
-  PASS) — deckt Label-Ketten, Phase→DisplayMode, Step-Hint ab.
-
-Was bewusst **nicht** Teil von PR 2 ist:
-
-- kein Workflow-Builder, kein Editor, kein freier Canvas;
-- keine action_id-Queue, kein History-System, keine Persistenz;
-- keine neuen Event-Typen, keine Protokolländerung, keine neue
-  IPC-Nachricht;
-- kein Nutzer-Toggle zwischen Collapsed und Expanded;
-- keine Änderung an Window-Behavior, Avatar, Presence, Banner,
-  Discovery-Panel, Compact-Input.
-
-**PR 4 (Dev-Steuerung).** Zusätzlich zur produktiven Workflow-
-Overlay-Logik gibt es jetzt einen kleinen, opt-in Dev-Hook
-`workflow_overlay_controller.preview_phase(name)` — siehe
-`docs/ui_architecture.md` §8c. Der Hook setzt den internen Flow-
-Zustand direkt auf eine der bekannten Phasen, ohne EventBus-
-Injection, ohne Action-Event-Erzeugung, und wird nur aus dem
-env-gategten Dev-Panel (`SMOLIT_UI_DEV_CONTROLS=1`) aufgerufen.
-Read-only-Charakter des Overlays bleibt erhalten.
-
-**1. Kurzbeschreibung.** Ein transparentes, leichtgewichtiges
-visuelles Flow-Overlay, das links vom Avatar/Icon bzw. als linker
-Flügel innerhalb derselben Presence-Hülle erscheint. Es zeigt auf
-Basis der Action Events einen verständlichen Handlungsfluss
-(Trigger / Schritte / Aktion / Ergebnis). **Read-only**, kein
-Editor, kein Executor, kein zweites Logiksystem.
-
-**2. MVP-Scope.**
-
-- kleine node-basierte Darstellung, Standardfall 2–4 Knoten;
-- gerichtete Kanten mit dezenten Aktivitätsanimationen;
-- semantische Zustände pro Knoten/Kante: `geplant` / `aktiv` /
-  `erfolgreich` / `fehlgeschlagen` / `abgebrochen` / `unklar`;
-- **kein** Zoom, **kein** Pan, **kein** Drag, **keine** freie
-  Verkabelung, **kein** unendlicher Canvas.
-
-**3. Event-Bindung.** Das Overlay konsumiert ausschließlich
-Action Events aus dem Core — es erzeugt keine eigenen Zustände.
-Im MVP bevorzugt genutzt:
-
-- `action_planned`
-- `action_started`
-- `action_step`
-- `action_completed`
-- `action_failed`
-
-Spätere Eventtypen (`action_verification`, `action_cancelled` o. ä.)
-können **additiv** hinzukommen, sollen aber nicht als heutiger
-Ist-Zustand dargestellt werden. Details zur Projektion in
-[docs/api.md „UI-Projektion: Workflow Overlay"](./docs/api.md).
-
-**4. Nicht-Ziele.**
-
-- kein n8n-Ersatz, kein Workflow-Authoring, kein Graph-Editor;
-- keine Desktop-Automation in Godot;
-- keine zweite Session- oder Execution-Logik in der UI;
-- keine Protokollhoheit — die Wahrheit bleibt im Core;
-- Smolit wird dadurch **kein** visueller Workflow-Builder.
-
-**5. Offene Punkte.**
-
-- Layout-Strategie (feste Spur vs. adaptiv, vertikal vs. radial);
-- Node-Semantik / Symbolik (Trigger / Step / Action / Result);
-- Collapse/Expand-Verhalten bei längeren Abläufen;
-- spätere Visualisierungsstufen (Inspect, History-Rewind) sind
-  explizit **nicht** MVP-Teil, aber architektonisch nicht
-  ausgeschlossen.
-
-Dieses Overlay erweitert die Presence-Linie, hält aber die Trennung
-zwischen sichtbarer Darstellung und technischer Ausführung strikt
-aufrecht — die Desktop-Ausführung bleibt ausschließlich im Core /
-Desktop Interaction Layer, die UI projiziert nur.
+- Interaction-Layer-MVP: nur `open_application`. Accessibility-
+  Probe + Discovery laufen ehrlich als „unavailable / uncertain"
+  bis der AT-SPI-RPC-Spike umgesetzt ist.
 
 ---
 
-## Phase 4 – Behavioral Layer (V0.5)
+## 4. Completed Milestones
 
-- [x] **Micro-Animation / Personality Layer v1 (UI-only)** — subtile
-      Idle-Breath, Thinking-Breath, Acting-Pulse, Talking-Pulse,
-      Error-Startle; seltener Curious-Wiggle im Idle; ruhiger
-      Disconnected-Zustand; sauber geschichtet auf drei orthogonalen
-      Transform-Properties (Root-Scale / Body-Scale / Body-Rotation).
-      Rein UI-seitig, keine neuen States, keine IPC-/Protokolländerung.
-      Siehe
-      [docs/ui_architecture.md §7](./docs/ui_architecture.md) „Phase B++".
-- [x] **Behavioral Expression Layer v1 (UI-only, PR 15)** — sechs
-      kuratierte Ausdrucksmodi (`neutral` / `focused` / `curious` /
-      `speaking` / `pleased` / `error_soft`) als dünner Multiplier-
-      /Tint-Patch oberhalb der bestehenden Avatar-States. Event-
-      Mapping: `thinking → focused`, `response → pleased → state-
-      default`, `speaking_started → speaking` (sticky), `speaking_ended
-      ok → pleased → state-default`, `speaking_ended !ok → error_soft
-      + bestehender ERROR-Pfad`, `heard → curious` (transient),
-      `disconnected → neutral`. Template-Capability-Contract bleibt
-      bindend (`orb.wiggle = NONE` ist auch in `curious` still).
-      **Ausdrücklich kein** Emotion-Protokoll, **kein** Phonem-/Lip-
-      Sync, **kein** Streaming-Audio, **keine** Asset-Imports. PR 14-
-      Speech-Sync bleibt das Fundament; PR 15 nutzt
-      `speaking_started` / `speaking_ended` nur visuell. Verifiziert
-      durch `scripts/avatar_expression_smoke.gd` (Harness-Case
-      `avatar-expression-smoke`). Details in
-      [docs/ui_architecture.md §7 „Phase 4 – Behavioral Expression Layer v1"](./docs/ui_architecture.md).
-      **Offene Restschuld:** feinere Zustände wie `alert`, Emotion-
-      Mapping aus ABrain-Responses, antwortabhängige Reaktionen
-      (Text-Tonalität → Ausdruck) — das würde ein neues Protokoll
-      und/oder einen Streaming-Pfad brauchen und bleibt Phase C.
-- [x] **Workflow Visibility Overlay v1 (UI-only, PR 16)** — read-only
-      Panel neben dem Avatar, das die bestehenden UI-Events in eine
-      kleine lineare Kette sichtbarer Workflow-Schritte projiziert:
-      `heard → thinking → response → action → step → speaking →
-      completed/failed`. Acht kuratierte Step-Kategorien, Snippets
-      hart auf 60 Zeichen gekürzt, Status-Badges (pending / active /
-      done / failed / skipped). Konsumiert ausschließlich bereits
-      existierende EventBus-Signale — keine neuen IPC-Events, kein
-      `emotion`-Feld, kein Core-Hook. PR 14 Speech-Sync
-      (`speaking_started` / `speaking_ended`) und PR 15 Expression
-      Layer bleiben das Fundament; PR 16 nutzt sie nur als Ereignis-
-      Quelle. Standardmäßig hidden; Opt-in per
-      `SMOLIT_WORKFLOW_OVERLAY=1` oder Toggle im Dev-Panel
-      (`SMOLIT_UI_DEV_CONTROLS=1`). Scope-Kuratierung: kein Editor,
-      kein n8n-Ersatz, kein Drag/Drop, kein Speichern, kein Export,
-      keine Approval-/Interaction-/Provider-/Settings-Änderung,
-      keine langen Textinhalte. Verifiziert durch
-      `scripts/workflow_visibility_smoke.gd` (Harness-Case
-      `workflow-visibility-smoke`). Details in
-      [docs/ui_architecture.md §8.4c](./docs/ui_architecture.md).
-      **Offene Restschuld:** Detail-Layer (Zeitleiste, Dauer-Balken),
-      parallele Workflows, Export/Persistenz, optional zukünftige
-      Core-Emission eines `workflow_snapshot`-Envelopes.
-- [x] **Approval UX v1 — Card + Integrationen (PR 17)** —
-      `control > autonomy`. Smolit darf geplante Aktionen erklären
-      und um Zustimmung bitten; **keine** gefährlichen Aktionen
-      landen in diesem PR. Additive Core-Erweiterung: `risk` auf
-      `ApprovalRequest` (`low` / `medium` / `high`, Default
-      `medium`), `source` auf `ApprovalResolvedPayload` (`user` /
-      `timeout` / `system`), neue schmalere Commands
-      `approval_approve` / `approval_deny` (wire-äquivalent zu
-      `approval_response`) und ein **harmloser Demo-Auslöser**
-      `request_approval_demo`, der eine Approval-Kette ohne
-      Backend-Aktion öffnet. Neue UI: `ApprovalCard`
-      (`ui/scenes/approval/approval_card.tscn`) mit Titel/Summary/
-      Risk-Badge und Approve/Deny-Buttons, Resolving-Zustand,
-      Disconnect-Gate, Summary-Kürzung auf 140 Zeichen. Integration
-      in PR 16 (neuer Step-Kind `APPROVAL`), weicher Avatar-
-      Expression-Hook (PR 15; `curious` bei Request, `error_soft`
-      bei Denied/Cancelled/TimedOut/Expired) und Dev-Panel-Knöpfe
-      für alle drei Risikostufen (session-only). Verifiziert durch
-      `scripts/approval_card_smoke.gd` (Harness-Case
-      `approval-card-smoke`) plus Core-Tests für Demo-Flow,
-      Risk-Sanitization und Idempotenz. Details in
-      [docs/api.md §2.7](./docs/api.md),
-      [docs/ui_architecture.md §8.4d](./docs/ui_architecture.md)
-      und [docs/security/APPROVAL_UX.md](./docs/security/APPROVAL_UX.md).
-      **Ausdrücklich NICHT Teil von PR 17:** echte Tool-Gating-
-      Integration, Desktop-Automation, Shell-Zugriff, AdminBot-
-      Call, Policy-Engine, Persistenz, Approval-Historie, sensible
-      Full-Payloads im UI, langer Text. Der Core-Approval-Kanal
-      ist weiterhin Loopback-WebSocket; PR 17 erweitert nur die
-      UX-Oberfläche darüber.
-- [x] **Approval-Gated Action Planner v1 (PR 18)** —
-      `control > autonomy`, jetzt mit konkreter Gating-Kette.
-      Neues pures Modul `core/src/actions/plan.rs` (`DemoPlan`,
-      `DemoPlanStatus`, drei kuratierte Kinds `demo_echo` /
-      `demo_wait` / `noop`, sanitisierte Titel/Summary/Risk).
-      `App::plan_demo_action` emittiert `action_planned`, optional
-      `approval_requested`, und führt erst nach `approved` eine
-      **reine Mock-Kette** (`action_started → action_step →
-      action_completed`) aus. Deny/Cancel/Timeout emittieren
-      `action_cancelled` ohne Mock-Lauf. Idempotenz durch die
-      bestehende `PendingApprovalRegistry`: ein zweiter Approve
-      landet als `error`-Frame, nie als zweite Ausführung. Neuer
-      IPC-Command `plan_demo_action { title?, summary?, risk?,
-      kind?, requires_approval? }` plus UI-Helfer
-      `IpcClient.plan_demo_action` und zwei Dev-Panel-Buttons
-      („Run (no approval)" / „Run (needs approval)"). Approval-
-      Card (PR 17) rendert die Frage unverändert; Workflow
-      Visibility Overlay (PR 16) spiegelt die volle Kette
-      (ACTION/APPROVAL/STEP/COMPLETED oder APPROVAL-FAILED +
-      ACTION-FAILED). Details in
-      [docs/api.md §2.7](./docs/api.md),
-      [docs/ui_architecture.md §8.4e](./docs/ui_architecture.md)
-      und [docs/security/APPROVAL_UX.md](./docs/security/APPROVAL_UX.md).
-      Verifiziert durch sechs neue Core-IPC-Tests + erweiterte
-      `approval-card-smoke` und `workflow-visibility-smoke`.
-      **Ausdrücklich NICHT Teil von PR 18:** echte Systemaktionen,
-      Shell, Dateisystem-Ops, AdminBot, Desktop-Automation, echte
-      Provider-Mutationen, Policy-Engine, Persistenz, Approval-
-      Historie, kryptografische Signaturen. Der Executor ist ein
-      Mock — Grundlage für eine spätere sichere Tool-/Desktop-/
-      AdminBot-Gating-Schicht, nicht der Schalter dafür.
-- [x] **Local Audit Trail v1 (PR 19)** —
-      *accountability without surveillance.* Neues Modul
-      `core/src/audit/` mit `AuditEvent` (kuratiertes Kind-Enum,
-      sanitisierte `source`/`result`/`risk`-Whitelists, hart
-      gekürzte `summary` auf 80 Zeichen) und `AuditStore` (thread-
-      safer In-Memory-Ring-Buffer, Default 100 Einträge, hartes
-      Maximum 1000, Env-Override `SMOLIT_AUDIT_MAX_EVENTS`).
-      `App::plan_demo_action` und der PR-18-Executor rufen den
-      Store an sechs Lifecycle-Stellen; unbekannte/bereits
-      aufgelöste `approval_id`s werden als `ipc_command_rejected`
-      auditiv sichtbar. Read-only IPC-Command `audit_recent
-      { limit? }` liefert eine gekürzte Liste; kein Schreib-Pfad,
-      kein Export. Dev-only UI (`ui/scripts/audit/audit_panel.gd`
-      + `audit_model.gd`) rendert eine schmale Liste (Zeit +
-      Kind-Kurzlabel + Risk + gekürzte ID + Summary) hinter
-      `SMOLIT_UI_DEV_CONTROLS=1`; ohne Opt-in bleibt das Panel
-      hidden. Verifiziert durch neue Core-Tests in
-      `core/src/audit/` und `core/src/ipc/server.rs` (sechs
-      Lifecycle-Szenarien inkl. Idempotenz) plus den neuen
-      Harness-Case `audit-panel-smoke` (38 Assertions). Details in
-      [docs/api.md §2.7](./docs/api.md),
-      [docs/ui_architecture.md §8.4f](./docs/ui_architecture.md)
-      und [docs/security/AUDIT_TRAIL.md](./docs/security/AUDIT_TRAIL.md).
-      **Ausdrücklich NICHT Teil von PR 19:** persistente Speicherung
-      (weder Datei noch DB noch Cloud), Datei-Export, vollständige
-      User-Prompts, vollständige TTS-/STT-Texte, Audio-Bytes,
-      Approval-Historie als Produktfeature, kryptografische
-      Signatur / Manipulationssicherheit, Policy-Engine,
-      AdminBot-/Desktop-/Shell-Aktionen. Der Store ist ein
-      Dev-/Debug-Hilfsmittel; ein Core-Restart leert ihn
-      vollständig.
-- [ ] Emotion-Mapping Core → UI (setzt Protokollerweiterung um
-      `emotion` voraus)
-- [x] Speech-Sync (TTS-Lebenszyklus-Events → Animation) — MVP via
-      PR 14, siehe Subeinheit 3.2. Tiefer gehender Sync (Phonem,
-      Audio-Timeline) bleibt offen.
-- [ ] Antwortabhängige Reaktionen (Text-Tonalität → Expression-
-      Auswahl); heute nur binär PLEASED bei Erfolg / ERROR_SOFT bei
-      Fehler. Feinere Abbildung bräuchte Emotion- oder Sentiment-
-      Signal aus dem Core.
-- [ ] erste echte Persönlichkeits-Cues über rein visuelle Mikro-Cues
-      hinaus
+- **Phase 0 — Core Foundation.** Tokio-Server, Config-Loader,
+  Tracing, Cargo-Build.
+- **Phase 1 — Voice Interface.** TTS-/STT-Command-Adapter,
+  `speak` / `voice` / `audio-status`.
+- **Phase 2 — IPC Bridge.** WebSocket-Server, JSON-Protokoll,
+  Action-Event-Modell v1, Status-Payload.
+- **Phase 3 — Avatar / Presence / UI.** Godot-Projekt, 2D-Avatar-
+  MVP, Expanded/Docked-Presence, Compact-Input, Workflow-
+  Overlay-Spike, Accessibility-Probe-Spike, Target-Selection,
+  Window-Overlay-MVP inkl. AOT-X11-Spezialpfad.
+- **Phase 4 — Behavior / Visibility / Approval / Audit.**
+  PR 14 (TTS-Lifecycle), PR 15 (Behavioral Expression Layer),
+  PR 16 (Workflow Visibility Overlay v1), PR 17 (Approval UX v1),
+  PR 18 (Approval-Gated Demo Action Planner), PR 19 (Local Audit
+  Trail v1), PR 20 (Docs Reality Check — dieser PR).
+
+Detaillierte PR-Historie: [`docs/reviews/`](./docs/reviews/).
 
 ---
 
-## Phase 4b – Avatar Appearance & Personalization (parallele Linie; Stufen A und B Ist, Stufe C research-/security-gated)
+## 5. Open Workstreams
 
-Parallele Linie zu Phase 4 (Behavioral Layer). Diese Phase beschreibt
-die Erweiterung der bestehenden Avatar-/Presence-Linie um ein
-strukturiertes **Appearance-System**. Sie ist **rein visuell /
-darstellerisch**, beeinflusst weder Core-Logik noch ABrain noch
-Sicherheits-/Permission-Modelle.
+Single-Source für offene Punkte:
+[`docs/OPEN_WORK.md`](./docs/OPEN_WORK.md).
 
-**Status.** Stufe A ist als MVP-Spike implementiert (nur
-Smolit-Salamander, vier markentreue Themes, drei UI-Behavior-
-Profiles, kleine Appearance-Overrides, Env-gesteuerte Opt-in-
-Konfiguration). Stufe B ist gelandet und gehärtet (drei zusätzliche
-prozedurale Identities neben Smolit und ein Template-Capability-
-Contract; Details siehe §4b.5 unten). Stufe C ist ausdrücklich
-**nicht begonnen**; sie ist in diesem Zyklus ein dokumentierter
-Forschungs-/Designraum mit eigenen Nicht-Zielen, Sicherheitsmodell
-und Exit-Kriterien —
-[`docs/avatar_stage_c_research.md`](./docs/avatar_stage_c_research.md).
-Der Default-Avatar (Smolit Salamander) bleibt unverändert und
-erster-Klasse.
-
-**Bindende Abgrenzungen:**
-
-- Appearance ≠ Behavior ≠ Personality ≠ Policy.
-- Avatar-Auswahl beeinflusst **nicht**: Action-Execution, Permissions,
-  ABrain-Entscheidungen, Systemverhalten.
-- Personalisierung ist **additiv, nicht ersetzend** — der Default
-  Smolit Salamander bleibt erster-Klasse und ist kein austauschbares
-  Theme unter gleichberechtigten Themes.
-- Kein Vermischen von Avatar-Look, Assistant-Personality und
-  Automation-Policy.
-- UI bleibt reiner Renderer; Rust Core bleibt Source of Truth.
-
-### 4b.1 Avatar Identity
-
-Figurentyp — beschreibt **ausschließlich die visuelle Figur**, nicht
-Verhalten oder Logik:
-
-- **Salamander** (Default, Smolit)
-- Roboter
-- Mensch (Kopf / Figur)
-- Tiere
-- abstrakte Formen (z. B. Orb, Nebel)
-
-Ein Wechsel der Identity darf die Liste der unterstützten Presence-
-/Avatar-States nicht implizit ändern; fehlende States fallen auf
-einen neutralen Zustand zurück, ohne die UI zu brechen.
-
-### 4b.2 Avatar Themes / Styles
-
-Mehrere visuelle Varianten **pro Figur**. Themes verändern Stil,
-nicht Funktion. Beispiele:
-
-- `default`
-- `tech`
-- `soft`
-- `neon`
-- `minimal`
-
-Themes sind reine Rendering-Presets; sie dürfen keine Zustands-
-Maschine modifizieren und keine neuen Presence-Modi erzeugen.
-
-### 4b.3 Appearance Overrides
-
-Nutzerspezifische, rein visuelle Anpassungen oberhalb von Identity
-und Theme:
-
-- Farben
-- Glow
-- Outline
-- Größe
-- visuelle Intensität
-
-Overrides sind additiv zum Theme und persistieren als reine
-UI-Präferenz. Im Ist-Zustand landet das in einer sehr kleinen
-lokalen ConfigFile (`user://smolit_ui.cfg`, Sektion
-`[avatar_appearance]`); siehe
-[`docs/ui_architecture.md` §8b.7](./docs/ui_architecture.md). Eine
-größere Persistenz-/Nutzerprofil-Architektur ist in dieser Phase
-bewusst *nicht* Teil des Scopes.
-
-### 4b.4 Behavior Profiles (UI-Ebene)
-
-„Behavior Profile" in diesem Abschnitt meint ausschließlich den
-*visuellen Ausdruck*, nicht Assistant-Verhalten:
-
-- ruhig
-- aktiv
-- verspielt
-- zurückhaltend
-
-Sie modulieren Animationsintensität, Idle-Cues und Übergangsstil —
-**kein** Einfluss auf Core-Entscheidungen, kein Einfluss auf die
-Avatar-State-Maschine, kein Einfluss auf Action-Events oder deren
-Verarbeitung.
-
-### 4b.5 Stufenmodell
-
-Die Personalisierung wird in drei klar getrennten Stufen ausgebaut.
-Stufe A ist implementiert; B und C bleiben Ziel-Zustand.
-
-- **Stufe A — Brand-safe Personalisierung (Ist, MVP-Spike).** Nur
-  Smolit-Varianten, Themes + Behavior Profiles + Appearance
-  Overrides. Realisiert in
-  `ui/scripts/avatar/avatar_appearance.gd`; Integration im
-  bestehenden `avatar_controller.gd`; Steuerung via drei opt-in
-  Env-Variablen (`SMOLIT_AVATAR_THEME` / `SMOLIT_AVATAR_PROFILE` /
-  `SMOLIT_AVATAR_INTENSITY`) und zusätzlich über die kleine
-  env-gated Dev-Steuerung
-  (`SMOLIT_UI_DEV_CONTROLS=1`, Theme/Profile/Intensity live in der
-  UI schaltbar; siehe
-  [`docs/ui_architecture.md` §8c](./docs/ui_architecture.md)).
-  Seit diesem PR zusätzlich eine **kleine lokale UI-Persistenz**
-  (`ui/scripts/avatar/avatar_preferences.gd`, Datei
-  `user://smolit_ui.cfg`, Sektion `[avatar_appearance]`) — die
-  Dev-Steuerung bekommt einen `Save as default`-Button,
-  ausdrücklich **kein** Auto-Save, **kein** Settings-System, **kein**
-  Nutzerprofil. Prioritätsreihenfolge beim Laden ist feldweise und
-  bindend: `Env > gespeicherte Preferences > harte Defaults`. Ohne
-  Env und ohne Preferences-Datei bleibt das Startverhalten byte-
-  identisch zum vor-PR-Stand (alle 8 Harness-Cases diff-sauber).
-  Identitätsgarantie (DEFAULT + CALM + Unity-Overrides == vor-PR-
-  Verhalten) durch den Smoketest
-  `scripts/avatar_appearance_smoke.gd` belegt (32 Assertions
-  PASS; Harness-Case `avatar-appearance-smoke`). Zusätzlich
-  deckt `scripts/dev_controls_smoke.gd` die Übersetzungslogik
-  zwischen Panel und Controllern ab (15 Assertions PASS;
-  Harness-Case `dev-controls-smoke`), und der neue
-  `scripts/avatar_preferences_smoke.gd` prüft Load/Save/Fallback-
-  Reihenfolge, invalide Einträge, partielle Dateien und Intensity-
-  Clamping (22 Assertions PASS; Harness-Case
-  `avatar-preferences-smoke`). Details siehe
-  [`docs/ui_architecture.md` §8b.7](./docs/ui_architecture.md).
-- **Stufe B — Kuratierte Templates (Ist, gehärtet mit Capability-Contract).**
-  Drei zusätzliche Identity-IDs neben Smolit: `robot_head`,
-  `humanoid_head` und `orb`, rein prozedural gezeichnet (keine
-  Binärassets, keine Import-Pipeline). Gleiche Eingabepfade wie
-  Phase A (`SMOLIT_AVATAR_IDENTITY` Env, gespeicherte
-  UI-Preferences, harter Default = Smolit). Unbekannte Werte fallen
-  in allen Schichten still auf Smolit zurück — nie auf eine der
-  Alternativen. Realisiert in `ui/scripts/avatar/avatar_identity.gd`
-  (Katalog), `ui/scripts/avatar/avatar_identity_visual.gd`
-  (prozeduraler `_draw`) und seit dem Hardening-PR zusätzlich
-  `ui/scripts/avatar/avatar_template_capabilities.gd` (Capability-
-  Contract). Jedes Template deklariert jetzt explizit: welche
-  Avatar-States es trägt (inkl. optionalem `state_fallback`, z. B.
-  `orb.TALKING → ACTING`, weil Orb keinen Mund hat), und wie stark
-  es die fünf Ausdrucks-Achsen (Theme-Tint, Behavior-Profile,
-  State-Pulse, Wiggle, Error-Startle) umsetzt
-  (`NONE` / `REDUCED` / `FULL`). Der Avatar-Controller fragt dieses
-  Modul statt auf Identity-IDs zu verzweigen. Dev-Panel bekommt vier
-  Optionen im Identity-Picker. Smoketests
-  `scripts/avatar_identity_smoke.gd` (45 Assertions PASS;
-  Harness-Case `avatar-identity-smoke`) und
-  `scripts/avatar_template_capabilities_smoke.gd` (65 Assertions
-  PASS; Harness-Case `avatar-template-capabilities-smoke`) decken
-  Default, Parser, Fallback, Capability-Lookups und Multiplier-
-  Mapping ab. Details siehe
-  [`docs/ui_architecture.md` §8b.8](./docs/ui_architecture.md).
-  Bewusst **nicht** Teil dieses Schritts: weitere Figuren über die
-  vier hinaus, animierte Prozeduralformen, alternative State-
-  Maschinen, Asset-Imports, Plug-in-Contract-Sprache, User-Uploads.
-- **Stufe C — Forschungs- und Designraum (research-gated,
-  security-gated; nicht begonnen).** Stage C ist in diesem Zyklus
-  ausdrücklich **keine** aktive Build-Phase. Es existiert weder
-  Asset-Loader noch Manifest-Parser noch File-Picker für Avatar-
-  Inhalte; der Capability-Contract aus Stufe B bleibt intern. Was
-  „Stage C" in Zukunft überhaupt meinen könnte — mögliche
-  Architekturpfade (nur mehr kuratierte Templates, repo-gepflegte
-  statische Assets, deklarative lokale Bundles, echte User-Imports),
-  harte Nicht-Ziele (kein Plugin-System, kein Marktplatz, keine
-  ausführbaren Fremdskripte, keine stillen Netzwerkzugriffe, keine
-  Vermischung mit Personality / Policy / Permissions / ABrain),
-  Sicherheits- und Vertrauensmodell sowie Exit-Kriterien für einen
-  späteren echten Implementierungsstart — steht konsolidiert in
-  [`docs/avatar_stage_c_research.md`](./docs/avatar_stage_c_research.md).
-  Ein Übergang von Research in Implementation ist erst legitim, wenn
-  die dort in §10 aufgeführten Kriterien erfüllt sind.
-
-### 4b.6 Nicht-Ziele
-
-- **Kein 3D-Character-Editor.**
-- **Kein generisches Avatar-Rigging-System** im MVP.
-- **Kein Einfluss auf ABrain** — weder über das Appearance-System
-  noch über Behavior Profiles.
-- **Kein Einfluss auf Core-Logik** — gleiche Nutzereingabe erzeugt
-  dieselbe Systemreaktion, unabhängig vom gewählten Avatar.
-- **Kein Einfluss auf Security / Permissions** — Avatar-Wahl
-  verändert keine Approval-Flows, keine Action-Execution-Rechte,
-  keine Trust-Entscheidungen.
-- **Kein automatisches „Persönlichkeits-Upgrade" durch Avatar** —
-  ein „verspieltes" Visual-Profile führt nicht zu anderem
-  Assistant-Verhalten.
-- **Kein Austausch des Defaults.** Smolit Salamander bleibt
-  Default und Referenz; Alternativen sind additiv, nicht
-  ersetzend.
-
-Detailarchitektur siehe
-[`docs/ui_architecture.md`](./docs/ui_architecture.md), Abschnitt
-„Avatar Appearance System (Ziel-Zustand)".
-Presence-Einordnung siehe
-[`docs/presence_desktop_interaction.md`](./docs/presence_desktop_interaction.md),
-Unterabschnitt „Avatar-Personalisierung als Presence-Erweiterung".
+- **A. Docs & Architecture Hygiene** — PR 20 (läuft), Nachläufer
+  PR 21.
+- **B. Window / Overlay / Click-through / AOT Reality** — echte
+  Wayland-Compositor-Messungen noch ausstehend.
+- **C. Audio Pipeline v2** — zweites STT-/TTS-Kind, *kein*
+  Streaming-Audio in Sichtweite.
+- **D. Provider / Settings Consolidation** — Default-Ketten-UX,
+  cloud_http-Onboarding.
+- **E. Approval / Policy / Tool-Gating** — erste echte Gating-
+  Verdrahtung (z. B. für `open_application`).
+- **F. Desktop Interaction Layer** — `focus_window`-Backend-
+  Entscheidung.
+- **G. Avatar Animation / Stage C Research** — research-gated.
+- **H. ABrain Native Integration** — heute CLI; native API ist
+  Ziel-Zustand.
+- **I. Packaging / Release / CI** — noch nicht aufgesetzt.
 
 ---
 
-## Phase 5 – Personality & Memory (V0.6)
+## 6. Next Mandatory PRs (Vorschlag)
 
-- [ ] User-Profil
-- [ ] Session-State
-- [ ] Conversation-Memory
-- [ ] Preference-Storage
-- [ ] Context-aware Responses
-- [ ] Verhaltensmodulation via ABrain
+Reihenfolge ist **nicht bindend**, aber navigierbar. Jeder Schritt
+bleibt klein; keiner führt eine neue gefährliche Fähigkeit ein,
+ohne vorgeschaltete Policy-Verdrahtung.
 
----
-
-## Phase 6 – Presence System (V0.7)
-
-Ziel: Umsetzung des Presence-Modells aus
-[docs/presence_desktop_interaction.md](./docs/presence_desktop_interaction.md),
-§5–§7 (Presence Modes, Docked/Expanded/Action Mode, Visual Action
-Modes). Noch **nicht** implementiert.
-
-- [ ] Presence Modes konfigurierbar (Off / Icon only / Light avatar /
-      Full avatar)
-- [ ] Zustände Docked / Expanded / Action Mode im Overlay
-- [~] Visual Action Modes (none / minimal feedback / guided movement /
-      full theatrical) — Phase-3.3-MVP als UI-Staging-Achse gelandet
-      (siehe Phase 3 Subeinheit 3.3 oben). Endausprägung (Bewegungspfad
-      / Zielobjekt / Gestik über Fremdfenster) bleibt offen.
-- [ ] Screen-Movement
-- [ ] Idle-Behavior-Cycles
-- [ ] Attention-System
-- [ ] Interaction-Zones
-- [ ] Snap-to-Edge-Verhalten
-- [ ] Click-through-Modus (ausgebaut)
+| PR | Workstream | Gegenstand |
+| -- | ---------- | ---------- |
+| 21 | A | Docs-Follow-ups aus PR 20: tote Links, `docs/reviews/`-Index, Glossar-Embryo |
+| 22 | B | Wayland-Compositor-Live-Messung auf separatem Host |
+| 23 | F | `focus_window` Spike: entweder reale `wmctrl`-Verdrahtung hinter Policy oder ehrliche Entfernung |
+| 24 | E | Policy v0: real `require_confirmation=true` → echter Approval-Pfad für `open_application` |
+| 25 | D | Provider-Onboarding-UX: Default-Ketten und cloud_http-First-Run |
+| 26 | C | STT-Alternative (z. B. `whisper.cpp`), bleibt command-basiert |
+| 27 | A | `presence_desktop_interaction.md` auf Ist-Zustand trimmen |
+| 28 | G | Avatar-Render-Polish-Follow-up (rein visuell) |
+| 29 | I | README-Build-Setup + erste Install-Doku |
+| 30 | A | Glossar fixieren (`Approval`, `Audit`, `Workflow-Overlay`, `Presence`, …) |
 
 ---
 
-## Phase 7 – Interaction Layer (V0.8)
+## 7. Explicitly Deferred
 
-- [ ] Unified Input-Routing (Text / Voice / UI-Events)
-- [ ] Multimodales Routing
-- [ ] Event-getriebenes Interaktionsmodell
-- [ ] File- / Image-Input-Hooks
+Diese Punkte sind **bewusst nicht** Teil der nahen PR-Reihe; jeder
+davon würde eine eigene Design-Entscheidung brauchen:
 
----
-
-## Phase 8 – Tool Integration (V0.9)
-
-- [ ] AdminBot-Integration
-- [ ] LabOS-Integration
-- [ ] Tool-Call-Routing
-- [ ] Plugin-System (basic)
-- [ ] Tool → UI-Feedback
-
----
-
-## Phase 3b – Linux Window & Overlay Architecture (parallele Linie)
-
-Plattformgrundlage für spätere Overlay-Arbeit. Bewusst **keine
-Implementierung in diesem Schritt**, sondern Architektur- und
-Forschungslinie. Vollständige Grundlage in
-[docs/linux_window_overlay_architecture.md](./docs/linux_window_overlay_architecture.md).
-
-Ziel-Session: Ubuntu 24.04 / Wayland (GNOME/Mutter), X11 als
-dokumentierter Fallback.
-
-- [x] Architekturdokument Linux Window & Overlay
-      ([docs/linux_window_overlay_architecture.md](./docs/linux_window_overlay_architecture.md))
-      mit Wayland/X11-Trennung, Capability-Matrix und Phasen A/B/C.
-- [x] **Window Behavior Capability Spike v1** — kleine
-      `ui/scripts/window_behavior/`-Linie (Fassade + Capability-
-      Detection + opt-in Runtime-Probe via `SMOLIT_WINDOW_PROBE=1`)
-      für Transparenz und Click-through. Kein Always-on-top, keine
-      Scene-Kopplung, keine IPC-Änderung. Siehe
-      [docs/linux_window_overlay_architecture.md §F.1](./docs/linux_window_overlay_architecture.md)
-      und
-      [docs/ui_architecture.md §9.1](./docs/ui_architecture.md).
-- [~] Forschungsspikes zu Wayland-Constraints unter GNOME 46/47
-      (Transparenz, Input-Region, HiDPI, Fractional Scaling,
-      Nvidia/XWayland-Edge-Cases). Grundlage ist jetzt der
-      **Verifikationsspike**: opt-in Runtime-Report
-      (`SMOLIT_WINDOW_REPORT=1`) +
-      [docs/linux_overlay_verification_matrix.md](./docs/linux_overlay_verification_matrix.md)
-      + [scripts/run_overlay_verification.sh](./scripts/run_overlay_verification.sh).
-      Die tatsächlichen Messläufe auf realen Wayland-/X11-Sessions
-      stehen weiterhin offen und sind nicht von diesem Harness
-      geleistet — er liefert nur die reproduzierbare Grundlage dafür.
-- [x] Entscheidungsspike „always-on-top unter GNOME": Extension vs.
-      Verzicht vs. compositor-spezifischer Pfad — entschieden für
-      **Verzicht im Standardpfad** auf GNOME/Wayland. GNOME-Shell-
-      Extension ausdrücklich zurückgestellt (Pflegeaufwand,
-      Versionsbindung, Sicherheitsmodell); X11-Sonderpfad bleibt
-      dokumentierte Option für spätere, opt-in Aktivierung;
-      wlroots/layer-shell bleibt dokumentierte Möglichkeit ohne
-      aktuelles Ziel. Details und Produktversprechen siehe
-      [docs/linux_always_on_top_decision.md](./docs/linux_always_on_top_decision.md);
-      Entscheidungssnapshot in
-      [docs/linux_window_overlay_architecture.md §G.2](./docs/linux_window_overlay_architecture.md).
-      Ergänzend enthält der opt-in `SMOLIT_WINDOW_PROBE=1`-Pfad
-      jetzt einen kurzen, reversiblen AOT-Flag-Versuch als ehrliche
-      Diagnostik („flag accepted by API — not a user-visible
-      guarantee under Mutter").
-- [~] X11-Sonderpfad für optionales Always-on-top — kleiner opt-in
-      MVP gelandet. Eigenes Env-Flag `SMOLIT_UI_ALWAYS_ON_TOP=1`,
-      eigener Controller
-      `ui/scripts/window_behavior/overlay_always_on_top_controller.gd`,
-      strikt X11-only: unter Wayland/GNOME, headless und unknown
-      Session ein ehrlicher No-op mit klarer Log-Begründung.
-      Unter echtem X11 setzt der Controller
-      `WINDOW_FLAG_ALWAYS_ON_TOP` (entspricht `_NET_WM_STATE_ABOVE`)
-      und loggt, dass sichtbares Stacking-Verhalten WM-abhängig
-      bleibt — ausdrücklich kein Standard-MVP und kein universelles
-      Linux-AOT-Feature. Reproduzierbarer Harness-Case `aot-x11` in
-      [scripts/run_overlay_verification.sh](./scripts/run_overlay_verification.sh)
-      (neu: `--scene`-Flag startet die Main-Scene als Standalone-
-      Runtime für echte X11-Messungen). Details:
-      [docs/linux_window_overlay_architecture.md §F.4](./docs/linux_window_overlay_architecture.md)
-      und
-      [docs/linux_always_on_top_decision.md](./docs/linux_always_on_top_decision.md).
-      Auf dem GNOME/X11-Entwicklungshost inzwischen **beide Ebenen**
-      gemessen: Protokoll (`_NET_WM_STATE_ABOVE` gesetzt) und UX mit
-      xterm-Peer (Smolit bleibt im Stacking oberhalb bei
-      Fokuswechsel, über Minimize/Restore und sogar bei
-      fullscreen-xterm; nicht sticky über Workspaces). Details in
-      [docs/x11_always_on_top_verification.md §F.1 / §H](./docs/x11_always_on_top_verification.md)
-      und [docs/x11_always_on_top_results.md](./docs/x11_always_on_top_results.md).
-      Zeile bleibt bewusst bei `[~]` — offen: KDE/KWin (X11), Xfwm4,
-      Openbox, Fluxbox, XWayland-Sonderfall, Browser-F11 /
-      Videospieler-Fullscreen, Multi-Monitor, Langzeitstabilität.
-      Feintuning (z. B. `_NET_WM_WINDOW_TYPE_DOCK`) nur bei klarer
-      Nachfrage.
-      Zusätzlich: **Refusal-Gegentest** für GNOME/Wayland existiert
-      jetzt als dedizierter Harness-Case `aot-wayland-refusal` mit
-      Env-Override-Simulation; Rohdaten in
-      [docs/wayland_always_on_top_refusal_results.md](./docs/wayland_always_on_top_refusal_results.md).
-      Offen bleibt der Lauf gegen einen echten Mutter-Wayland- oder
-      wlroots-Compositor — nicht, um AOT dort einzubauen, sondern um
-      die Refusal-Message gegen reale Session-Signale zu verifizieren.
-- [ ] Entscheidungsspike „Godot-Fenster-Flags vs. GDExtension vs.
-      Host-Prozess mit eingebettetem Godot".
-- [~] Window-Behavior-Abstraktion als eigene Schicht
-      (`window_behavior/`) vollständig ausbauen — Trait/Interface mit
-      `set_always_on_top`, `set_transparent`, `set_click_through`,
-      `request_position`, `current_capabilities`. Capability-Seite
-      steht per Spike v1 bereits; Activation-Seite ist inzwischen in
-      drei getrennte opt-in Controller (Overlay, Click-through, X11-
-      AOT) zerlegt und verwendet ein gemeinsames Ergebnis-Vokabular
-      (`requested / capable / applied / observed / active / reason`,
-      siehe `window_behavior_result.gd`). Offen: echte Backend-
-      Familie (§F Zielstruktur), `request_position`, ein Setter-
-      Interface statt drei separaten Controllern.
-- [~] Backends als getrennte Familie einordnen: `backend_x11`,
-      `backend_wayland_mutter`, `backend_wayland_wlroots`,
-      `backend_xwayland`, `backend_wayland_generic`,
-      `backend_noop`. **Familienstruktur steht** — alle sechs
-      Klassen existieren unter `ui/scripts/window_behavior/`, plus
-      `backend_base.gd` und `backend_resolver.gd`. Die Fassade
-      `apply_all(anchor)` löst pro Lauf ein Backend auf (Session-Typ
-      + Desktop-Environment + Display-Driver → konservative
-      Klassifikation in GNOME/Mutter, wlroots-Familie, XWayland-
-      Sonderfall, oder generischer Wayland-Fallback) und delegiert
-      die drei Aktivierungen darüber. Plattformlogik bleibt in den
-      Controller-Gates. **Routing-Ebene empirisch belegt**: der
-      Resolver-Klassifikations-Smoketest
-      [`scripts/resolver_classification_smoke.gd`](./scripts/resolver_classification_smoke.gd)
-      bestätigt die Auswahl für alle sechs Backends (9 synthetische
-      Session/Desktop/Driver-Kombinationen PASS); der opt-in
-      Runtime-Report druckt die gewählte `backend.id` +
-      `backend.description` in einem eigenen Block. Evidenzmatrix
-      pro Backend (real / simuliert / offen) steht in
-      [docs/window_behavior_backend_verification.md](./docs/window_behavior_backend_verification.md).
-      **Echte backend-spezifische Aktivierung bleibt offen**: die
-      Backends delegieren 1:1 an die gemeinsamen Controller; echte
-      Differenzierung (`wlr-layer-shell`-Wrapper in
-      `backend_wayland_wlroots`, etwaige Mutter-spezifische Policy
-      in `backend_wayland_mutter`, XWayland-AOT-Feintuning) bleibt
-      spätere, bewusst gewählte Arbeit. Auch die in §F des
-      Architekturdokuments genannten Setter-/Positionsoperationen
-      sind noch offen, ebenso echte Compositor-Läufe auf realen
-      Mutter-Wayland-/KDE-Wayland-/wlroots-Sessions.
-- [~] Experimenteller wlroots-Vorbereitungspfad —
-      `backend_wayland_wlroots` trägt jetzt als **einziges** Backend
-      einen `experimental_stance`-Marker und ergänzt die
-      Aktivierungs-Ergebnis-Dicts additiv um einen
-      `wlroots_research`-Block (`state = "prepared, not
-      implemented"`). Runtime-Report druckt `backend.experimental =
-      experimental seat for a future wlr-layer-shell-unstable-v1
-      path …`, wenn dieses Backend gewählt wurde. Verhalten
-      unverändert: keine layer-shell-Integration, keine neue
-      Aktivierung, kein Nutzerversprechen unter wlroots. Forschungs-
-      und Decision-Grundlage:
-      [docs/wlroots_overlay_path.md](./docs/wlroots_overlay_path.md).
-      Offen: echter Spike mit `wlr-layer-shell-unstable-v1`,
-      Godot-/GDExtension-/Host-Prozess-Frage aus §F des
-      Architekturdokuments, echte Sway-/Hyprland-Messung.
-- [x] Overlay-MVP Phase B (opt-in): transparent + borderless
-      Presence-Fenster per `SMOLIT_UI_OVERLAY=1`, capability-gesteuert
-      mit ehrlichem Fallback; **ohne** Always-on-top-Zusicherung unter
-      GNOME/Wayland. Produktives Click-through hat seinen eigenen
-      Folgepunkt (siehe nächsten Eintrag), ist nicht stillschweigend in
-      Phase B enthalten. Siehe
-      [docs/linux_window_overlay_architecture.md §F.2](./docs/linux_window_overlay_architecture.md)
-      und
-      [docs/ui_architecture.md §9.2](./docs/ui_architecture.md).
-- [~] Click-through mit definierten interaktiven Zonen (opt-in
-      Folgeschritt auf Phase B) — Zwischenstand, ausdrücklich noch
-      **nicht** das finale Interaktionsmodell. Aktiv nur, wenn
-      `SMOLIT_UI_CLICK_THROUGH=1` gesetzt ist, Overlay wirklich aktiv
-      ist, Click-through-Capability tragfähig ist und mindestens eine
-      *gültige* Zone (Allowlist, Visible, Rohsize > 0, Viewport-Clamp,
-      Mindestkantenlänge) ableitbar ist. Aktueller MVP nutzt Godots
-      `DisplayServer.window_set_mouse_passthrough` mit *einem*
-      Polygonpfad und fasst alle gültigen Zonen (Avatar, Header,
-      Banner, DockPanel, CompactInputPanel) zu einer **einzigen
-      Bounding-Rect-Union** zusammen — leerer Raum *innerhalb* dieser
-      Box bleibt klickbar. Refresh läuft über `visibility_changed` /
-      `resized`-Signale und einen einmaligen `call_deferred`-Post-
-      Layout-Refresh; Refresh-Logs sind dedupliziert. Ausdrücklich
-      offen bis zur Ablösung dieses Zwischenstandes:
-      Multi-Polygon-Passthrough-Shapes (XShape-Multirect unter X11
-      bzw. `wl_surface.set_input_region` mit mehreren Rechtecken
-      unter Wayland), präzisere Input-Regionen statt Bounding-Union,
-      robustere HiDPI-/Mehrfenster-Koordinaten. Siehe
-      [docs/linux_window_overlay_architecture.md §F.3](./docs/linux_window_overlay_architecture.md)
-      und
-      [docs/ui_architecture.md §9.3](./docs/ui_architecture.md).
-- [ ] Compositor-spezifische Pfade (wlroots layer-shell,
-      optional GNOME-Extension) erst in Phase C, falls
-      Nutzungsnachfrage da ist.
-- [ ] XDG-Portal-Strategie festlegen (Screenshot, Screen-Cast,
-      GlobalShortcuts, OpenURI) für spätere Desktop-Interaktion.
+- **Streaming-Audio / Audio-Timeline.** Kein Code-Pfad heute;
+  Phonem- und Lip-Sync sind ausdrücklich Phase-C.
+- **Echte Desktop-Automation jenseits `open_application`.** Kein
+  `focus_window` / `type_text` / `send_shortcut` Backend-Pfad,
+  bis Policy-Verdrahtung steht.
+- **AdminBot-Integration / Shell-Zugriff.** Kein Plan.
+- **Stage-C-Avatar-Assets / User-Uploads.**
+  [`docs/avatar_stage_c_research.md`](./docs/avatar_stage_c_research.md)
+  bleibt Research-Gate.
+- **Cloud-Provider als Default.** cloud_http existiert als
+  opt-in; wird nicht standard-aktiviert.
+- **Policy-Engine im „grand design"-Sinn.** Stattdessen konkrete
+  Gating-Verdrahtung für genau eine Aktion (PR 24).
+- **Audit-Persistenz / Audit-Export.** Ring-Buffer bleibt
+  in-memory. Ein Persistenz-Pfad braucht eine eigene Security-
+  Review (siehe
+  [`docs/security/AUDIT_TRAIL.md`](./docs/security/AUDIT_TRAIL.md)).
+- **Multi-Seat / Multi-User / kryptografische Signatur.**
+- **Emotion-Feld in `response`-Payloads.** Kein Core-Signal heute.
+- **Native ABrain-API / Tool-Calls / Streaming-Response.**
+  `docs/api.md §5` beschreibt das Ziel; kein Code.
 
 ---
 
-## Phase 8b – Desktop Interaction Layer (parallele Linie)
+## 8. Quellen / Detailreferenzen
 
-Architektonisch eigene, von der UI entkoppelte Schicht gemäß
-[docs/presence_desktop_interaction.md](./docs/presence_desktop_interaction.md),
-§3, §4 und §10. Diese Phase ist bewusst **parallel** zu den
-UI-Phasen geführt und noch **nicht** begonnen.
-
-- [ ] Desktop Interaction Layer als eigene Adapterfamilie (nicht in
-      Godot)
-- [ ] Interaction Fidelity Modes (native-first / hybrid /
-      pixel-guided / experimental)
-- [ ] Interaction Stack v1: App Discovery → UI Targeting → Action
-      Execution → Verification → Recovery
-- [ ] Standardaktionen `open` / `focus` / `click` / `type` /
-      `shortcut` / `scroll`
-- [ ] Verifikations- und Recovery-Schicht
-- [ ] Desktop Automation Modes (none / assist only / confirm before
-      action / allowed trusted actions only)
-- [ ] Trust-Modell für Anwendungen und Fenster
-- [x] Approval / Confirmation Flow MVP zwischen Core und UI (Banner,
-      `approval_requested` / `approval_response` / `approval_resolved`,
-      Timeout über `SMOLIT_APPROVAL_TIMEOUT_SECONDS`; siehe
-      [docs/api.md §2.7](./docs/api.md))
-- [x] `focus_window` Interaction-Spike: Policy-Gate
-      (`SMOLIT_INTERACTION_ALLOW_FOCUS_WINDOW`), command-basiertes
-      MVP-Backend mit Template (`SMOLIT_INTERACTION_FOCUS_WINDOW_CMD`),
-      Approval-Integration, ehrliches `uncertain` statt Pseudo-
-      Verifikation, `BackendUnsupported` wenn kein Template (z. B.
-      Wayland). IPC-Nachricht `interaction_focus_window` additiv.
-- [ ] Confirmation- und Approval-UX für weitere Action Kinds
-      (`type_text`, `send_shortcut`, Multi-Step-Flows, persistente
-      Trust-Entscheidungen)
-- [ ] Reicheres `focus_window`-Backend jenseits command-basiertem
-      Spike (Portal / compositor-spezifische Pfade, Fokus-Probe zur
-      `verified`-Hochstufung)
-- [ ] Kill switch / Stop-Mechanik
-- [ ] Action-/Verification-/Failure-Events additiv in
-      [docs/api.md](./docs/api.md) (Basis steht seit Action Event
-      Model v1; offen sind aktive Emission und strukturierte Targets
-      aus der Automation-Schicht)
-- [ ] Avatar-Zustände für Interaktionsphasen (`targeting`,
-      `executing`, `verifying`, `recovered`, `aborted`)
-- [x] Linux Accessibility Backend Spike (AT-SPI Capability Probe +
-      read-only Discovery/Inspection-Schema): `AccessibilityProbe`
-      (`uncertain` / `unavailable` / `failed` + Grund) aus Umgebungs-
-      und Unix-Socket-Vorprüfung, Schema für `AccessibilityItem`,
-      IPC-Nachrichten `interaction_probe_accessibility` /
-      `interaction_discover_accessibility`, Action-Event-Integration
-      mit zusätzlichen Envelopes `accessibility_probe_result` /
-      `accessibility_discovery_result`, optionale
-      `StatusPayload`-Felder `accessibility_probe` /
-      `accessibility_probe_reason`. Bewusst dependency-frei; echter
-      zbus-/`atspi-connection`-RPC-Probe, Registry-`GetChildren` und
-      Namens-/Rollen-Lookup bleiben nächste Stufe. Siehe
-      [docs/linux_interaction_backends_research.md](./docs/linux_interaction_backends_research.md)
-      §2 und [docs/api.md §2.8](./docs/api.md).
-- [x] Verified Target Discovery (Confidence-Modell + UI-Darstellung):
-      `AccessibilityDiscovery::Ok { items }` neben `Uncertain` /
-      `Unavailable` / `Failed`; pro Item `confidence` (`verified`
-      reserviert für echten RPC-Pfad, `discovered` für ehrliche
-      Hint-Echos), `source`, optional `matched_hint`, `detail`,
-      `app_name`. `inspect_target(hint)` liefert Hint-Echo-Items in
-      strukturierter Form; `discover_top_level()` bleibt ehrlich
-      `Uncertain`. Godot-UI rendert das in einem neuen DiscoveryPanel
-      (Status-Badge, Item-Liste mit Confidence-Badge) rein anzeigend.
-      Siehe [docs/api.md §2.8](./docs/api.md) und
-      [docs/ui_architecture.md §8.1](./docs/ui_architecture.md).
-- [x] Target Selection + Approval-assisted Target Handoff:
-      `SelectedTarget`-Referenzmodell (`id`, `name`, `role`, `source`,
-      `confidence`, optional `matched_hint` / `app_name`) in
-      `core/src/interaction/selection.rs`, IPC-Nachrichten
-      `interaction_select_target` / `interaction_clear_target` →
-      `target_selected` / `target_cleared`. Core hält genau einen Slot
-      im Speicher (kein Store, keine Persistenz); `ApprovalRequest`
-      trägt den Snapshot als `selected_target` und der Approval-Text
-      bekommt den Zusatz „Ziel: name (role, confidence)". Godot-UI
-      macht Discovery-Items klickbar („Select"/„Selected"), zeigt eine
-      SelectedTargetRow mit Clear-Button und rendert das Ziel im
-      Approval-Banner. Auswahl ≠ Berechtigung — der Approval-Flow
-      bleibt unverändert. Siehe [docs/api.md §2.9](./docs/api.md) und
-      [docs/ui_architecture.md §8.2](./docs/ui_architecture.md).
-- [ ] Linux-Backends (Folgestufen): echter AT-SPI-RPC-Pfad (zbus /
-      atspi-connection), Registry-Root-Discovery, Namens-/Rollen-
-      basierte Inspection, Toolkit-Vergleich (GTK / Qt / Electron /
-      Terminal), Umgang mit Wayland vs. X11 beim Fokus-/Write-Pfad
-- [ ] OCR-/Template-Erkennung und Pixel-Fallback mit Safe Sandboxing
-- [ ] Performance Profiles (low / balanced / high fidelity)
-      konfigurierbar und mit Presence/Visual Action gekoppelt
-
----
-
-## Phase 8c – Provider Fallback & Settings (parallele Linie, Architektur-Spike)
-
-Parallele Linie zu den Avatar-/Interaction-Strängen. Ziel: Smolit-
-Assistant auch **ohne ABrain** als eigenständiger Assistent nutzbar
-machen — über lokale oder (opt-in, sichtbare) Cloud-Provider für Text,
-STT und TTS. **Kein** Security-Bypass, **keine** Aufweichung der
-Approval-/Interaction-Policy, kein heimlicher Cloud-Zwang.
-
-Grundlage steht als Architektur-Dokument:
-[docs/provider_fallback_and_settings_architecture.md](./docs/provider_fallback_and_settings_architecture.md)
-— Provider-Achsen (Text / STT / TTS), Fallback-Modell,
-Transparenz-/Sicherheitsgrenzen, Status-/Health-Modell, Settings-Scope
-und Nicht-Ziele.
-
-- [x] Architektur + Doku (PR 1 aus §9 der Doku). Kein Code, kein
-      Scene-/IPC-/Core-Eingriff.
-- [x] PR 2: Core Provider Resolver für Text — gelandet. Neuer
-      `core/src/providers/text.rs` mit `TextProviderImpl`-Enum,
-      `TextProviderResolver` (geordnete Kette, deterministischer
-      Fallback, Runtime-Status), `AbrainCliProvider` als einziger
-      produktiver Kind. Config: `TextProviderConfig.chain` (Env
-      `SMOLIT_TEXT_PROVIDER_CHAIN`, unbekannte Kinds sichtbar
-      verworfen, leere Kette → Default `["abrain"]`). `App::handle_text_query`
-      geht jetzt ausschließlich durch den Resolver (alter
-      `adapters::abrain`-Pfad entfernt). `StatusPayload` additiv um
-      fünf `text_provider_*`-Felder erweitert
-      (`configured` / `active` / `availability` / `last_error` /
-      `cloud`). Keine neuen Eventtypen, keine Policy-Änderung, kein
-      Cloud-Pfad. Details in
-      [docs/provider_fallback_and_settings_architecture.md §9](./docs/provider_fallback_and_settings_architecture.md)
-      und [docs/api.md §2.3 / §3](./docs/api.md).
-- [x] PR 2a: Llamafile-Local-Vorbereitung (Variante A, Architektur-
-      Stub) — gelandet. Neue Enum-Variante
-      `TextProviderImpl::LlamafileLocal`, `LlamafileLocalProvider`
-      mit acht-Zustände-Lifecycle-Modell (heute produziert:
-      `disabled` / `not_configured` / `configured`; scaffolding:
-      `starting` / `ready` / `busy` / `failed` / `stopped`),
-      `LlamafileConfig` in `config.rs` mit vier neuen Env-Vars
-      (`SMOLIT_LLAMAFILE_ENABLED` / `SMOLIT_LLAMAFILE_PATH` /
-      `SMOLIT_LLAMAFILE_MODE` mit Whitelist `on_demand`/`standby` /
-      `SMOLIT_LLAMAFILE_IDLE_TIMEOUT_SECONDS`). Stub liefert beim
-      Aufruf **ausschließlich** deterministische Refusal-Klassen
-      (`disabled` / `not_configured` / `not_implemented`); Resolver
-      instanziiert den Stub auch bei inaktivem Lifecycle, damit
-      Fallback-Fluss `llamafile_local → abrain` mit
-      `availability=fallback_active` überprüfbar ist. **Runtime
-      nicht implementiert** — Prozess-Spawn, HTTP-Dispatch,
-      Idle-Timeout-Scheduling bleiben PR 2b. Kein Modell-Bundling,
-      keine Secrets, keine UI, keine Cloud. Core-Tests: 120 PASS
-      (17 neue Resolver-/Lifecycle-Tests, 4 neue Config-Tests); alle
-      10 UI-Smokes bleiben grün.
-- [x] PR 2b: Llamafile Runtime — gelandet. Realer `on_demand`-
-      Runtime-Pfad für `llamafile_local`: Prozess-Spawn (tokio mit
-      `kill_on_drop`), Readiness-Poll gegen `GET /health`, Completion
-      via `POST /completion` (`stream: false`), interner HTTP/1.1-
-      Client auf `tokio::net::TcpStream` (keine SDK-Abhängigkeit).
-      Watchdog-Task hält `Weak`-Referenz und beendet den Prozess nach
-      `idle_timeout_seconds` Ruhe; Folge-Request spawnt wieder. Alle
-      acht Lifecycle-Zustände (`disabled` / `not_configured` /
-      `configured` / `starting` / `ready` / `busy` / `failed` /
-      `stopped`) werden real durchlaufen. Drei neue Env-Vars
-      (`SMOLIT_LLAMAFILE_PORT` / `_STARTUP_TIMEOUT_SECONDS` /
-      `_REQUEST_TIMEOUT_SECONDS`), acht zusätzliche Fehlerklassen im
-      Klassifikator. Single-Process-/Single-Request-MVP; kein
-      Streaming, kein `standby` (reserviert, verhält sich heute wie
-      `on_demand`). Core-Tests: 129 PASS (+9 gegenüber PR 2a, darunter
-      drei Integrationstests gegen einen Fake-HTTP-Server plus Shell-
-      Skript als Spawn-Ziel); alle 10 UI-Smokes grün. Details in
-      [docs/provider_fallback_and_settings_architecture.md §4.1a](./docs/provider_fallback_and_settings_architecture.md)
-      und [docs/api.md §3](./docs/api.md). **Weiterhin offen:**
-      Modell-Bundling/Provisioning, echter `standby`-Mode, Streaming,
-      GPU-/Advanced-Tuning, Settings-UI-Exposition des Lifecycles —
-      jeweils eigene Folge-PRs.
-- [x] PR 3: Settings-Shell im UI — gelandet. Reine UI-Shell für ein
-      Settings-Panel im Expanded-Window: sichtbarer `⚙ Settings`-
-      Button im Header-Row, neuer UI-Substate innerhalb derselben
-      Presence-Hülle (Shell ersetzt das Dock-Panel, Avatar / Banner /
-      Workflow-Overlay / Utterance-Bubble bleiben unberührt). Sieben
-      read-only Bereiche aus Doku §6 in fester Reihenfolge:
-      **General**, **Presence / UI**, **Text Provider**, **STT**,
-      **TTS**, **Privacy / Cloud / Data handling**,
-      **Connection / Status**. Text-Provider-Readout bindet defensiv
-      an die fünf `text_provider_*`-Felder aus `StatusPayload` und
-      benennt `llamafile_local` ehrlich als lokalen Runtime-Fallback
-      (Configured/Active/Availability/Last-Error/Cloud sichtbar; keine
-      Pfad-/Secret-/Start/Stop-Eingabe). Keine neuen IPC-Nachrichten,
-      keine Schreibaktionen, kein Secrets-Editor, keine Cloud-Integration.
-      Neue Dateien: `ui/scenes/settings/settings_panel.tscn`,
-      `ui/scripts/settings/settings_sections.gd`,
-      `ui/scripts/settings/settings_panel_controller.gd`; additive
-      Einbindung in `ui/scenes/main.tscn` + `ui/scripts/main.gd`. Tests:
-      `scripts/settings_shell_smoke.gd` (70 Assertions PASS), Harness-
-      Case `settings-shell-smoke`. Alle bestehenden UI-Smokes bleiben
-      grün, Core-Tests unberührt. Details in
-      [docs/ui_architecture.md §8d](./docs/ui_architecture.md) und
-      [docs/provider_fallback_and_settings_architecture.md §9](./docs/provider_fallback_and_settings_architecture.md).
-- [x] PR 4: Vertiefter Status-Readout für Text/STT/TTS — gelandet
-      (Text-Achse produktiv; STT/TTS konservativ bei Basis-Readout).
-      `StatusPayload` um sieben additive Felder erweitert:
-      `text_provider_chain` (geordnete Resolver-Kette),
-      `llamafile_in_chain`, `llamafile_enabled`,
-      `llamafile_configured`, `llamafile_lifecycle`, `llamafile_mode`,
-      `llamafile_idle_timeout_seconds`. Lifecycle-/Mode-/Idle-Felder
-      sind `null`, wenn `llamafile_local` **nicht** in der Kette
-      steht — so bleibt `null` ehrlich als „nicht in der Kette"
-      lesbar, nicht als „Runtime kaputt". Resolver exponiert
-      `chain_kinds()` (jetzt öffentlich) und
-      `llamafile_lifecycle()`. Die Settings-Shell rendert die Kette
-      als „→"-getrennte Reihenfolge, öffnet bei
-      `llamafile_in_chain=true` einen vertieften llamafile-Block und
-      verdichtet Cloud-/Lokal-Status im Privacy-Abschnitt. Kein
-      Cloud-Provider, keine STT-/TTS-Provider-Abstraktion, keine
-      Secrets-Eingabe, keine Schreibaktionen, keine neue IPC-Familie.
-      Ältere UI-Stände ohne Kenntnis der neuen Felder bleiben ohne
-      Regression lesbar (defensiver Rückfall-Pfad im Renderer).
-      Tests: Core 135 PASS (+6 Resolver-/IPC-Tests); UI
-      `settings-shell-smoke` auf 88 Assertions erweitert (+18). Alle
-      anderen UI-Smokes grün. Details in
-      [docs/provider_fallback_and_settings_architecture.md §8.1](./docs/provider_fallback_and_settings_architecture.md),
-      [docs/api.md §2.3](./docs/api.md) und
-      [docs/ui_architecture.md §8d](./docs/ui_architecture.md).
-- [x] PR 5: Erste Schreib-/Probe-Oberfläche (Text-Achse,
-      `llamafile_local`) — gelandet, bewusst konservativ. Die
-      Settings-Shell bekommt einen schmalen Editor-Block direkt
-      unter dem Text-Provider-Readout: `enabled` (CheckBox),
-      `mode` (OptionButton `on_demand`/`standby`),
-      `idle_timeout_seconds` (SpinBox) und Binary-`path` (LineEdit),
-      plus Apply- und Probe-Button. Apply → neue additive IPC-
-      Nachricht `settings_set_llamafile_config`; Core validiert
-      (Whitelist für Mode, `idle > 0`), rebuildet den
-      `TextProviderResolver` atomar, persistiert atomar in einer
-      kleinen JSON-Datei unter `SMOLIT_SETTINGS_DIR` → `$XDG_CONFIG_HOME/smolit-assistant/` →
-      `$HOME/.config/smolit-assistant/` (Permissions 0600), und
-      antwortet mit einem frischen `status`-Envelope; unbekannte
-      Werte lehnen den Write **ausdrücklich** ab. Probe →
-      `settings_probe_llamafile` → `settings_probe_result` mit
-      kuratierten Tags (`ok` / `not_in_chain` / `disabled` /
-      `not_configured` / `path_missing` / `path_not_file` /
-      `path_not_executable`), Side-Effect-frei (kein Spawn, kein
-      HTTP). Sicherheitsdisziplin: Binary-Pfad taucht weder in Logs
-      noch im Probe-Ergebnis noch im Fehler-Envelope auf (`path_set`-
-      Boolean reicht); Sensitive-Werte (API-Keys etc.) sind
-      ausdrücklich **nicht** Teil von PR 5 und bleiben für einen
-      späteren dedizierten Secret-Pfad reserviert. Neues Core-Modul
-      `settings_store` mit Kategorien-Doku; App wrappt
-      `text_provider` jetzt hinter `RwLock<Arc<...>>` für atomare
-      Rebuilds. Keine neue IPC-Familie, keine STT-/TTS-Provider-
-      Abstraktion, keine Cloud-Integration, keine Provider-Auswahl,
-      keine Start/Stop-Logik in der UI, keine Pfad-Editor-
-      Clear-Affordance (bewusst ausgelassen — Apply mit leerem Feld
-      sendet `null`, nicht `""`). Details in
-      [docs/provider_fallback_and_settings_architecture.md §9 + §11](./docs/provider_fallback_and_settings_architecture.md),
-      [docs/api.md §2.10](./docs/api.md),
-      [docs/ui_architecture.md §8d.5a](./docs/ui_architecture.md).
-      Tests: Core 150 PASS (+15 vs. PR 4 — sechs
-      `settings_store`-Unit-Tests, vier IPC-Integrationstests, vier
-      Protocol-Tests, ein Mode-Validator-Test); UI
-      `settings-shell-smoke` auf 103 Assertions erweitert (+15).
-      Alle zehn anderen UI-Smokes grün; Headless-Boot sauber.
-- [x] PR 6: STT-/TTS-Provider-Abstraktion + Statusangleichung —
-      gelandet, konservativ. Die Audio-Achsen werden an den Text-Pfad
-      angeglichen: zwei neue Core-Module
-      [core/src/providers/stt.rs](./core/src/providers/stt.rs) und
-      [core/src/providers/tts.rs](./core/src/providers/tts.rs) mit
-      Enum-Dispatch, Resolver, Laufzeitstatus und
-      Fehlerklassifikator — gleiche Leitplanken wie Text-Resolver.
-      Heute produktives Kind pro Achse: `command` (bisheriger
-      `SMOLIT_STT_CMD` / `SMOLIT_TTS_CMD`-Pfad, byte-kompatibel —
-      Timeouts, Fehlertexte, Legacy-`available`-Semantik bleiben
-      erhalten). Altes `audio::SttService`/`audio::TtsService`
-      entfernt; `audio/types.rs` bleibt für geteilte Helfer.
-      `AudioConfig` bekommt zwei zusätzliche Listen
-      (`stt_provider_chain`, `tts_provider_chain`) mit
-      Env-Overrides `SMOLIT_STT_PROVIDER_CHAIN` /
-      `SMOLIT_TTS_PROVIDER_CHAIN`; unbekannte Kinds werden sichtbar
-      verworfen, Fallback auf `["command"]`. `App.stt` und `App.tts`
-      sind jetzt `Arc<…Resolver>`; `handle_voice_once` und
-      `handle_speak` routen ausschließlich durch den Resolver.
-      `StatusPayload` additiv um zehn Felder erweitert:
-      `stt_provider_configured` / `_active` / `_availability` /
-      `_last_error` / `_cloud` und der TTS-Spiegel. UI-Settings-
-      Shell rendert die fünf Resolver-Zeilen pro Achse (mit
-      ehrlichem Fallback-Hinweis für alte Cores); der Privacy-
-      Abschnitt verdichtet STT-/TTS-Cloud separat, sobald die
-      neuen Felder da sind. Keine Cloud-Kinds, kein HTTP-Kind,
-      keine Streaming-Pipeline, keine neuen Audio-Events, keine
-      STT-/TTS-Provider-Editor-Fläche in der UI — das bleibt
-      explizit offen für spätere PRs. Details in
-      [docs/provider_fallback_and_settings_architecture.md §4.2 + §4.3 + §9](./docs/provider_fallback_and_settings_architecture.md),
-      [docs/api.md §2.3 + §4](./docs/api.md),
-      [docs/ui_architecture.md §8d](./docs/ui_architecture.md).
-      Tests: Core 170 PASS (+20 vs. PR 5 — zwei neue Resolver-
-      Test-Module mit je ~7 Tests, drei neue Config-Parser-Tests,
-      zwei neue IPC-Integrationstests); UI
-      `settings-shell-smoke` auf 118 Assertions erweitert (+15).
-      Alle zehn anderen UI-Smokes grün; Headless-Boot sauber.
-- [x] PR 7: STT-/TTS-Settings-Editor + Probe-Pfade — analog zu PR 5,
-      bewusst kleiner gehalten. Der
-      [`settings_store`](./core/src/settings_store.rs) bekommt zwei
-      weitere Override-Dateien `stt.json` und `tts.json` (gleiche
-      Verzeichnis-Auflösung, 0600-Permissions, atomarer Schreibpfad),
-      [`App`](./core/src/app.rs) hält einen neuen `live_audio`-
-      Zustand (`Mutex<AudioConfig>`) und rebuildet den STT- bzw.
-      TTS-Resolver atomar bei jedem Schreibpfad. STT-/TTS-Resolver
-      sitzen dafür seit PR 7 hinter `RwLock<Arc<…>>`, Callsites holen
-      den aktuellen Resolver über `App::current_stt()` /
-      `current_tts()`. Neue IPC-Messages
-      `settings_set_stt_config` / `settings_set_tts_config` /
-      `settings_probe_stt` / `settings_probe_tts` (alle additiv).
-      `SettingsProbeResultPayload` trägt jetzt ein `axis`-Feld
-      (`"llamafile"` / `"stt"` / `"tts"`) für das UI-Routing;
-      ältere Cores ohne das Feld werden UI-seitig auf `llamafile`
-      zurückgefallen. Die Settings-Shell bekommt zwei weitere
-      Editor-Blöcke (`stt · Edit` und `tts · Edit`) direkt unter
-      dem jeweiligen Read-only-Abschnitt: Enabled + Command +
-      Apply + Probe; TTS ergänzt um Auto-Speak. Der Probe-Pfad ist
-      Side-Effect-frei: kein Mikrofon-Zugriff, kein Audio-Output,
-      kein Spawn — nur `split_command` + Filesystem-Check des
-      ersten Tokens. Secret-Disziplin wie bei PR 5: der Command-
-      String taucht weder in Logs, `settings_probe_result` noch
-      `error`-Envelopes auf. Keine Timeout-Editoren, keine Chain-
-      Umordnung, keine Cloud-Achse, keine Audio-Level-Anzeige, kein
-      Secrets-Store — bleibt explizit offen. Details in
-      [docs/provider_fallback_and_settings_architecture.md §9 + §11](./docs/provider_fallback_and_settings_architecture.md),
-      [docs/api.md §2.10 (inkl. 2.10a)](./docs/api.md),
-      [docs/ui_architecture.md §8d.5b](./docs/ui_architecture.md).
-      Tests: Core 185 PASS (+15 vs. PR 6 — fünf IPC-Ende-zu-Ende-
-      Tests, vier `settings_store`-Unit-Tests, fünf Protocol-
-      Parser-Tests, zwei Probe-Axis-Tests); UI
-      `settings-shell-smoke` auf 136 Assertions erweitert (+18).
-      Alle übrigen UI-Smokes grün; Headless-Boot sauber.
-- [x] PR 8: erster zusätzlicher externer Text-Provider `local_http`
-      — allgemeiner lokaler HTTP-Text-Provider, gleichrangig zu
-      `abrain` und `llamafile_local`. Ziel: Brücke zwischen rein
-      lokal-eingebetteten Providern und späterer Cloud-Welt; kein
-      Cloud-SDK, keine Secrets-Pflicht, lokal-first, HTTP-MVP.
-      Neuer `TextProviderImpl::LocalHttp`-Variant in
-      [`core/src/providers/text.rs`](./core/src/providers/text.rs);
-      nutzt den bereits bestehenden internen `http_request`-Helfer
-      (HTTP/1.1 über `tokio::net::TcpStream`), **keine neue
-      Dependency, kein TLS, kein Streaming**. `TextProviderConfig`
-      bekommt ein additives `local_http`-Unterobjekt
-      (`LocalHttpConfig`) mit `enabled`, `endpoint`,
-      `request_timeout_seconds`, `prompt_field`, `response_field`;
-      neue Env-Variablen `SMOLIT_LOCAL_HTTP_ENABLED` /
-      `_ENDPOINT` / `_REQUEST_TIMEOUT_SECONDS` / `_PROMPT_FIELD` /
-      `_RESPONSE_FIELD`. Der Provider postet
-      `{"<prompt_field>": "<input>", "stream": false}` und liest
-      `<response_field>` aus der JSON-Antwort; `https://` wird
-      hart abgelehnt (eigene Fehlerklasse
-      `endpoint_scheme_unsupported`). `settings_store` bekommt
-      `local_http.json` als viertes Override-File
-      (Verzeichnis-Auflösung, 0600-Permissions, atomarer
-      Schreibpfad wie bei PR 5/7). `App` hält einen neuen
-      `live_local_http`-Zustand; Schreibpfad rebuildet den
-      `TextProviderResolver` atomar analog zu PR 5. Neue IPC-
-      Messages `settings_set_local_http_config` /
-      `settings_probe_local_http`; der Probe ist ehrlich
-      loopback-begrenzt: **nur** TCP-Connect auf `host:port`,
-      **kein** Completion-Roundtrip, **kein** Prompt-Versand.
-      `StatusPayload` bekommt drei additive Felder
-      (`local_http_in_chain` / `_enabled` / `_configured`); der
-      Endpoint **taucht nicht** im Status auf. Die Settings-Shell
-      bekommt einen eigenen „local_http · Edit"-Block direkt
-      unter dem Llamafile-Editor (Enabled + Endpoint + Apply +
-      Probe), Probe-Ergebnisse werden über den neuen
-      `axis="local_http"`-Diskriminator geroutet. **Bewusst nicht
-      Teil von PR 8:** kein TLS / `https://`, keine Streaming-
-      Pipeline, keine Auth-/API-Key-Eingabe, keine
-      OpenAI-/`messages`-Welt, keine Chain-Reihenfolge-Umordnung
-      in der UI, keine Cloud-Provider-Implementierung, keine
-      Timeout-Editoren in der Shell. Details in
-      [docs/provider_fallback_and_settings_architecture.md §4.1c + §9 + §11](./docs/provider_fallback_and_settings_architecture.md),
-      [docs/api.md §2.10 (inkl. 2.10b) + §3](./docs/api.md),
-      [docs/ui_architecture.md §8d.5c](./docs/ui_architecture.md).
-      Tests: Core 210 PASS (+25 vs. PR 7 — neun Text-Provider-
-      Unit-Tests für den `local_http`-Request-/Response-Pfad und
-      den Endpoint-Parser, drei `settings_store`-Unit-Tests,
-      drei Protocol-Parser-Tests, fünf IPC-Ende-zu-Ende-Tests
-      inkl. Secret-Disziplin); UI `settings-shell-smoke` auf 154
-      Assertions erweitert (+18 — Editor-Bau + Sync, axis-
-      Routing, Scheme-unsupported ohne Leak,
-      `text_provider_lines`-Visibility-Pfad). Alle übrigen UI-
-      Smokes grün; Headless-Boot sauber.
-- [x] PR 9: Text-Provider-Chain-Editor in der Settings-Shell —
-      erstmals kann der Nutzer die **Text-Provider-Fallback-
-      Reihenfolge** über die UI editieren. Scope konservativ:
-      nur bekannte Kinds (`abrain` / `llamafile_local` /
-      `local_http`), keine freie Namenseingabe, kein Drag-and-
-      Drop, kein STT-/TTS-Chain-Editor in diesem PR.
-      [`providers/text.rs`](./core/src/providers/text.rs) bekommt
-      eine `KNOWN_TEXT_KINDS`-Whitelist,
-      `DEFAULT_TEXT_PROVIDER_CHAIN` und einen
-      `validate_text_chain`-Helper (Whitelist-Check,
-      Duplikat-Ablehnung, Empty-Reject, Case-/Whitespace-
-      Normalisierung). `App.text_provider_chain` wird zu
-      `App.live_text_chain: Mutex<Vec<…>>`; neue Methoden
-      `App::update_text_provider_chain` und
-      `App::reset_text_provider_chain` führen Validierung +
-      Persistenz + Resolver-Rebuild atomar durch.
-      [`settings_store`](./core/src/settings_store.rs) bekommt
-      eine fünfte Override-Datei `text_chain.json` (gleiche
-      Verzeichnisauflösung, 0600-Permissions, atomarer Write)
-      plus `clear_text_chain_override`-Pfad für den Reset.
-      Neue IPC-Messages `settings_set_text_provider_chain` /
-      `settings_reset_text_provider_chain`; Response bei Erfolg
-      ist der reguläre `status`-Envelope, bei Validation-Fehlern
-      ein kuratiertes `error`-Envelope mit dem konkreten
-      Ablehnungsgrund.
-      [`StatusPayload.text_provider_chain`](./docs/api.md) bleibt
-      der einzige Readout-Kanal — keine neuen Status-Felder.
-      Settings-Shell: neuer „text provider chain · Edit"-Block
-      direkt über den Per-Kind-Editoren mit einer Zeile pro
-      bekanntem Kind (Enable-CheckBox + Up/Down-Buttons) und
-      Apply/Reset; UI-seitige Empty-Guard verhindert den Versand
-      leerer Ketten, der Core-Validator ist
-      Second-Line-of-Defense. **Bewusst nicht Teil von PR 9:**
-      keine STT-/TTS-Chain-Editoren, kein Cloud-Provider, keine
-      Drag-and-Drop-UX, keine Secrets-/API-Key-Eingabe, kein
-      Timeout-Editor für die Chain. Details in
-      [docs/provider_fallback_and_settings_architecture.md §9 + §11](./docs/provider_fallback_and_settings_architecture.md),
-      [docs/api.md §2.10 (inkl. 2.10c)](./docs/api.md),
-      [docs/ui_architecture.md §8d.5d](./docs/ui_architecture.md).
-      Tests: Core 230 PASS (+20 vs. PR 8 — sieben
-      Validator-Unit-Tests, vier `settings_store`-Unit-Tests,
-      drei Protocol-Parser-Tests, sechs IPC-Ende-zu-Ende-Tests
-      inkl. Reject-Pfade und Reset-To-Default); UI
-      `settings-shell-smoke` um drei Blöcke erweitert (+9
-      Assertions). Alle übrigen UI-Smokes grün; Headless-Boot
-      sauber.
-- [x] PR 10: erster Cloud-/Remote-Text-Provider `cloud_http` +
-      dedizierter Secret-Pfad — sehr bewusster MVP, **opt-in**,
-      nicht Default, nicht stiller Fallback. POST JSON mit
-      einem Prompt-Feld + optionalem `model`, Response trägt
-      ein Text-Feld, Bearer-Auth über einen konfigurierbaren
-      Header. **Kein Streaming, kein Tool-Calling, kein
-      `messages`-Array.** Plaintext HTTP nur in dieser Stufe
-      (Scheme `https://` wird hart abgelehnt; Betreiber stellen
-      einen vertrauenswürdigen Reverse-Proxy vor den Endpoint).
-      **Secret-Pfad** ist der Herzschlag des PRs: neuer
-      [`core/src/secrets_store.rs`](./core/src/secrets_store.rs)
-      mit eigener Datei `secrets.json` (getrennt von allen
-      operationalen Overrides, Permissions 0600, atomarer
-      Write). `SecretsFile::Debug` elidiert Werte durchgängig
-      zu `<set>`/`<unset>`; `CloudHttpProvider::Debug` tut
-      dasselbe. `App.cloud_http_api_key: Mutex<Option<String>>`
-      lebt getrennt von allen operationalen `live_*`-Configs.
-      `StatusPayload` bekommt vier schmale, **nicht-sensitiven**
-      Felder: `cloud_http_in_chain`, `cloud_http_enabled`,
-      `cloud_http_configured`, `cloud_http_secret_present` —
-      der Key-Wert verlässt den Store niemals. Neue IPC-Messages
-      `settings_set_cloud_http_config` (operational),
-      `settings_set_cloud_http_secret` (einziger IPC-Pfad mit
-      Key-Klartext; Response enthält nur den `secret_present`-
-      Flag), `settings_probe_cloud_http` (TCP-Connect only,
-      kein Completion-Roundtrip, kein Bearer-Header auf der
-      Leitung). UI-Seite: deutlich abgesetzter, gold-orange
-      gefärbter „cloud_http · Edit · external"-Block mit
-      Warnhinweis, maskiertem Secret-LineEdit
-      (`secret = true`), separatem **Save key** / **Clear key**-
-      Button, sofortigem Leeren des Edit-Felds beim Klick
-      (auch offline — Security-First), Status-Label, das
-      ausschließlich kuratierte Strings zeigt (`key: saved ✓`
-      vs. `key: not set ✗`), und **niemals** einen Rückspiegel-
-      Pfad aus dem Status ins Edit-Feld. **Bewusst nicht Teil
-      von PR 10:** TLS / `https://`, Streaming, Function-/Tool-
-      Calling, `messages`-Array, Anbieter-Zoo, Approval-/
-      Interaction-/Desktop-Automation-Änderung, Stage-C-/Avatar-
-      Kopplung. Details in
-      [docs/provider_fallback_and_settings_architecture.md §9 + §11](./docs/provider_fallback_and_settings_architecture.md),
-      [docs/api.md §2.10 inkl. §2.10d](./docs/api.md),
-      [docs/ui_architecture.md §8d.5e](./docs/ui_architecture.md).
-      Tests: Core 260 PASS (+30 vs. PR 9 — acht
-      Secret-Store-Unit-Tests inkl. 0600-Permission-Test,
-      Debug-Leak-Guard und Parse-Error-ohne-Panic; elf
-      Text-Provider-Unit-Tests; vier Protocol-Parser-Tests;
-      sechs IPC-Ende-zu-Ende-Tests, davon vier mit aktiven
-      Secret-Leak-Guards — weder `status` noch Probe-Response
-      noch `error`-Envelope dürfen Key-Marker oder Endpoint
-      enthalten). UI `settings-shell-smoke` um vier
-      Cloud-HTTP-Blöcke erweitert. Alle übrigen UI-Smokes grün;
-      Headless-Boot sauber.
-- [x] PR 11: TLS für `cloud_http` + sicherer Probe-/Request-
-      Pfad. Der `cloud_http`-Provider akzeptiert jetzt zusätzlich
-      zu `http://` auch `https://`; der HTTPS-Pfad läuft über
-      `tokio-rustls` (pure-Rust, `ring`-Crypto-Provider) gegen
-      den in `webpki-roots` eingebetteten Mozilla-Trust-Store.
-      Hermetischer Build, **keine** Abhängigkeit auf System-
-      Cert-Stores oder native TLS-Libs. **Keine** stille
-      Zertifikats-Deaktivierung, **kein** UI-Schalter „unsichere
-      TLS-Verbindung erlauben", **keine** `accept_invalid_certs`-
-      Abkürzung. Die PR-10-Ablehnung `endpoint_scheme_unsupported`
-      für `https://` entfällt; die Klasse meldet jetzt nur noch
-      nicht-http/https-Schemes (z. B. `ftp://`). Neue
-      Fehlerklassen: `tls_handshake_failed`, `cert_untrusted`
-      (UnknownIssuer-Familie), `cert_invalid` (Expired /
-      NotYetValid / BadSignature / DNS-Mismatch). Der Probe-Pfad
-      macht für `https://` einen echten TLS-Handshake (kein
-      Completion-Request, kein Bearer-Header auf der Leitung);
-      für `http://` bleibt der bisherige TCP-Connect mit
-      kennzeichnender Klasse `ok_http`. UI-Seite: kleiner
-      Insecure-Transport-Hinweis, der sichtbar wird, sobald der
-      Nutzer einen `http://`-Endpoint tippt — kein Toggle, kein
-      Bypass. **Bewusst nicht Teil von PR 11:** kein
-      authentifizierter Probe-Request über TLS (nur der
-      Handshake wird heute ausgeführt; `unauthorized`-Klasse
-      existiert im Run-Pfad, wird aber in der Probe noch nicht
-      getroffen), kein Client-Cert-Support, keine Custom-CA-
-      Bundle-UX, keine TLS-Metriken im Status, kein Streaming/
-      Function-Calling-Ausbau, keine Anbieter-Zoo-Erweiterung.
-      Details in
-      [docs/provider_fallback_and_settings_architecture.md §9 + §11](./docs/provider_fallback_and_settings_architecture.md),
-      [docs/api.md §2.10d](./docs/api.md),
-      [docs/ui_architecture.md §8d.5e](./docs/ui_architecture.md).
-      Tests: Core 268 PASS (+8 vs. PR 10 — drei neue
-      Parser-Unit-Tests inkl. `https://`-Akzeptanz,
-      fünf Provider-Integrationstests inkl. einem echten
-      HTTPS-Fake-Server via rcgen + `cert_untrusted`-Pfad gegen
-      den Produktions-Trust-Store + `tls_handshake_failed`-Pfad
-      HTTPS-gegen-Plain-HTTP + `unauthorized`-Pfad über TLS +
-      plaintext-HTTP-Regressionstest, plus ein IPC-Ende-zu-Ende-
-      Test gegen den Fake-HTTPS-Server mit Produktions-Config);
-      UI `settings-shell-smoke` +3 Assertions (`http://`-Hint
-      erscheint, verweist auf `https://`, bleibt bei `https://`
-      leer). Alle übrigen UI-Smokes grün; Headless-Boot sauber.
-- [x] PR 12: authentifizierter `cloud_http`-Probe-Roundtrip. Die
-      Probe wertet sich von einer Transport-/TLS-Prüfung zu
-      einer echten Application-Layer-Probe auf. Der Core sendet
-      einen `HEAD`-Request gegen den konfigurierten Endpoint
-      mit `Authorization: Bearer <key>` (Header-Name aus Config,
-      Key aus dem Secrets-Store). **Kein** Completion-Request,
-      **kein** Prompt, **kein** Nutzer-Inhalt auf der Leitung —
-      HEAD reicht, weil Auth-Middleware den Bearer genauso
-      validiert wie bei POST. Die Probe kann jetzt ehrlich
-      zwischen `ok` (HTTP 2xx → Auth akzeptiert, Endpoint
-      erreichbar), `unauthorized` (HTTP 401/403 → Server lehnt
-      den gespeicherten Key explizit ab) und `http_error`
-      (sonstige Non-2xx, mit numerischem Status in der Meldung)
-      unterscheiden. Die PR-11-only-Klasse `ok_http` (TCP-
-      Connect-only für `http://`) **entfällt**; beide Transporte
-      gehen jetzt durch denselben authentifizierten HEAD-Pfad.
-      Die `fake-server`-Infrastruktur in
-      [`providers/text.rs::tests`](./core/src/providers/text.rs)
-      bekam einen neuen `FakeHttpsMode::RequiresBearer`-Modus,
-      einen `HttpErrorStatus(u16)`-Modus, und einen neuen
-      `start_fake_http_auth_server`-Helper (Plaintext-Pendant zu
-      `start_fake_https_server`). **Bewusst nicht Teil von
-      PR 12:** kein End-to-End-Happy-Path über echtes TLS durch
-      den Probe-Pfad (der Probe nutzt fest die Produktions-
-      `default_cloud_http_tls_config`; der TLS-Trust-Pfad wird
-      stattdessen auf Provider-Ebene via
-      `CloudHttpProvider::new_with_tls_config` getestet). Kein
-      Streaming / Function-Calling / messages-Array, kein
-      Anbieter-Zoo, kein Client-Cert / mTLS, keine Custom-CA-
-      Bundle-UX, kein Secret-Rotation-Pfad, keine Stage-C-/
-      Avatar-Kopplung, keine Approval-/Interaction-/Desktop-
-      Automation-Änderung, keine TLS-Abschwächung oder
-      `accept_invalid_certs`-Abkürzung. Details in
-      [docs/provider_fallback_and_settings_architecture.md §9 + §11](./docs/provider_fallback_and_settings_architecture.md),
-      [docs/api.md §2.10d](./docs/api.md). Tests: Core 272 PASS
-      (+4 vs. PR 11 — vier neue IPC-Ende-zu-Ende-Tests: `ok`
-      über plaintext-HTTP mit `RequiresBearer`-Fake-Server,
-      `unauthorized` bei Mismatched Bearer, `http_error` bei
-      Server-500, Cert-Pfad über HTTPS bestätigt, dass
-      untrusted cert auch mit Auth im Spiel sauber blockiert;
-      alle vier tragen aktive Secret-Leak-Guards). UI-Smokes
-      unverändert grün; Headless-Boot sauber. UI: Probe-Button-
-      Tooltip aktualisiert (weist jetzt auf authentifizierten
-      HEAD hin, keine neue Button-Oberfläche).
-- [x] PR 13: STT/TTS Chain-Editor in der Settings-Shell. Spiegel
-      zum Text-Chain-Editor aus PR 9, aufgesetzt auf die
-      Audio-Achsen. `providers::stt` und `providers::tts` bekommen
-      jeweils eine kuratierte Whitelist (`KNOWN_{STT,TTS}_KINDS`),
-      eine `DEFAULT_{STT,TTS}_PROVIDER_CHAIN`-Konstante, eine
-      `SttChainValidationError` / `TtsChainValidationError`-Enum
-      und einen `validate_{stt,tts}_chain`-Helper (Empty-Reject,
-      UnknownKind, Duplicate, Trim+Lowercase). `App` bekommt
-      `update_{stt,tts}_provider_chain` + `reset_*`-Methoden;
-      `live_audio.{stt,tts}_provider_chain` ist der neue
-      Source-of-Truth-Stand (die Startup-Config-Chain wirkt nur
-      noch als Startwert). Neues
-      `settings_store::AudioChainOverrideFile { chain: Option<Vec<String>> }`-
-      Format + zwei neue Override-Dateien `stt_chain.json` und
-      `tts_chain.json` (gleiche Verzeichnisauflösung, 0600-
-      Permissions, atomarer Write wie `text_chain.json`). Neue
-      IPC-Messages `settings_set_{stt,tts}_provider_chain` +
-      `settings_reset_{stt,tts}_provider_chain` (alle additiv);
-      Response bei Erfolg `status`-Envelope mit
-      `stt_provider_chain` / `tts_provider_chain`-Readout, bei
-      Validation-Fehlern kuratiertes `error`-Envelope.
-      `StatusPayload` bekommt additiv `stt_provider_chain` /
-      `tts_provider_chain`. UI: gemeinsamer
-      `_build_audio_chain_editor_block(axis)`-Helper, eine Zeile
-      pro bekanntem Kind (Enable-CheckBox + Up/Down), plus
-      Apply/Reset. Kleines ehrliches Info-Label: „heute nur
-      `command` verfügbar, der Mechanismus bleibt für zukünftige
-      Kinds vorbereitet". Readout in STT-/TTS-Section rendert die
-      aktuelle Chain als Pfeil-separierten String. **Bewusst nicht
-      Teil von PR 13:** keine Drag-and-Drop-UX, keine freie
-      Namenseingabe, kein Cloud-STT/Cloud-TTS-Provider-Zoo, kein
-      Secrets-Pfad für Audio (heute nicht nötig), keine Stage-C-/
-      Avatar-Kopplung, keine Approval-/Interaction-/Desktop-
-      Automation-Änderung. Details in
-      [docs/provider_fallback_and_settings_architecture.md §9 + §11](./docs/provider_fallback_and_settings_architecture.md),
-      [docs/api.md §2.10 (inkl. 2.10e)](./docs/api.md),
-      [docs/ui_architecture.md §8d.5f](./docs/ui_architecture.md).
-      Tests: Core 302 PASS (+30 vs. PR 12 — sechs Validator-
-      Unit-Tests pro Achse, sechs `settings_store`-Unit-Tests,
-      vier Protocol-Parser-Tests, sieben IPC-Ende-zu-Ende-Tests
-      über beide Achsen inkl. Reject-Unknown, Reject-Empty,
-      Reject-Duplicate, Reset-To-Default, Case-/Whitespace-
-      Normalisierung). UI `settings-shell-smoke` +6 Blöcke für die
-      Chain-Editoren (Build+Sync, Empty-Guard pro Achse,
-      Single-Kind-Info-Hinweis, Readout-Chain-Zeile). Alle übrigen
-      UI-Smokes grün; Headless-Boot sauber.
-
----
-
-## Phase 9 – Intelligence Expansion (V0.95)
-
-- [ ] Multi-Agent-Orchestrierung
-- [ ] Long-Term-Memory
-- [ ] Context-Persistence
-- [ ] adaptives Verhalten
-- [ ] Feedback-Loops
-- [ ] Trace- / Replay-Integration
-
----
-
-## Phase 10 – Production (V1.0)
-
-- [ ] Performance-Optimierung
-- [ ] Packaging
-- [ ] Installer
-- [ ] Autostart-Integration
-- [ ] Crash-Handling
-- [ ] Logging / Diagnostics
-- [ ] Config-UX
-- [ ] Cross-Platform-Support
-
----
-
-## Architekturprinzipien
-
-Diese Prinzipien gelten über alle Phasen hinweg. Sie sind nicht Wunsch,
-sondern Merge-Kriterium.
-
-- **Core-driven.** Der Rust-Core ist die einzige Quelle der Wahrheit für
-  Zustand, Entscheidungen und Orchestrierung. UI und Adapter reagieren.
-- **UI ohne Geschäftslogik.** Die Godot-UI rendert Events und sendet
-  Eingaben. Sie trifft keine Entscheidungen, hält keine Session-Wahrheit,
-  kennt ABrain nicht direkt.
-- **ABrain als Cognition-Schicht.** ABrain ist das Entscheidungssystem,
-  nicht das UI-System und nicht der Orchestrator. Austauschbar hinter
-  einer schmalen Adaptergrenze.
-- **Adapter statt Parallel-Stacks.** Kein zweiter IPC-Stack, keine zweite
-  Runtime, keine zweite Audiopipeline. Neue Transporte oder Engines
-  kommen als Adapter hinter bestehenden Handlern.
-- **Leichtgewichtig.** Keine schweren Abhängigkeiten ohne klaren Nutzen.
-  Der Idle-Footprint muss vertretbar bleiben.
-- **Additiv erweitern.** Protokolle und APIs wachsen über neue Felder
-  und neue `type`-Werte, nicht über Breaking Changes.
-- **Asynchron und nicht-blockierend.** Langsame Adapter (STT, TTS,
-  ABrain) dürfen den Event-Loop nicht blockieren.
-- **Graceful failure vor harten Dependencies.** Fehlt ein Adapter,
-  meldet der Core das als Zustand; er stürzt nicht ab.
-- **Inkrementelle Multimodalität.** Text zuerst, dann Audio, dann Vision
-  / Sensorik — jeweils erst, wenn die Schicht darunter stabil ist.
-
----
-
-## Aktueller Fokus
-
-→ **Phase 3.3 Presence MVP** steht: Presence-State, Action-Banner und
-docked/expanded-Umschaltung laufen auf Basis der Action Events. Nächste
-Schritte sind das echte Desktop-Overlay (randloses, transparentes,
-optional click-through-fähiges Fenster) auf Basis der neuen Linux-
-Window-/Overlay-Architektur (Phase 3b, siehe
-[docs/linux_window_overlay_architecture.md](./docs/linux_window_overlay_architecture.md))
-und die strukturierten Targets aus einer Desktop-Interaction-Schicht
-(Phase 8b). Avatar-seitig bleibt echte Charakteranimation offen.
-Speech-Sync ist mit PR 14 im MVP angekommen
-(`speaking_started` / `speaking_ended` + UI-Projektion, siehe
-[docs/api.md §2.11](./docs/api.md) und
-[docs/ui_architecture.md §8.4a](./docs/ui_architecture.md));
-PR 15 setzt darauf den **Behavioral Expression Layer v1** auf (sechs
-UI-only Ausdrucksmodi als Multiplier-/Tint-Patch, siehe
-[docs/ui_architecture.md §8.4b](./docs/ui_architecture.md));
-PR 16 ergänzt das **Workflow Visibility Overlay v1** — ein read-only
-Panel, das die bestehenden UI-Events als kleine lineare Kette
-sichtbar macht (siehe
-[docs/ui_architecture.md §8.4c](./docs/ui_architecture.md)).
-PR 17 setzt darauf die **Approval UX v1** auf: neue Approval-Card,
-additives `risk`/`source` am bestehenden Approval-Protokoll, plus
-ein **harmloser Demo-Pfad** (`request_approval_demo`) — **keine**
-echte Tool-Ausführung, keine Desktop-Automation, kein AdminBot
-(siehe [docs/ui_architecture.md §8.4d](./docs/ui_architecture.md)
-und [docs/security/APPROVAL_UX.md](./docs/security/APPROVAL_UX.md)).
-PR 18 macht aus dem UX-Muster eine **Gating-Kette**
-(`plan_demo_action`): eine geplante Demo-Aktion darf erst nach
-`approved` als Mock durchlaufen; Deny/Cancel/Timeout blockieren
-die Ausführung hart (siehe
-[docs/ui_architecture.md §8.4e](./docs/ui_architecture.md)). Der
-Executor ist weiterhin ein Mock — PR 18 ist Grundlage, nicht
-Schalter, für eine spätere sichere Tool-Gating-Schicht.
-PR 19 ergänzt einen kleinen **Local Audit Trail v1** (in-memory
-Ring-Buffer, read-only Envelope `audit_recent`, Dev-only UI hinter
-`SMOLIT_UI_DEV_CONTROLS=1`) — *accountability without
-surveillance*, ohne Persistenz und ohne Export (siehe
-[docs/security/AUDIT_TRAIL.md](./docs/security/AUDIT_TRAIL.md)).
-Tieferer Speech-Sync (Phonem, Audio-Timeline) und Emotion-Mapping
-aus ABrain bleiben in Phase C geparkt — weder PR 15, PR 16, PR 17,
-PR 18 noch PR 19 ändern das Protokoll über additive Felder hinaus.
-
-Für den Desktop Interaction Layer läuft jetzt ein konkreter
-**Approval / Confirmation Flow MVP**: freigabepflichtige Aktionen
-(aktuell `open_application`) werden vom Core nicht mehr stumm
-abgelehnt, sondern über `approval_requested` / `approval_response` /
-`approval_resolved` an die UI gespiegelt und bei Timeout sauber
-`action_cancelled`. Details in [docs/api.md §2.7](./docs/api.md).
-
-Zusätzlich ist der erste **Interaction-Backend-Spike für
-`focus_window`** im Core gelandet: neuer IPC-Call
-`interaction_focus_window`, Policy-Gate
-`SMOLIT_INTERACTION_ALLOW_FOCUS_WINDOW` (konservativ off),
-command-basiertes Backend mit Template
-`SMOLIT_INTERACTION_FOCUS_WINDOW_CMD`, vollständige Einbindung in
-den Approval-Flow. Verifikation bleibt ehrlich `uncertain`; ohne
-Template (typisch Wayland) meldet der Core
-`BackendUnsupported("focus_window")` statt Pseudo-Erfolg.
-
-Zusätzlich begonnen: **Phase 3b Linux Window & Overlay Architecture**
-als parallele Architekturlinie. Das Dokument legt Wayland/X11-Trennung,
-Capability-Matrix und eine noch nicht vollständig implementierte
-Window-Behavior-Abstraktion fest. Als erster Codepunkt ist ein
-**Window Behavior Capability Spike v1** gelandet:
-`ui/scripts/window_behavior/` (Capability-Detection + opt-in
-Transparenz-/Click-through-Probe via `SMOLIT_WINDOW_PROBE=1`, ohne
-Always-on-top-Versprechen und ohne Scene-Kopplung). Details in
-[docs/linux_window_overlay_architecture.md §F.1](./docs/linux_window_overlay_architecture.md).
-
-Aufbauend darauf ist jetzt ein **Overlay-MVP Phase B** gelandet:
-`ui/scripts/window_behavior/overlay_controller.gd` aktiviert opt-in
-(via `SMOLIT_UI_OVERLAY=1`) einen transparenten, borderlosen
-Presence-Modus — capability-gesteuert, mit ehrlichem Fallback auf das
-normale Fenster, wenn die Transparenz im aktuellen Setup nicht
-tragfähig ist. Click-through und Always-on-top werden bewusst **nicht**
-versprochen (Folgearbeit bzw. compositor-abhängig). Presence- und
-Avatar-Schicht bleiben unberührt. Details in
-[docs/linux_window_overlay_architecture.md §F.2](./docs/linux_window_overlay_architecture.md)
-und
-[docs/ui_architecture.md §9.2](./docs/ui_architecture.md).
-
-Ebenfalls gelandet: **Verified Target Discovery** (Phase 8b). Der
-Accessibility-Spike unterscheidet jetzt explizit zwischen `ok`,
-`uncertain`, `unavailable` und `failed` auf Payload-Ebene sowie
-`verified` vs. `discovered` pro Item. `verified` bleibt reserviert
-für den zukünftigen echten RPC-Pfad; `inspect_target(hint)` liefert
-Hint-Echo-Items als `discovered`. Die Godot-UI rendert die Ergebnisse
-in einem kleinen DiscoveryPanel — rein anzeigend, ohne Confidence
-nachträglich hochzustufen. Details in
-[docs/ui_architecture.md §8.1](./docs/ui_architecture.md) und
-[docs/linux_interaction_backends_research.md §2.3](./docs/linux_interaction_backends_research.md).
-
-Ebenfalls gelandet: **Target Selection + Approval-assisted Target
-Handoff** (Phase 8b). UI kann Discovery-Items per „Select"-Button als
-aktuellen Interaction-Kontext markieren; der Core hält genau einen
-`SelectedTarget` im Speicher und antwortet mit `target_selected` /
-`target_cleared`. Beim nächsten `approval_requested` trägt der Core das
-Target im zusätzlichen `selected_target`-Feld und ergänzt den
-Approval-Text um „Ziel: name (role, confidence)". Auswahl ist
-ausdrücklich **keine** Berechtigung — jede Folgeaktion geht weiterhin
-durch den bestehenden Approval-Flow, und die UI räumt die Auswahl bei
-Clear-Klick oder `ipc_disconnected`. Details in
-[docs/api.md §2.9](./docs/api.md) und
-[docs/ui_architecture.md §8.2](./docs/ui_architecture.md).
-
-Ebenfalls gelandet: **Linux Accessibility Backend Spike** (Phase 8b).
-`AccessibilityProbe::detect()` liefert aus Session-Umgebung und
-Unix-Socket-Vorprüfung ein getaggtes
-`uncertain` / `unavailable` / `failed` mit Grund; die neuen
-IPC-Nachrichten `interaction_probe_accessibility` und
-`interaction_discover_accessibility` laufen über das Action Event
-Model und emittieren zusätzliche `accessibility_probe_result`- bzw.
-`accessibility_discovery_result`-Envelopes. `AccessibilityItem` ist
-als Schema vorbereitet, aber die Discovery-Füllung fehlt bewusst —
-die echte RPC-Stufe (zbus / `atspi-connection`, Registry-
-`GetChildren`, Namens-Lookup) ist die nächste Ausbaustufe. Details in
-[docs/linux_interaction_backends_research.md](./docs/linux_interaction_backends_research.md)
-und [docs/api.md §2.8](./docs/api.md).
+- **IPC-Spezifikation:** [`docs/api.md`](./docs/api.md)
+- **UI-Architektur:** [`docs/ui_architecture.md`](./docs/ui_architecture.md)
+- **Provider-/Settings-Architektur:**
+  [`docs/provider_fallback_and_settings_architecture.md`](./docs/provider_fallback_and_settings_architecture.md)
+- **Presence + Desktop-Interaction-Vision:**
+  [`docs/presence_desktop_interaction.md`](./docs/presence_desktop_interaction.md)
+- **Approval-UX-Prinzipien (PR 17/18):**
+  [`docs/security/APPROVAL_UX.md`](./docs/security/APPROVAL_UX.md)
+- **Audit-Trail-Prinzipien (PR 19):**
+  [`docs/security/AUDIT_TRAIL.md`](./docs/security/AUDIT_TRAIL.md)
+- **Linux-Window-/Overlay-Architektur:**
+  [`docs/linux_window_overlay_architecture.md`](./docs/linux_window_overlay_architecture.md)
+  (plus Teilmessungen in `docs/x11_always_on_top_*.md`,
+  `docs/wayland_always_on_top_refusal_results.md`)
+- **Avatar-Stage-C-Forschung:**
+  [`docs/avatar_stage_c_research.md`](./docs/avatar_stage_c_research.md)
+- **Reviews & PR-Historie:** [`docs/reviews/`](./docs/reviews/)
+  inkl. [`PR20_DOCS_REALITY_CHECK.md`](./docs/reviews/PR20_DOCS_REALITY_CHECK.md)
+- **Offene Arbeiten (Live-Single-Source):**
+  [`docs/OPEN_WORK.md`](./docs/OPEN_WORK.md)
