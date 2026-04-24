@@ -208,8 +208,11 @@ Single-Source für offene Punkte:
   deckt nur `plan_demo_action`; der reale
   `open_application`-Lifecycle ist nicht auditiert. → PR 32.
 - **F. Desktop Interaction Layer** — `focus_window` mit PR 23
-  entschieden. Nächster Kandidat ohne Priorität: AT-SPI-RPC-Spike-
-  Entscheidung (PR 37).
+  entschieden; Accessibility-RPC-Spike-Decision mit PR 37
+  entschieden ([`ADR-0002`](./docs/adr/ADR-0002-accessibility-rpc-readonly.md),
+  read-only AT-SPI, Docs/ADR-only). Nächster Kandidat (Future Work,
+  nicht priorisiert): FA-1-Spike-Implementation hinter dem
+  `accessibility_rpc`-Feature-Flag.
 - **G. Avatar Animation / Stage C Research** — PR 30 gelandet;
   Stage C bleibt Research-Gate. Nächster Kandidat wartet auf
   Token-Export auf der smolitux-ui-Seite (siehe J / PR 35).
@@ -260,7 +263,7 @@ PR 31 selbst ist dieser Roadmap-Checkpoint (Docs-only).
 | 34 | C | TTS Alternative v1 (2026-04-24, gelandet): `piper` als zweites command-basiertes TTS-Kind unter `SMOLIT_TTS_PIPER_CMD`. Whitelist `[command, piper]`; Default bleibt `["command"]`. Keine Build-Abhängigkeit auf Piper, kein Modell-Manager, kein Runtime-Editor. Speaking-Lifecycle-`provider`-Feld trägt jetzt den realen Kind-Namen statt hardcodiert `command`. Keine neuen IPC-Commands. |
 | 35 | J | **Smolitux Token Contract Prep in smolitux-ui.** Cross-Repo-Docs-PR auf [smolitux-ui](https://github.com/Modularium/smolitux-ui): Token-Schema-Vorschlag, Export-Format, Namensraum. **Kein** Export-Build, **kein** Import in Smolit-Assistant. Voraussetzung für einen späteren Token-Spike auf der Assistant-Seite. |
 | 36 | D | **Settings-Shell-UX-Cleanup** nach Provider-Onboarding: visuelle Hierarchie, Kollapsierung alter Per-Kind-Editoren, klare Section-Header. Keine neuen IPC-Commands, keine Default-Änderung, kein Auto-Cloud. |
-| 37 | F | **Accessibility RPC Spike Decision (AT-SPI read-only).** ADR für einen echten `GetChildren`-Pfad auf Registry-Root; Toolkit-/Wayland-Fragmentierung und Portal-Pfad benennen, entscheiden **vor** Code. |
+| 37 | F | **Accessibility RPC Spike Decision (AT-SPI read-only)** (2026-04-24, gelandet, **Docs/ADR-only**): [`ADR-0002`](./docs/adr/ADR-0002-accessibility-rpc-readonly.md) entscheidet den Rahmen vor Code. Read-only `GetChildren` auf Registry-Root; `atspi`+`zbus` hinter einem `accessibility_rpc`-Feature-Flag (default-off); **keine** Input-Injection, **kein** `DoAction`, **kein** Baum-Walk über eine Tiefe hinaus, **keine** Passwort-/Secret-Felder, **keine** Wayland-Compositor-Aktion, **kein** Approval-Bypass. `confidence: verified` bleibt exklusiv für Items mit Registry-Evidenz — Hint-Echos bleiben `discovered`. Wire-Schema (`docs/api.md` §2.8) unverändert, keine neuen IPC-Commands. |
 | 38 | I | **Release/CI Foundation.** Minimale GitHub-Action: `cargo test` + `settings-shell-smoke`. **Kein** Packaging-Format, **keine** Signing-Stufe, **kein** Artifact-Upload in diesem Schritt. |
 | 39 | H | **ABrain Native Integration ADR.** API-Scope, Ownership der API-Definition, Migration aus dem CLI-Pfad. Noch kein Code; Entscheidung über Schnittstellen-Besitz kommt vor Implementation. |
 | 40 | — | **OceanData Data-Layer Integration ADR** (cross-repo falls nötig). Beschreibt einen *hypothetischen* Anbindungsweg eines Data-Layers an Smolit-Assistant. OceanData bleibt explizit **kein** UI-/Design-System. Nur ADR, keine Implementation. |

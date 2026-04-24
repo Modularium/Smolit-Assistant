@@ -284,16 +284,31 @@ stub-unterstützt ohne Backend.
 **Blocker:** keine technischen Blocker; weitere Interaction-Kinds
 (`type_text` / `send_shortcut`) brauchen eine eigene Policy-
 Entscheidung vor Backend-Arbeit.
-**Nächster kleinster PR:**
+**Erledigt (Decision only):**
 
-- **PR 37 F-Accessibility-RPC-Spike-Decision.** ADR für einen
-  echten AT-SPI-`GetChildren`-Pfad am Registry-Root — **read-only**,
-  ohne Eingabe/Klick/Fokus. Der ADR benennt Toolkit-Fragmentierung
-  (GTK / Qt / Electron), Wayland-Portal-Abhängigkeit und den
-  Confidence-Pfad (`discovered` → `verified`). Entscheidet *vor*
-  Code, ob / mit welcher Bibliothek (zbus/atspi) der Spike kommt.
-  `focus_window` bleibt mit PR 23 abgeschlossen; `type_text` /
-  `send_shortcut` bekommen auch hier **keinen** Backend-Pfad.
+- **PR 37 F-Accessibility-RPC-Spike-Decision** *(2026-04-24, gelandet,
+  Docs/ADR-only)*. [`ADR-0002`](./adr/ADR-0002-accessibility-rpc-readonly.md)
+  entscheidet den Rahmen für einen späteren AT-SPI-RPC-Pfad:
+  **read-only** `GetChildren` am Registry-Root, **kein** Klick,
+  **kein** Tipp, **kein** `DoAction`, **kein** Baum-Walk über eine
+  Tiefe hinaus. Kandidaten-Stack ist `atspi` + `zbus` (pure-Rust)
+  hinter einem `accessibility_rpc`-Feature-Flag (default-off). Das
+  Wire-Schema aus [`docs/api.md` §2.8](./api.md) bleibt unverändert;
+  `confidence: verified` bleibt exklusiv für Items, die aus einem
+  echten Registry-Call stammen, heutige Hint-Echos bleiben
+  `discovered`. Kein Code in diesem PR.
+
+**Nächster kleinster PR (Future Work, nicht priorisiert):**
+
+- **FA-1 — accessibility_rpc-Feature-Spike.** Setzt ADR-0002 D1–D5
+  um: `atspi`+`zbus` hinter Feature-Flag, Registry-Root-Children-
+  Read, Failure-Mode-Mapping aus ADR-0002. Eigener PR mit eigenen
+  Tests und Packaging-Note (Flatpak: `--talk-name=org.a11y.Bus`).
+- **FA-2/FA-3/FA-4 — eigene ADRs vor Code** für Name-Match-Pfad,
+  Toolkit-Gaps und Wayland-Portal-Fokus.
+
+`focus_window` bleibt mit PR 23 abgeschlossen; `type_text` /
+`send_shortcut` bekommen auch hier **keinen** Backend-Pfad.
 
 **Nicht-Ziele:**
 
@@ -316,6 +331,12 @@ Entscheidung vor Backend-Arbeit.
   target-Mapping, Approval-Flow).
 - Keine UI-Referenzen (rg auf `ui/` liefert null Treffer), daher
   keine neue Smoke-Rolle nötig.
+- PR 37 ist Docs/ADR-only — keine neuen Tests. Die bestehenden
+  Accessibility-Unit-Tests in
+  [`core/src/interaction/accessibility.rs`](../core/src/interaction/accessibility.rs)
+  decken den Ehrlichkeits-Guard weiterhin ab (`verified` wird in
+  keinem Pfad emittiert, Hint-Echo produziert `discovered` mit
+  `matched_hint`).
 
 ---
 
