@@ -892,7 +892,8 @@ Reality-Check:
   bei Erfolg konsequent `uncertain` statt `verified`.
 - **Keine** Eingabe in sensible Dialoge (Anmelde-, Zahlungs-, System-
   dialoge) geplant; erst eine spätere Phase definiert Trust-Stufen
-  (siehe `docs/presence_desktop_interaction.md`, §7).
+  (siehe [`docs/presence_desktop_interaction.md`](./presence_desktop_interaction.md)
+  §10 Future Work und §11 Explicit Non-goals).
 
 ---
 

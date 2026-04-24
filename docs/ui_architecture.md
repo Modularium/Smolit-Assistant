@@ -1587,8 +1587,8 @@ Approval, Deny, Doppel-Approve) und den IPC-Roundtrip ab.
 
 ### 8.5 Visual Action Mode (UI-Staging MVP, Phase 3.3, Ist-Zustand)
 
-Kleine, ehrliche MVP-Umsetzung der Produktachse aus
-[`docs/presence_desktop_interaction.md` §7](./presence_desktop_interaction.md).
+Kleine, ehrliche MVP-Umsetzung der UI-Staging-Achse aus
+[`docs/presence_desktop_interaction.md` §9](./presence_desktop_interaction.md).
 **Kein** Feature-Bau Richtung echter Avatar-Bahn über Fremdfenster,
 **kein** Desktop-Targeting, **keine** IPC-/Core-Änderung. Der Modus
 moduliert rein innerhalb der Presence-Hülle, **wie laut** bestehende

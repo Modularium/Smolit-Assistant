@@ -12,19 +12,23 @@ Stand: 2026-04-24 (nach PR 20 Docs Reality Check).
 
 ## A — Docs & Architecture Hygiene
 
-**Status:** aktiv, läuft durch PR 20.
+**Status:** aktiv. PR 20 (Docs Reality Check), PR 24 (Smolitux Design
+Contract ADR) und **PR 28 (2026-04-24) — `presence_desktop_interaction.md`
+auf Ist-Zustand getrimmt (1096 → 491 Zeilen, 12-Abschnitt-Struktur,
+Zielbild konsequent in Future Work / Non-goals isoliert)** sind
+gelandet. Siehe
+[`PR20_DOCS_REALITY_CHECK.md`](./reviews/PR20_DOCS_REALITY_CHECK.md)
+und [`PR28_PRESENCE_DESKTOP_INTERACTION_TRIM.md`](./reviews/PR28_PRESENCE_DESKTOP_INTERACTION_TRIM.md).
 **Warum wichtig:** Docs waren gegenüber dem Code gedriftet; zwei
 Vokabularfamilien (Avatar-Phase A/B/B+/B++ vs. Roadmap-Phase 0–10)
 kollidierten; zwei Workflow-Overlays koexistieren ohne Abgrenzung;
-ROADMAP war 1 811 Zeilen PR-Log. Siehe
-[`PR20_DOCS_REALITY_CHECK.md`](./reviews/PR20_DOCS_REALITY_CHECK.md).
+`presence_desktop_interaction.md` versprach Bewegungspfade, OCR,
+Vision und breite Desktop-Automation, die im Code schlicht nicht
+existierten. PR 28 hat diese Lücke geschlossen.
 **Blocker:** keine; reine Docs-Arbeit.
-**Nächster kleinster PR:**
-
-- **PR 21 A-Docs Follow-up:** tote Links im gesamten Repo
-  reparieren, `docs/reviews/`-Index anlegen, Glossar-Embryo
-  starten (`Approval`, `Audit`, `Workflow-Overlay`, `Presence`,
-  `Expression`, `Action Event`).
+**Nächster kleinster PR:** kein zwingender A-PR in der nahen Reihe.
+PR 21 (tote Links, Reviews-Index, Glossar-Embryo) ist abgearbeitet;
+PR 31 (Glossar fixieren) bleibt als Pflegepunkt in §6 der ROADMAP.
 
 **Nicht-Ziele:**
 
