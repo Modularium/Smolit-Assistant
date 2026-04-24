@@ -374,3 +374,17 @@ bindend; jeder Schritt bekommt bei Bedarf einen eigenen ADR.
 - Ziel-Zustand-Skizze: [`docs/api.md §5`](../api.md).
 - Provider-Chain-Mechanik:
   [`docs/provider_fallback_and_settings_architecture.md`](../provider_fallback_and_settings_architecture.md).
+
+## Crosslinks
+
+- **ABrain ≠ OceanData.** ABrain ist Brain / Reasoning /
+  Orchestration (dieser ADR). OceanData ist Data-/Kontext-/Memory-
+  Schicht und lebt auf einer separaten (zukünftigen) Context-
+  Provider-Achse — siehe [ADR-0004 — OceanData Data-Layer
+  Integration Path](./ADR-0004-oceandata-data-layer-integration.md).
+- **ABrain native path ≠ unrestricted OceanData access.** Auch wenn
+  der Native-Pfad später kommt, darf ABrain **keinen** direkten
+  OceanData-Zugriff bekommen (kein Registry-Lookup, keine Tool-
+  Funktion, die on-demand Kontext holt). OceanData-Ergebnisse
+  fließen — wenn überhaupt — nur als *redacted Summary* über den
+  Core an ABrain (ADR-0004 D7 / D8).
