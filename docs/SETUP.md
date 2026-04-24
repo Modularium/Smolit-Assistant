@@ -359,13 +359,58 @@ Wahrscheinliche Ursachen:
 4. **Issues:**
    [github.com/Modularium/Smolit-Assistant/issues](https://github.com/Modularium/Smolit-Assistant/issues).
 
-## 7. Nicht im Scope dieses Setup-Guides
+## 7. CI / Local verification parity
 
-- **CI-Pipeline** (GitHub Actions o. ä.) — eigener Folge-PR
-  (Workstream I).
-- **Package-Manager-Pakete** (`.deb`, `.rpm`, Flatpak, Snap) — eigener
-  Folge-PR.
-- **Signierte Releases / Auto-Update** — nicht im Plan.
+Seit PR 38 fährt GitHub Actions eine minimale CI-Linie
+([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)):
+
+| Job          | Was läuft                                                   |
+| ------------ | ----------------------------------------------------------- |
+| `core-test`  | `cargo test --manifest-path core/Cargo.toml --locked` auf `ubuntu-latest` mit Rust stable. |
+| `ui-smoke`   | Godot 4.6 headless (offizielles Linux-Binary, pinned via `GODOT_VERSION`), fünf kuratierte Smokes: `settings-shell-smoke`, `avatar-render-polish-smoke`, `workflow-visibility-smoke`, `approval-card-smoke`, `audit-panel-smoke`. |
+
+Beide Jobs setzen vor dem Testlauf **XDG-Isolation**:
+
+```bash
+XDG_CONFIG_HOME=${RUNNER_TEMP}/smolit-config
+XDG_CACHE_HOME=${RUNNER_TEMP}/smolit-cache
+```
+
+`HOME` bleibt bewusst unverändert — rustup/cargo finden ihre
+Toolchain relativ zu `$HOME/.cargo`, und Godot legt seine
+User-Data ebenfalls HOME-relativ ab. Die Config-Isolation über
+`XDG_CONFIG_HOME` ist die tatsächlich relevante Dimension: Smolit-
+Core liest Konfiguration zuerst aus `$XDG_CONFIG_HOME/smolit-assistant/`;
+der hier gesetzte leere Ordner stellt sicher, dass keine Host-
+Artefakte hineinbluten. Das
+ist genau die Klasse, die auf lokalen Dev-Hosts mehrmals stille
+Failures ausgelöst hat (z. B. eine persistente `text_chain.json`, die
+CI-Tests zu `[llamafile_local, local_http, abrain]` statt `[abrain]`
+zwingt).
+
+**Für einen lokalen Parity-Lauf** liegt
+[`scripts/ci_verify.sh`](../scripts/ci_verify.sh) bei. Das Script
+baut sich eine frische Temp-Isolation, ruft `cargo test` auf und —
+wenn `godot` im PATH ist — die fünf Smokes. Ohne Godot bleibt es
+ehrlich und überspringt den Smoke-Teil. Typische Nutzung:
+
+```bash
+scripts/ci_verify.sh            # voller Lauf
+scripts/ci_verify.sh core       # nur cargo
+scripts/ci_verify.sh smokes     # nur smokes (benötigt godot im PATH)
+```
+
+Bewusst **nicht** in CI heute (und nicht in diesem Setup-Guide):
+Release-Tagging, Packaging-Formate (`.deb` / `.rpm` / Flatpak / Snap),
+Docker-Images, Code-Signing, Auto-Publish, Secret-/Cloud-Provider-
+Roundtrip-Tests. Die Entscheidung steht in ROADMAP.md § PR 38; eine
+spätere Release-Line braucht einen eigenen ADR, bevor Code landet.
+
+## 8. Nicht im Scope dieses Setup-Guides
+
+- **Release-Pipeline / Artefakte** (`.deb`, `.rpm`, Flatpak, Snap,
+  Docker-Images, signierte Releases, Auto-Update) — eigener Folge-PR
+  (Workstream I, Post-PR 38).
 - **Cloud-Deployment** — Smolit ist Desktop-first; kein Server-Modus.
 - **smolitux-ui-Integration** — per ADR-0001 ausgeschlossen; Smolit
   bleibt Godot-nativ.

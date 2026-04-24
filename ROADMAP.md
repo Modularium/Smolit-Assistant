@@ -222,8 +222,15 @@ Single-Source für offene Punkte:
 - **H. ABrain Native Integration** — heute CLI; native API ist
   Ziel-Zustand. Nächster Kandidat: ADR (PR 39) vor Code.
 - **I. Packaging / Release / CI** — README/SETUP/.env.example
-  gelandet (PR 29). Nächster Kandidat: minimale CI-Smoke-Linie
-  (PR 38); **keine** Packaging-Formate in dieser Stufe.
+  gelandet (PR 29). Minimale GitHub-Actions-CI gelandet (PR 38,
+  [`ci.yml`](./.github/workflows/ci.yml)): Job `core-test`
+  (`cargo test`) plus Job `ui-smoke` (Godot 4.6 headless, fünf
+  Smokes), beide mit XDG-Isolation gegen stray Dev-Artefakte.
+  Nächster Kandidat (Future Work, nicht priorisiert):
+  Packaging-Entscheidungs-ADR (`.deb` vs. AppImage vs. Flatpak,
+  Signing-Chain) — rein ADR, keine Implementation in der nahen
+  Reihe. **Keine** Packaging-Formate, **keine** signierten Releases,
+  **kein** Auto-Update in dieser Stufe.
 - **J. Smolitux Design Contract / Cross-Runtime UI Consistency** —
   ADR-0001 gelandet (PR 24), Avatar-Palette (PR 30) als lokaler
   Token-Andockpunkt, Smolitux Token Contract v0 gelandet (PR 35,
@@ -270,7 +277,7 @@ PR 31 selbst ist dieser Roadmap-Checkpoint (Docs-only).
 | 35 | J | **Smolitux Token Contract Prep in smolitux-ui** (2026-04-24, gelandet, **Docs/Schema only**): Token Contract v0 liegt cross-repo in [`smolitux-ui docs/design/SMOLITUX_TOKEN_CONTRACT.md`](https://github.com/Modularium/smolitux-ui/blob/main/docs/design/SMOLITUX_TOKEN_CONTRACT.md) — Kategorien, Naming-Regeln (lowercase dot-path, runtime-neutral), Value-Types, Pflicht-Semantic-/State-Tokens, Export-Target-Katalog, Versionierung und Validator-Erwartungen. Non-authoritatives Beispiel unter `docs/design/examples/smolitux.tokens.example.json`. **Keine** Token-Implementation, **kein** Generator, **kein** Style Dictionary, **kein** Export-Build, **kein** Import in Smolit-Assistant, **keine** `@smolitux/*`-Paketänderung, **keine** OceanData-Berührung. In Smolit-Assistant selbst: ADR-0001 verlinkt den Token Contract, `ui_architecture.md` markiert `avatar_palette.gd` explizit als lokalen Andockpunkt (kein Token-Consumer). |
 | 36 | D | **Settings-Shell-UX-Cleanup** (2026-04-24, gelandet): Text / STT / TTS folgen derselben dreiteiligen Lesereihenfolge **Summary · Details · Editoren**. Summary benennt `Primary (intended)` (chain[0]), `Active (running)`, `Availability`, `Local / Cloud` in eigenen Zeilen — Fallback-Fälle werden so beim ersten Blick sichtbar. Privacy-Section bekommt einen expliziten `— Safety notes —`-Block (Opt-in cloud, Secrets nie angezeigt, env-only `SMOLIT_STT_WHISPER_CPP_CMD` / `SMOLIT_TTS_PIPER_CMD`, Probes side-effect-frei). Text-Chain-Editor bekommt eine Note, die cloud_http als Opt-in ausweist. **Keine** neuen IPC-Commands, **keine** neuen `StatusPayload`-Felder, **keine** Core-Änderung, **keine** Default-Änderung — Smoke-Guard gegen neue IPC-Helfer im Controller hält das live. Details: [`docs/provider_fallback_and_settings_architecture.md`](./docs/provider_fallback_and_settings_architecture.md) §13. |
 | 37 | F | **Accessibility RPC Spike Decision (AT-SPI read-only)** (2026-04-24, gelandet, **Docs/ADR-only**): [`ADR-0002`](./docs/adr/ADR-0002-accessibility-rpc-readonly.md) entscheidet den Rahmen vor Code. Read-only `GetChildren` auf Registry-Root; `atspi`+`zbus` hinter einem `accessibility_rpc`-Feature-Flag (default-off); **keine** Input-Injection, **kein** `DoAction`, **kein** Baum-Walk über eine Tiefe hinaus, **keine** Passwort-/Secret-Felder, **keine** Wayland-Compositor-Aktion, **kein** Approval-Bypass. `confidence: verified` bleibt exklusiv für Items mit Registry-Evidenz — Hint-Echos bleiben `discovered`. Wire-Schema (`docs/api.md` §2.8) unverändert, keine neuen IPC-Commands. |
-| 38 | I | **Release/CI Foundation.** Minimale GitHub-Action: `cargo test` + `settings-shell-smoke`. **Kein** Packaging-Format, **keine** Signing-Stufe, **kein** Artifact-Upload in diesem Schritt. |
+| 38 | I | **Release/CI Foundation** (2026-04-24, gelandet): GitHub-Actions-Workflow [`ci.yml`](./.github/workflows/ci.yml) mit zwei Jobs — `core-test` (`cargo test --manifest-path core/Cargo.toml --locked` auf `ubuntu-latest`, Rust stable) und `ui-smoke` (Godot 4.6 headless, pinned via `GODOT_VERSION`, fünf Smokes: `settings-shell-smoke`, `avatar-render-polish-smoke`, `workflow-visibility-smoke`, `approval-card-smoke`, `audit-panel-smoke`). Beide Jobs laufen mit `HOME` / `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` unterhalb `runner.temp` — damit sind stray `~/.config/smolit-assistant/`-Dev-Artefakte strukturell ausgeschlossen. Lokaler Parity-Helper: [`scripts/ci_verify.sh`](./scripts/ci_verify.sh). **Kein** Packaging-Format, **keine** Signing-Stufe, **kein** Artifact-Upload, **kein** Release-Tagging, **kein** Docker-Image, **keine** Secrets, **keine** Provider-Endpunkte, **keine** echten TTS/STT-Binaries. |
 | 39 | H | **ABrain Native Integration ADR.** API-Scope, Ownership der API-Definition, Migration aus dem CLI-Pfad. Noch kein Code; Entscheidung über Schnittstellen-Besitz kommt vor Implementation. |
 | 40 | — | **OceanData Data-Layer Integration ADR** (cross-repo falls nötig). Beschreibt einen *hypothetischen* Anbindungsweg eines Data-Layers an Smolit-Assistant. OceanData bleibt explizit **kein** UI-/Design-System. Nur ADR, keine Implementation. |
 
