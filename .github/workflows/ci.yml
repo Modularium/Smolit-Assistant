@@ -1,0 +1,159 @@
+name: CI
+
+# PR 38 — Release/CI Foundation.
+#
+# Scope bewusst minimal: zwei Jobs, beide read-only, beide ohne
+# Netzwerk zu Provider-Endpunkten, ohne Secrets, ohne Artefakte.
+#
+#   1. core-test — Rust-Core (`cargo test --manifest-path core/Cargo.toml`).
+#   2. ui-smoke  — Godot-4.6-headless, fünf kuratierte Smokes aus
+#                  scripts/run_overlay_verification.sh.
+#
+# Nicht-Ziele dieses Workflows (siehe ROADMAP.md § PR 38):
+#   * Kein Release, kein Tagging, keine .deb/.rpm/Flatpak/Snap.
+#   * Kein Docker, kein Code-Signing.
+#   * Kein Cloud-Provider-Test; TTS/STT-Binaries werden nicht installiert.
+#   * Keine Dependabot-/Auto-Publish-Integration.
+#
+# Die ~/.config/smolit-assistant/-Artefakte, die lokale Entwicklungs-
+# Sessions manchmal hinterlassen (text_chain.json, secrets.json) sind
+# in CI strukturell ausgeschlossen: `HOME` / `XDG_CONFIG_HOME` /
+# `XDG_CACHE_HOME` zeigen auf leere `runner.temp`-Unterordner.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Manuelles Nachfahren erlaubt — praktisch, um Godot-Download-
+  # Flakes einzeln zu reproduzieren.
+  workflow_dispatch:
+
+# Cancel laufende Läufe pro PR-/Branch-Kombination, damit Rebases
+# und schnelle Force-Pushes nicht die Warteschlange verstopfen. Der
+# `main`-Branch selbst wird nicht gecancelt (protected).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  # Pinned Godot-Version — siehe docs/SETUP.md § Godot.
+  GODOT_VERSION: "4.6-stable"
+
+jobs:
+  core-test:
+    name: Core tests (cargo)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+
+      - name: Configure XDG isolation
+        # Verhindert, dass lokale Dev-Artefakte in
+        # `$XDG_CONFIG_HOME/smolit-assistant/` (bzw.
+        # `~/.config/smolit-assistant/`) die Tests beeinflussen. Auf
+        # einem frischen Runner ist das ohnehin leer; der explizite
+        # Pfad-Override dokumentiert die Isolationsgarantie und ist
+        # Robustheit gegen spätere Self-hosted-Runner.
+        #
+        # Hinweis: `HOME` bleibt absichtlich unverändert. Rustup und
+        # Cargo finden ihre Toolchain relativ zu `$HOME/.cargo` /
+        # `$HOME/.rustup` — ein isoliertes HOME würde die via
+        # `dtolnay/rust-toolchain` installierte stable-Toolchain
+        # verlieren. Smolit-Core liest seine Konfiguration zuerst
+        # über `$XDG_CONFIG_HOME`; die hier gesetzten leeren Ordner
+        # reichen deshalb, um Stray-Config auszuschließen.
+        run: |
+          mkdir -p "${RUNNER_TEMP}/smolit-config" \
+                   "${RUNNER_TEMP}/smolit-cache"
+          {
+            echo "XDG_CONFIG_HOME=${RUNNER_TEMP}/smolit-config"
+            echo "XDG_CACHE_HOME=${RUNNER_TEMP}/smolit-cache"
+          } >> "$GITHUB_ENV"
+
+      - name: cargo test
+        run: cargo test --manifest-path core/Cargo.toml --locked
+
+  ui-smoke:
+    name: UI smokes (Godot ${{ env.GODOT_VERSION }} headless)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Godot runtime dependencies
+        # Godot 4.6 auf `--headless` braucht keine X11-Libs, aber das
+        # Binary linkt gegen libgl1 und libxkbcommon0. Wir halten die
+        # Installation minimal und hängen keine zusätzlichen Extras an.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ca-certificates \
+            libgl1 \
+            libxkbcommon0 \
+            unzip
+
+      - name: Download Godot ${{ env.GODOT_VERSION }} headless
+        # Wir nutzen das offizielle Linux-Standard-Binary (nicht
+        # `godot_server`), weil es `--headless` unterstützt und der
+        # Smoke-Wrapper diesen Flag bereits setzt. Pinned Version →
+        # reproduzierbar; Checksum-Check wäre FA-Work (siehe
+        # docs/SETUP.md § CI / Local verification parity).
+        run: |
+          set -euo pipefail
+          GODOT_URL="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_linux.x86_64.zip"
+          GODOT_ZIP="${RUNNER_TEMP}/godot.zip"
+          GODOT_BIN_DIR="${RUNNER_TEMP}/godot-bin"
+          mkdir -p "${GODOT_BIN_DIR}"
+          curl -fsSL "${GODOT_URL}" -o "${GODOT_ZIP}"
+          unzip -q "${GODOT_ZIP}" -d "${GODOT_BIN_DIR}"
+          # Das Archiv enthält `Godot_v<version>_linux.x86_64` — auf
+          # stabilen Namen umbenennen, damit der Smoke-Wrapper `godot`
+          # aufrufen kann.
+          mv "${GODOT_BIN_DIR}/Godot_v${GODOT_VERSION}_linux.x86_64" \
+             "${GODOT_BIN_DIR}/godot"
+          chmod +x "${GODOT_BIN_DIR}/godot"
+          echo "${GODOT_BIN_DIR}" >> "$GITHUB_PATH"
+
+      - name: Verify Godot is callable
+        run: godot --version
+
+      - name: Configure XDG isolation
+        # Gleiche Isolation wie im core-test-Job. Zusätzlich wichtig
+        # für Godot, das `user://`-Schreibpfade unter
+        # `~/.local/share/godot/app_userdata/<project>/` anlegt.
+        run: |
+          mkdir -p "${RUNNER_TEMP}/smolit-home" \
+                   "${RUNNER_TEMP}/smolit-config" \
+                   "${RUNNER_TEMP}/smolit-cache"
+          {
+            echo "HOME=${RUNNER_TEMP}/smolit-home"
+            echo "XDG_CONFIG_HOME=${RUNNER_TEMP}/smolit-config"
+            echo "XDG_CACHE_HOME=${RUNNER_TEMP}/smolit-cache"
+          } >> "$GITHUB_ENV"
+
+      - name: settings-shell-smoke
+        run: scripts/run_overlay_verification.sh settings-shell-smoke
+
+      - name: avatar-render-polish-smoke
+        run: scripts/run_overlay_verification.sh avatar-render-polish-smoke
+
+      - name: workflow-visibility-smoke
+        run: scripts/run_overlay_verification.sh workflow-visibility-smoke
+
+      - name: approval-card-smoke
+        run: scripts/run_overlay_verification.sh approval-card-smoke
+
+      - name: audit-panel-smoke
+        run: scripts/run_overlay_verification.sh audit-panel-smoke
