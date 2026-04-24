@@ -166,6 +166,82 @@ Inhalte nicht entschieden sind.
 
 Siehe [`docs/avatar_stage_c_research.md`](./avatar_stage_c_research.md).
 
+## Smolitux-UI
+
+Die **Web-/React-Komponentenbibliothek** des Smolitux-Ökosystems
+([github.com/Modularium/smolitux-ui](https://github.com/Modularium/smolitux-ui)).
+Enthält `@smolitux/*`-Pakete (z. B. `@smolitux/core`,
+`@smolitux/theme`), ein Docusaurus-Wiki und Storybook. Zielgruppe
+sind Webanwendungen im EcoSphere Network.
+
+**Nicht dasselbe wie:**
+
+- **Smolit-Assistant** — ein Godot-nativer Desktop-Client, der
+  Smolitux-UI **nicht** als Laufzeit-Komponentenquelle benutzt
+  (siehe [ADR-0001](./adr/ADR-0001-smolitux-design-contract.md)).
+- **OceanData** — Data-Layer / Datenplattform, **keine** UI-Library
+  und **kein** Design-System. OceanData liefert weder Komponenten
+  noch Design-Tokens.
+
+Siehe [`docs/adr/ADR-0001-smolitux-design-contract.md`](./adr/ADR-0001-smolitux-design-contract.md).
+
+## Smolitux Design Contract
+
+Die cross-repo Vereinbarung, wie Smolit-Assistant visuelle und
+semantische Konsistenz zum Smolitux-Ökosystem herstellt, ohne den
+Godot-Client mit React zu koppeln. Der Vertrag besagt:
+
+- Smolit-Assistant importiert **keine** React-Komponenten aus
+  smolitux-ui.
+- Smolit-Assistant nutzt **kein** WebView, um Smolitux-UI
+  einzubetten.
+- Smolit-Assistant **kann** Smolitux Design Tokens übernehmen, sobald
+  diese in einem serialisierbaren Format exportiert werden.
+- Der Rust-Core bleibt frei von UI-/React-Abhängigkeiten.
+- smolitux-ui bleibt Single Source of Truth für Web-Komponenten;
+  Design Tokens werden langfristig Single Source of Truth für
+  cross-runtime visuelle Konsistenz.
+
+Siehe [`docs/adr/ADR-0001-smolitux-design-contract.md`](./adr/ADR-0001-smolitux-design-contract.md)
+und den Spiegel-ADR in smolitux-ui.
+
+## Design Tokens
+
+**Serialisierbare Design-Konstanten** (Farben, Typografie,
+Spacings, Motion, Elevations, Semantik-Status) als potenzielle
+cross-runtime Single Source of Truth. Format ist bewusst offen
+(JSON / YAML / TOML wären Kandidaten). In Smolit-Assistant heute
+**nicht** implementiert — ein späterer Token-Import-Spike würde
+Tokens in Godot-native Theme-Ressourcen mappen (Buttons, Panels,
+Badges, Statusanzeigen).
+
+**Abgrenzung:** Design Tokens sind kein React-Artefakt; sie sind
+der Vertragspunkt, an dem Godot und React gleichwertig andocken
+können.
+
+## Godot-native UI
+
+Das Implementierungs-Modell der Smolit-Assistant-UI: Scenes,
+Themes, Autoloads, Godot-eigene Nodes. Kein HTML, kein DOM, keine
+JavaScript-Laufzeit in der UI-Schicht. Godot-native UI ist die
+Voraussetzung für das Presence-Modell (siehe
+[`docs/presence_desktop_interaction.md`](./presence_desktop_interaction.md))
+und für den Overlay-Pfad (siehe
+[`docs/linux_window_overlay_architecture.md`](./linux_window_overlay_architecture.md)).
+
+**Nicht dasselbe wie:** „Smolitux-UI in Godot" — es gibt keinen
+React-Godot-Brücken-Layer.
+
+## Cross-runtime UI Consistency
+
+Das Ziel, dass eine Smolitux-Web-App und ein Godot-nativer Client
+wie Smolit-Assistant *erkennbar* zum selben Produkt-Ökosystem
+gehören — über gemeinsame Design Tokens, gemeinsame Status-
+Semantik (z. B. `focused`, `speaking`, `error_soft`) und
+gemeinsame Accessibility-/Motion-Konventionen. Der Vertrag lebt in
+[ADR-0001](./adr/ADR-0001-smolitux-design-contract.md); die
+Implementation ist **nicht** Teil dieses ADR.
+
 ---
 
 ## Nicht im Glossar enthalten (bewusst)

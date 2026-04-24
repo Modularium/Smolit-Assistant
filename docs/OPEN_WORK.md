@@ -158,10 +158,11 @@ eine Demo.
 Aktionen werden standardmäßig gated".
 **Nächster kleinster PR:**
 
-- **PR 24 E-Policy-v0:** `SMOLIT_INTERACTION_REQUIRE_CONFIRMATION=1`
-  dokumentieren und als empfohlenen Default für produktive Builds
-  kennzeichnen; keine neue Policy-Engine, nur ein Schritt in
-  Richtung realer Gating-Verdrahtung.
+- **PR 25 E-Policy-v0** *(neu nach ADR-Insertion; vorher als PR 24
+  geführt):* `SMOLIT_INTERACTION_REQUIRE_CONFIRMATION=1` dokumentieren
+  und als empfohlenen Default für produktive Builds kennzeichnen;
+  keine neue Policy-Engine, nur ein Schritt in Richtung realer
+  Gating-Verdrahtung.
 
 **Nicht-Ziele:**
 
@@ -204,8 +205,8 @@ Entscheidung vor Backend-Arbeit.
 
 - **Kein eigener F-PR in der nahen Reihe.** `focus_window` ist mit
   PR 23 abgeschlossen; die offene Next-Step-Arbeit ist Workstream E
-  (Policy-Verdrahtung, PR 24). `type_text` / `send_shortcut`
-  bekommen keinen Backend-Pfad vor Policy.
+  (Policy-Verdrahtung, neu PR 25 nach ADR-Insertion). `type_text` /
+  `send_shortcut` bekommen keinen Backend-Pfad vor Policy.
 
 **Nicht-Ziele:**
 
@@ -308,6 +309,56 @@ werden sollen.
 
 - Neue README-Anleitung wird auf einem frischen Dev-Host getestet
   (manuell, dokumentiert).
+
+---
+
+## J — Smolitux Design Contract / Cross-Runtime UI Consistency
+
+**Status:** neu, Docs/ADR-only. Eingeführt mit dem Cross-Repo-ADR
+in [`docs/adr/ADR-0001-smolitux-design-contract.md`](./adr/ADR-0001-smolitux-design-contract.md)
+und einem Spiegel-ADR in
+[smolitux-ui](https://github.com/Modularium/smolitux-ui).
+
+**Warum wichtig:** Smolit-Assistant soll visuell und semantisch ins
+Smolitux-Ökosystem passen, ohne Godot mit React oder einer WebView
+zu koppeln. Ohne expliziten Kopplungsvertrag driftet die UI
+entweder in eine Eigen-Sprache oder versucht eine unmögliche
+React-Godot-Brücke.
+
+**Blocker:** Token-Format und Export-Pipeline in smolitux-ui sind
+noch nicht entschieden. Bis dahin ist auf Smolit-Assistant-Seite
+nur die ADR-Ebene machbar, keine Implementation.
+
+**Nächster kleinster PR:**
+
+- **PR 24 J-Cross-Repo-ADR:** ADR-0001 in diesem Repo +
+  Spiegel-ADR in smolitux-ui; ROADMAP/OPEN_WORK/GLOSSARY/
+  `ui_architecture.md` um den Design-Contract-Orientierungsblock
+  ergänzen. **Reiner Docs-PR**, keine Code-Änderungen.
+
+**Nicht-Ziele:**
+
+- Keine Token-Implementation.
+- Keine Theme-Generatoren.
+- Kein React in Godot.
+- Kein WebView.
+- Keine neuen Packages in diesem Repo.
+- Keine UI-Refactors.
+- Keine Core-Abhängigkeit.
+- **Keine OceanData-Änderungen.** OceanData ist Data-Layer /
+  Datenplattform und nicht Quelle des Smolitux-Design-Systems;
+  dieser Workstream bearbeitet OceanData nicht.
+
+**Tests / Verifikation:**
+
+- Markdown-Links im Repo ([`docs/adr/`](./adr/), ROADMAP,
+  OPEN_WORK, GLOSSARY, `ui_architecture.md`) sind konsistent.
+- Keine Code-Änderungen.
+- `cargo test` und `scripts/run_overlay_verification.sh`
+  optional unverändert grün, falls ausgeführt.
+- `rg "OceanData" docs README.md ROADMAP.md` liefert keine
+  Treffer, die OceanData als UI-Library oder Design-System-Quelle
+  darstellen.
 
 ---
 

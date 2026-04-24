@@ -49,6 +49,27 @@ und `Stage C` sind in
 [`docs/GLOSSARY.md`](./GLOSSARY.md) definiert. Wenn in dieser
 Datei ein Begriff anders erscheint, gewinnt das Glossar.
 
+**Smolitux Design Contract (Cross-Repo-Orientierung).** Smolit-
+Assistant ist **Godot-nativ**. Die UI folgt perspektivisch einem
+*Smolitux Design Contract* gegenüber der Web-/React-Komponenten-
+bibliothek [smolitux-ui](https://github.com/Modularium/smolitux-ui).
+Das heißt konkret für diese Datei:
+
+- **Keine direkte React-Komponentennutzung** in der Godot-UI. Es
+  werden keine `@smolitux/*`-Pakete zur Laufzeit importiert.
+- **Keine WebView-Einbettung** einer Smolitux-UI-Oberfläche.
+- **Keine React↔Godot-Brücke.**
+- **Design Tokens dürfen später in Godot-native Theme-Ressourcen
+  gemappt werden**, sobald smolitux-ui Tokens in einem
+  serialisierbaren Format (z. B. JSON / YAML / TOML) bereitstellt.
+  Heute ist das nicht implementiert.
+- **OceanData** ist Data-Layer / Datenplattform und ausdrücklich
+  **nicht** Quelle des UI-Designs; sie wird in dieser Datei und im
+  Design Contract nicht als UI-Library behandelt.
+
+Details: [`docs/adr/ADR-0001-smolitux-design-contract.md`](./adr/ADR-0001-smolitux-design-contract.md)
+und [`docs/OPEN_WORK.md`](./OPEN_WORK.md) Workstream J.
+
 ---
 
 

@@ -181,6 +181,14 @@ Single-Source für offene Punkte:
 - **H. ABrain Native Integration** — heute CLI; native API ist
   Ziel-Zustand.
 - **I. Packaging / Release / CI** — noch nicht aufgesetzt.
+- **J. Smolitux Design Contract / Cross-Runtime UI Consistency** —
+  neuer Docs-/ADR-only-Workstream. Smolit-Assistant bleibt Godot-
+  native; [smolitux-ui](https://github.com/Modularium/smolitux-ui)
+  bleibt Web-/React-Komponentenbibliothek; gemeinsamer Nenner sind
+  Design Tokens + Status-Semantik + Accessibility-/Motion-
+  Konventionen. Kein React in Godot, kein WebView, keine
+  Core-Abhängigkeit. **OceanData** ist Data-Layer und **nicht**
+  Teil dieses Workstreams.
 
 ---
 
@@ -190,18 +198,24 @@ Reihenfolge ist **nicht bindend**, aber navigierbar. Jeder Schritt
 bleibt klein; keiner führt eine neue gefährliche Fähigkeit ein,
 ohne vorgeschaltete Policy-Verdrahtung.
 
+> **Hinweis:** Die ursprüngliche Tabelle hatte PR 24 als Policy-v0.
+> Mit Einfügen des Cross-Repo-ADR als PR 24 verschieben sich die
+> Folge-Nummern um eins. *PR numbers may shift after ADR insertion* —
+> Reihenfolge und Inhalt der Folge-PRs bleiben identisch.
+
 | PR | Workstream | Gegenstand |
 | -- | ---------- | ---------- |
 | 21 | A | Docs-Follow-ups aus PR 20: tote Links, `docs/reviews/`-Index, Glossar-Embryo |
 | 22 | B | Wayland-Compositor-Live-Messung auf separatem Host |
 | 23 | F | `focus_window` Reality Decision — Option 1 bestätigt (template-basierter X11-Backend via `wmctrl -a {name}` bleibt), Details in [`docs/reviews/PR23_FOCUS_WINDOW_DECISION.md`](./docs/reviews/PR23_FOCUS_WINDOW_DECISION.md) |
-| 24 | E | Policy v0: real `require_confirmation=true` → echter Approval-Pfad für `open_application` |
-| 25 | D | Provider-Onboarding-UX: Default-Ketten und cloud_http-First-Run |
-| 26 | C | STT-Alternative (z. B. `whisper.cpp`), bleibt command-basiert |
-| 27 | A | `presence_desktop_interaction.md` auf Ist-Zustand trimmen |
-| 28 | G | Avatar-Render-Polish-Follow-up (rein visuell) |
-| 29 | I | README-Build-Setup + erste Install-Doku |
-| 30 | A | Glossar fixieren (`Approval`, `Audit`, `Workflow-Overlay`, `Presence`, …) |
+| 24 | J | Cross-Repo ADR: Smolitux Design Contract (Docs-only, dieser PR; Spiegel-ADR in smolitux-ui). Siehe [`docs/adr/ADR-0001-smolitux-design-contract.md`](./docs/adr/ADR-0001-smolitux-design-contract.md) |
+| 25 | E | Policy v0: real `require_confirmation=true` → echter Approval-Pfad für `open_application` |
+| 26 | D | Provider-Onboarding-UX: Default-Ketten und cloud_http-First-Run |
+| 27 | C | STT-Alternative (z. B. `whisper.cpp`), bleibt command-basiert |
+| 28 | A | `presence_desktop_interaction.md` auf Ist-Zustand trimmen |
+| 29 | G | Avatar-Render-Polish-Follow-up (rein visuell) |
+| 30 | I | README-Build-Setup + erste Install-Doku |
+| 31 | A | Glossar fixieren (`Approval`, `Audit`, `Workflow-Overlay`, `Presence`, …) |
 
 ---
 
@@ -218,7 +232,7 @@ davon würde eine eigene Design-Entscheidung brauchen:
   `SMOLIT_INTERACTION_FOCUS_WINDOW_CMD`, Default leer → honest
   `BackendUnsupported`). `type_text` / `send_shortcut` bleiben
   bewusst `BackendUnsupported` im `CommandBackend`, bis
-  Policy-Verdrahtung (Workstream E / PR 24) steht.
+  Policy-Verdrahtung (Workstream E, neu PR 25 nach ADR-Insertion) steht.
 - **AdminBot-Integration / Shell-Zugriff.** Kein Plan.
 - **Stage-C-Avatar-Assets / User-Uploads.**
   [`docs/avatar_stage_c_research.md`](./docs/avatar_stage_c_research.md)
@@ -226,7 +240,8 @@ davon würde eine eigene Design-Entscheidung brauchen:
 - **Cloud-Provider als Default.** cloud_http existiert als
   opt-in; wird nicht standard-aktiviert.
 - **Policy-Engine im „grand design"-Sinn.** Stattdessen konkrete
-  Gating-Verdrahtung für genau eine Aktion (PR 24).
+  Gating-Verdrahtung für genau eine Aktion (Workstream E, neu PR 25
+  nach ADR-Insertion).
 - **Audit-Persistenz / Audit-Export.** Ring-Buffer bleibt
   in-memory. Ein Persistenz-Pfad braucht eine eigene Security-
   Review (siehe
