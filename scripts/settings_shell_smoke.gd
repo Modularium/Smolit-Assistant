@@ -109,6 +109,23 @@ func _init() -> void:
 	_check_onboarding_local_first_quick_action_sends_expected_chain()
 	_check_onboarding_add_cloud_button_stays_disabled_by_design()
 	_check_onboarding_empty_status_renders_dashes()
+	# --- PR 36: Settings Shell UX Cleanup ---
+	_check_section_placeholders_acknowledge_chain_editors()
+	_check_text_provider_lines_summary_block_rendered()
+	_check_stt_lines_summary_block_rendered()
+	_check_tts_lines_summary_block_rendered()
+	_check_summary_primary_falls_back_to_chain_head()
+	_check_summary_active_distinct_from_primary_on_fallback()
+	_check_summary_local_cloud_marker_reflects_cloud_bool()
+	_check_privacy_lines_include_safety_notes_block()
+	_check_safety_notes_mention_env_only_commands()
+	_check_safety_notes_mention_secrets_never_displayed()
+	_check_safety_notes_mention_cloud_opt_in()
+	_check_stt_chain_editor_still_exposes_two_kinds()
+	_check_tts_chain_editor_still_exposes_two_kinds()
+	_check_text_chain_editor_mentions_cloud_http_is_opt_in()
+	_check_chain_reset_defaults_documented()
+	_check_no_new_ipc_command_helpers_in_controller()
 
 	print("---")
 	if _fail == 0:
@@ -1872,3 +1889,369 @@ func _check_tts_lines_legacy_core_without_piper_fields_is_silent() -> void:
 	var values := _row_map(lines)
 	_assert(not values.has("piper"),
 		"tts_lines (PR 34): ältere Cores ohne tts_piper_* bleiben still")
+
+
+# --- PR 36: Settings Shell UX Cleanup ----------------------------------
+
+
+func _check_section_placeholders_acknowledge_chain_editors() -> void:
+	# Die Placeholders für TEXT / STT / TTS dürfen nicht mehr behaupten,
+	# Provider-Auswahl komme in einem Folge-PR — die Chain-Editoren
+	# existieren seit PR 9/13/27/34. Der neue Wortlaut soll auf
+	# Summary · Chain · Details verweisen und die env-only Kommandos
+	# benennen.
+	var text_ph := _SectionsRef.placeholder_for(_SectionsRef.SectionId.TEXT_PROVIDER)
+	_assert(text_ph.find("Summary") >= 0,
+		"placeholder TEXT nennt Summary")
+	_assert(text_ph.find("Chain") >= 0,
+		"placeholder TEXT nennt Chain")
+	_assert(text_ph.find("cloud_http") >= 0,
+		"placeholder TEXT benennt cloud_http als Opt-in")
+	var stt_ph := _SectionsRef.placeholder_for(_SectionsRef.SectionId.STT)
+	_assert(stt_ph.find("whisper_cpp") >= 0,
+		"placeholder STT nennt whisper_cpp (PR 27)")
+	var tts_ph := _SectionsRef.placeholder_for(_SectionsRef.SectionId.TTS)
+	_assert(tts_ph.find("piper") >= 0,
+		"placeholder TTS nennt piper (PR 34)")
+	var privacy_ph := _SectionsRef.placeholder_for(_SectionsRef.SectionId.PRIVACY)
+	_assert(privacy_ph.find("Safety") >= 0 or privacy_ph.find("safety") >= 0,
+		"placeholder PRIVACY kündigt Safety-Notes an")
+
+
+func _check_text_provider_lines_summary_block_rendered() -> void:
+	# Die ersten Zeilen von text_provider_lines() enthalten den Summary-
+	# Header und die vier Summary-Labels: Primary / Active / Availability
+	# / Local-Cloud. Reihenfolge zählt — Summary steht vor Details.
+	var lines: Array = _SectionsRef.text_provider_lines({
+		"text_provider_configured": "abrain",
+		"text_provider_active": "abrain",
+		"text_provider_availability": "available",
+		"text_provider_cloud": false,
+		"text_provider_chain": ["abrain"],
+	})
+	_assert(lines.size() > 0
+			and String(lines[0].get("label", "")) == _SectionsRef.HEADER_SUMMARY,
+		"text_provider_lines: erste Zeile ist Summary-Header")
+	var labels_in_order: Array = []
+	var details_seen := false
+	for row in lines:
+		var l := String(row.get("label", ""))
+		if l == _SectionsRef.HEADER_DETAILS:
+			details_seen = true
+			break
+		labels_in_order.append(l)
+	_assert(details_seen,
+		"text_provider_lines: Details-Header folgt später")
+	_assert(labels_in_order.has(_SectionsRef.LABEL_PRIMARY),
+		"text_provider_lines (PR 36): Summary enthält 'Primary (intended)'")
+	_assert(labels_in_order.has(_SectionsRef.LABEL_ACTIVE),
+		"text_provider_lines (PR 36): Summary enthält 'Active (running)'")
+	_assert(labels_in_order.has(_SectionsRef.LABEL_AVAILABILITY),
+		"text_provider_lines (PR 36): Summary enthält 'Availability'")
+	_assert(labels_in_order.has(_SectionsRef.LABEL_LOCAL_CLOUD),
+		"text_provider_lines (PR 36): Summary enthält 'Local / Cloud'")
+
+
+func _check_stt_lines_summary_block_rendered() -> void:
+	var lines: Array = _SectionsRef.stt_lines({
+		"stt_enabled": true,
+		"stt_available": true,
+		"stt_provider_configured": "command",
+		"stt_provider_active": "command",
+		"stt_provider_availability": "available",
+		"stt_provider_cloud": false,
+		"stt_provider_chain": ["command"],
+	})
+	_assert(lines.size() > 0
+			and String(lines[0].get("label", "")) == _SectionsRef.HEADER_SUMMARY,
+		"stt_lines (PR 36): erste Zeile ist Summary-Header")
+	var summary_labels := _labels_before_header(lines, _SectionsRef.HEADER_DETAILS)
+	_assert(summary_labels.has(_SectionsRef.LABEL_PRIMARY),
+		"stt_lines (PR 36): Summary enthält Primary")
+	_assert(summary_labels.has(_SectionsRef.LABEL_LOCAL_CLOUD),
+		"stt_lines (PR 36): Summary enthält Local / Cloud")
+
+
+func _check_tts_lines_summary_block_rendered() -> void:
+	var lines: Array = _SectionsRef.tts_lines({
+		"tts_enabled": true,
+		"tts_available": true,
+		"auto_speak": true,
+		"tts_provider_configured": "command",
+		"tts_provider_active": "command",
+		"tts_provider_availability": "available",
+		"tts_provider_cloud": false,
+		"tts_provider_chain": ["command"],
+	})
+	_assert(lines.size() > 0
+			and String(lines[0].get("label", "")) == _SectionsRef.HEADER_SUMMARY,
+		"tts_lines (PR 36): erste Zeile ist Summary-Header")
+	var summary_labels := _labels_before_header(lines, _SectionsRef.HEADER_DETAILS)
+	_assert(summary_labels.has(_SectionsRef.LABEL_ACTIVE),
+		"tts_lines (PR 36): Summary enthält Active")
+
+
+func _check_summary_primary_falls_back_to_chain_head() -> void:
+	# Primary kommt aus `chain[0]`, nicht aus `_active`. Das ist der
+	# Kernpunkt der neuen Semantik: Primary = was der User als erstes
+	# haben will, Active = was der Core aktuell betreibt.
+	var lines: Array = _SectionsRef.text_provider_lines({
+		"text_provider_configured": "abrain",
+		"text_provider_active": "abrain",
+		"text_provider_chain": ["llamafile_local", "abrain"],
+	})
+	var summary_rows: Array = _rows_before_header(lines, _SectionsRef.HEADER_DETAILS)
+	var primary_value := _value_for_label(summary_rows, _SectionsRef.LABEL_PRIMARY)
+	_assert(primary_value == "llamafile_local",
+		"Primary = chain[0] (llamafile_local), auch wenn active=abrain")
+
+
+func _check_summary_active_distinct_from_primary_on_fallback() -> void:
+	# Wenn Primary ≠ Active, sind das zwei verschiedene Zeilen und der
+	# Nutzer sieht den Fallback auf einen Blick.
+	var lines: Array = _SectionsRef.text_provider_lines({
+		"text_provider_configured": "llamafile_local",
+		"text_provider_active": "abrain",
+		"text_provider_availability": "fallback_active",
+		"text_provider_chain": ["llamafile_local", "abrain"],
+	})
+	var summary_rows: Array = _rows_before_header(lines, _SectionsRef.HEADER_DETAILS)
+	var primary_value := _value_for_label(summary_rows, _SectionsRef.LABEL_PRIMARY)
+	var active_value := _value_for_label(summary_rows, _SectionsRef.LABEL_ACTIVE)
+	_assert(primary_value == "llamafile_local",
+		"Summary Primary auf Fallback-Achse: llamafile_local")
+	_assert(active_value == "abrain",
+		"Summary Active auf Fallback-Achse: abrain")
+	_assert(primary_value != active_value,
+		"Primary und Active differenzieren Fallback-Fall")
+
+
+func _check_summary_local_cloud_marker_reflects_cloud_bool() -> void:
+	var cloud_lines: Array = _SectionsRef.text_provider_lines({
+		"text_provider_chain": ["cloud_http"],
+		"text_provider_cloud": true,
+	})
+	var summary_cloud_rows: Array = _rows_before_header(cloud_lines, _SectionsRef.HEADER_DETAILS)
+	_assert(_value_for_label(summary_cloud_rows, _SectionsRef.LABEL_LOCAL_CLOUD) == "cloud",
+		"Summary Local/Cloud=cloud, wenn text_provider_cloud=true")
+
+	var local_lines: Array = _SectionsRef.text_provider_lines({
+		"text_provider_chain": ["abrain"],
+		"text_provider_cloud": false,
+	})
+	var summary_local_rows: Array = _rows_before_header(local_lines, _SectionsRef.HEADER_DETAILS)
+	_assert(_value_for_label(summary_local_rows, _SectionsRef.LABEL_LOCAL_CLOUD) == "local",
+		"Summary Local/Cloud=local, wenn text_provider_cloud=false")
+
+
+func _check_privacy_lines_include_safety_notes_block() -> void:
+	var lines: Array = _SectionsRef.privacy_lines({})
+	var labels: Array = []
+	for row in lines:
+		labels.append(String(row.get("label", "")))
+	_assert(labels.has(_SectionsRef.HEADER_SAFETY),
+		"privacy_lines (PR 36): Safety-Notes-Header vorhanden")
+	var values := _row_map(lines)
+	_assert(values.has("Opt-in cloud"),
+		"privacy_lines (PR 36): 'Opt-in cloud'-Zeile vorhanden")
+	_assert(values.has("Secrets"),
+		"privacy_lines (PR 36): 'Secrets'-Zeile vorhanden")
+	_assert(values.has("Env-only"),
+		"privacy_lines (PR 36): 'Env-only'-Zeile vorhanden")
+	_assert(values.has("Probes"),
+		"privacy_lines (PR 36): 'Probes'-Zeile vorhanden")
+
+
+func _check_safety_notes_mention_env_only_commands() -> void:
+	var lines: Array = _SectionsRef.safety_notes_lines()
+	var values := _row_map(lines)
+	var env_line := String(values.get("Env-only", ""))
+	_assert(env_line.find("SMOLIT_STT_WHISPER_CPP_CMD") >= 0,
+		"safety_notes (PR 36): Env-only benennt SMOLIT_STT_WHISPER_CPP_CMD")
+	_assert(env_line.find("SMOLIT_TTS_PIPER_CMD") >= 0,
+		"safety_notes (PR 36): Env-only benennt SMOLIT_TTS_PIPER_CMD")
+
+
+func _check_safety_notes_mention_secrets_never_displayed() -> void:
+	var lines: Array = _SectionsRef.safety_notes_lines()
+	var values := _row_map(lines)
+	var s := String(values.get("Secrets", ""))
+	_assert(s.find("nie") >= 0,
+		"safety_notes (PR 36): Secrets-Zeile sagt nie angezeigt")
+	_assert(s.find("0600") >= 0,
+		"safety_notes (PR 36): Secrets-Zeile benennt 0600-Permissions")
+
+
+func _check_safety_notes_mention_cloud_opt_in() -> void:
+	var lines: Array = _SectionsRef.safety_notes_lines()
+	var values := _row_map(lines)
+	var s := String(values.get("Opt-in cloud", ""))
+	_assert(s.find("cloud_http") >= 0,
+		"safety_notes (PR 36): Opt-in-Zeile benennt cloud_http")
+	_assert(s.find("Opt-in") >= 0,
+		"safety_notes (PR 36): Opt-in-Zeile sagt 'Opt-in'")
+
+
+func _check_stt_chain_editor_still_exposes_two_kinds() -> void:
+	# Regression-Lock aus PR 27: STT-Chain-Editor zeigt weiterhin
+	# command + whisper_cpp. PR 36 ändert hier nichts.
+	var panel := _PanelScene.instantiate()
+	root.add_child(panel)
+	panel.open_panel()
+	panel.apply_status({
+		"stt_provider_chain": ["command"],
+	})
+	var snapshot: Dictionary = panel.audio_chain_editor_snapshot("stt")
+	var rows: Array = snapshot.get("rows", [])
+	var kinds: Array = []
+	for row in rows:
+		kinds.append(String(row.get("kind", "")))
+	_assert(kinds.has("command"),
+		"STT Chain Editor (PR 36 Regression): command ist sichtbar")
+	_assert(kinds.has("whisper_cpp"),
+		"STT Chain Editor (PR 36 Regression): whisper_cpp ist sichtbar")
+	panel.queue_free()
+
+
+func _check_tts_chain_editor_still_exposes_two_kinds() -> void:
+	var panel := _PanelScene.instantiate()
+	root.add_child(panel)
+	panel.open_panel()
+	panel.apply_status({
+		"tts_provider_chain": ["command"],
+	})
+	var snapshot: Dictionary = panel.audio_chain_editor_snapshot("tts")
+	var rows: Array = snapshot.get("rows", [])
+	var kinds: Array = []
+	for row in rows:
+		kinds.append(String(row.get("kind", "")))
+	_assert(kinds.has("command"),
+		"TTS Chain Editor (PR 36 Regression): command ist sichtbar")
+	_assert(kinds.has("piper"),
+		"TTS Chain Editor (PR 36 Regression): piper ist sichtbar")
+	panel.queue_free()
+
+
+func _check_text_chain_editor_mentions_cloud_http_is_opt_in() -> void:
+	# PR 36 — der Chain-Editor hat einen expliziten Hinweis, dass
+	# cloud_http bewusst nicht in der Liste steht und Opt-in bleibt.
+	var panel := _PanelScene.instantiate()
+	root.add_child(panel)
+	panel.open_panel()
+	var note: Node = panel.find_child("TextChainCloudNote", true, false)
+	_assert(note != null,
+		"Text Chain Editor (PR 36): cloud_http-Opt-in-Note vorhanden")
+	if note != null:
+		var note_text := String(note.get("text"))
+		_assert(note_text.find("cloud_http") >= 0,
+			"Text Chain Editor Note nennt cloud_http")
+		_assert(note_text.find("Opt-in") >= 0,
+			"Text Chain Editor Note sagt 'Opt-in'")
+	panel.queue_free()
+
+
+func _check_chain_reset_defaults_documented() -> void:
+	# PR 36 — der Reset-Default pro Achse ist in den Tooltip-/Note-
+	# Strings dokumentiert. Diese Assertion prüft die Strings selbst
+	# (nicht den Effekt eines Reset-Klicks, das deckt der bestehende
+	# Chain-Smoke) — damit Drift am Label sichtbar wird.
+	var controller_text := FileAccess.get_file_as_string(
+		"res://scripts/settings/settings_panel_controller.gd",
+	)
+	# Der Text-Reset-Tooltip benennt den Default ["abrain"] (einziger
+	# Einsatzort); quotes sind escape'd im GDScript-Source, daher der
+	# backslash-suffigierte Lookup.
+	_assert(controller_text.find("Default [\\\"abrain\\\"]") >= 0,
+		"Controller-Tooltip dokumentiert Text-Default ['abrain']")
+	# STT/TTS teilen denselben Audio-Reset-Pfad — der Tooltip dort
+	# nennt den Default ["command"].
+	_assert(controller_text.find("Default [\\\"command\\\"]") >= 0,
+		"Controller-Tooltip dokumentiert STT/TTS-Default ['command']")
+
+
+func _check_no_new_ipc_command_helpers_in_controller() -> void:
+	# PR 36 ist explizit UI-only. Der Controller darf keine NEUEN
+	# IPC-Write-Helfer anbieten — die Whitelist der aktiv genutzten
+	# Commands steht in der Schreibkette (seit PR 9/10/13) und wird
+	# hier als Regression-Lock aufgezählt. Wenn ein NEUER
+	# `settings_set_*` in den Controller wandert, muss der Smoke
+	# angepasst werden und der zugehörige IPC-Command dokumentiert
+	# sein — nicht schleichend einziehen.
+	var controller_text := FileAccess.get_file_as_string(
+		"res://scripts/settings/settings_panel_controller.gd",
+	)
+	# Erlaubte (bestehende) IPC-Write-Helfer + Probe-Identifier, die
+	# in diesem Controller referenziert werden. `settings_probe_result`
+	# / `settings_probe_result_received` sind Signal-/Callback-Namen
+	# aus dem EventBus-Vokabular (PR 5/7/8/10), kein IPC-Command —
+	# werden aber vom Regex mitgefunden und deshalb in der Whitelist
+	# geführt. `settings_reset_{stt,tts}_provider_chain` werden
+	# dynamisch via `"settings_reset_%s_provider_chain" % axis`
+	# gebaut und tauchen in der direkten Identifier-Extraktion nicht
+	# auf (nur der Text-Pfad ist statisch).
+	var allowed := [
+		# Set-Helpers:
+		"settings_set_llamafile_config",
+		"settings_set_local_http_config",
+		"settings_set_cloud_http_config",
+		"settings_set_cloud_http_secret",
+		"settings_set_text_provider_chain",
+		"settings_set_stt_config",
+		"settings_set_tts_config",
+		# Probe-Helpers:
+		"settings_probe_llamafile",
+		"settings_probe_local_http",
+		"settings_probe_cloud_http",
+		"settings_probe_stt",
+		"settings_probe_tts",
+		# Probe-Result-Signal/Callback (aus EventBus):
+		"settings_probe_result",
+		"settings_probe_result_received",
+		# Reset-Helpers (statische Namen):
+		"settings_reset_text_provider_chain",
+	]
+	# Extrahiere alle `settings_(set|probe|reset)_*`-Identifier-
+	# Referenzen und prüfe, dass keine außerhalb der Whitelist steht.
+	var re := RegEx.new()
+	re.compile("settings_(?:set|probe|reset)_[a-z_]+")
+	var found: Dictionary = {}
+	for m in re.search_all(controller_text):
+		found[m.get_string()] = true
+	for key in found.keys():
+		_assert(allowed.has(String(key)),
+			"PR 36: Controller nutzt nur bekannte IPC-Write/Probe-Helfer (%s)" % key)
+
+
+# --- PR 36 helpers -------------------------------------------------------
+
+
+static func _labels_before_header(rows: Array, stop_header: String) -> Array:
+	var out: Array = []
+	for row in rows:
+		if typeof(row) != TYPE_DICTIONARY:
+			continue
+		var l := String(row.get("label", ""))
+		if l == stop_header:
+			break
+		out.append(l)
+	return out
+
+
+static func _rows_before_header(rows: Array, stop_header: String) -> Array:
+	var out: Array = []
+	for row in rows:
+		if typeof(row) != TYPE_DICTIONARY:
+			continue
+		if String(row.get("label", "")) == stop_header:
+			break
+		out.append(row)
+	return out
+
+
+static func _value_for_label(rows: Array, label: String) -> String:
+	for row in rows:
+		if typeof(row) != TYPE_DICTIONARY:
+			continue
+		if String(row.get("label", "")) == label:
+			return String(row.get("value", ""))
+	return ""
