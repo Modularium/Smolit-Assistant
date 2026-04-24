@@ -122,6 +122,20 @@ Teil dieses ADR bzw. des einführenden PRs sind:
   Datenplattform und nicht Quelle des Smolitux-Design-Systems; dieser
   ADR bearbeitet OceanData nicht und benennt sie nicht als UI-Library.
 
+## Related documents
+
+- **Smolitux Token Contract v0 (Draft, Docs/Schema only)** —
+  [smolitux-ui `docs/design/SMOLITUX_TOKEN_CONTRACT.md`](https://github.com/Modularium/smolitux-ui/blob/main/docs/design/SMOLITUX_TOKEN_CONTRACT.md)
+  (PR 35, cross-repo). Beschreibt die spätere *Datenform* der
+  Smolitux Design Tokens (Kategorien, Naming, Value-Types,
+  Semantik). Smolit-Assistant **konsumiert heute keine Tokens**
+  aus diesem Vertrag — der Token Contract ist reine Docs/Schema-
+  Vorarbeit; Tokens werden nicht erzeugt, nicht exportiert und
+  nicht importiert. Die Avatar-Polish-Palette
+  [`ui/scripts/avatar/avatar_palette.gd`](../../ui/scripts/avatar/avatar_palette.gd)
+  (PR 30) ist ein **lokaler Andockpunkt**, keine Token-Consumer-
+  Implementation.
+
 ## Future work
 
 Folge-Arbeiten, die diesem ADR folgen *können* (nicht müssen):

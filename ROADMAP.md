@@ -219,15 +219,18 @@ Single-Source für offene Punkte:
   gelandet (PR 29). Nächster Kandidat: minimale CI-Smoke-Linie
   (PR 38); **keine** Packaging-Formate in dieser Stufe.
 - **J. Smolitux Design Contract / Cross-Runtime UI Consistency** —
-  ADR-0001 gelandet (PR 24), Avatar-Palette (PR 30) als
-  Token-Andockpunkt. Smolit-Assistant bleibt Godot-native;
+  ADR-0001 gelandet (PR 24), Avatar-Palette (PR 30) als lokaler
+  Token-Andockpunkt, Smolitux Token Contract v0 gelandet (PR 35,
+  cross-repo in smolitux-ui, Docs/Schema only). Smolit-Assistant
+  bleibt Godot-native;
   [smolitux-ui](https://github.com/Modularium/smolitux-ui) bleibt
   Web-/React-Komponentenbibliothek; gemeinsamer Nenner sind Design
   Tokens + Status-Semantik + Accessibility-/Motion-Konventionen.
   Kein React in Godot, kein WebView, keine Core-Abhängigkeit.
   **OceanData** ist Data-Layer und **nicht** Teil dieses
-  Workstreams. Nächster Kandidat: Token-Contract-Prep in
-  smolitux-ui (PR 35, cross-repo, Docs/Schema only).
+  Workstreams. Nächster Kandidat (Future Work, nicht priorisiert):
+  Token-Example-Validation- oder Token-Generator-ADR auf
+  smolitux-ui-Seite.
 
 ---
 
@@ -258,7 +261,7 @@ PR 31 selbst ist dieser Roadmap-Checkpoint (Docs-only).
 | 32 | E | Audit Coverage für reale Interaction-Actions (2026-04-24, gelandet): `interaction_open_application` **und** `interaction_focus_window` laufen jetzt durch denselben Audit-Lifecycle wie der Demo-Pfad (IpcCommandReceived → ActionPlanned → ApprovalRequested → ApprovalResolved → ActionStarted → ActionCompleted / ActionCancelled / ActionFailed). Summaries tragen nur den Action-Titel — keine Command-Templates, keine Env-Namen, keine Secrets. Ring-Buffer bleibt in-memory, keine neuen IPC-Commands. Schließt die in PR 25 dokumentierte Audit-Lücke. Details: [`docs/reviews/PR32_AUDIT_INTERACTION_LIFECYCLE.md`](./docs/reviews/PR32_AUDIT_INTERACTION_LIFECYCLE.md). |
 | 33 | A | Workflow-Overlay-Konsolidierung (2026-04-24, gelandet, **Option C — Entfernen**): der alte Drei-Knoten-Phase-3.1-Spike (`ui/scripts/workflow_overlay/`, `ui/scenes/workflow_overlay/`, `scripts/workflow_overlay_state_smoke.gd`, zugehörige Dev-Control-Previews, Visual-Action-Staging-Keys) ist komplett aus dem Repo entfernt. Das Workflow Visibility Overlay v1 (PR 16) bleibt die einzige Workflow-UI. Kein neues Feature, keine neuen IPC-Events, keine neue Persistenz. Details: [`docs/reviews/PR33_WORKFLOW_OVERLAY_CONSOLIDATION.md`](./docs/reviews/PR33_WORKFLOW_OVERLAY_CONSOLIDATION.md). |
 | 34 | C | TTS Alternative v1 (2026-04-24, gelandet): `piper` als zweites command-basiertes TTS-Kind unter `SMOLIT_TTS_PIPER_CMD`. Whitelist `[command, piper]`; Default bleibt `["command"]`. Keine Build-Abhängigkeit auf Piper, kein Modell-Manager, kein Runtime-Editor. Speaking-Lifecycle-`provider`-Feld trägt jetzt den realen Kind-Namen statt hardcodiert `command`. Keine neuen IPC-Commands. |
-| 35 | J | **Smolitux Token Contract Prep in smolitux-ui.** Cross-Repo-Docs-PR auf [smolitux-ui](https://github.com/Modularium/smolitux-ui): Token-Schema-Vorschlag, Export-Format, Namensraum. **Kein** Export-Build, **kein** Import in Smolit-Assistant. Voraussetzung für einen späteren Token-Spike auf der Assistant-Seite. |
+| 35 | J | **Smolitux Token Contract Prep in smolitux-ui** (2026-04-24, gelandet, **Docs/Schema only**): Token Contract v0 liegt cross-repo in [`smolitux-ui docs/design/SMOLITUX_TOKEN_CONTRACT.md`](https://github.com/Modularium/smolitux-ui/blob/main/docs/design/SMOLITUX_TOKEN_CONTRACT.md) — Kategorien, Naming-Regeln (lowercase dot-path, runtime-neutral), Value-Types, Pflicht-Semantic-/State-Tokens, Export-Target-Katalog, Versionierung und Validator-Erwartungen. Non-authoritatives Beispiel unter `docs/design/examples/smolitux.tokens.example.json`. **Keine** Token-Implementation, **kein** Generator, **kein** Style Dictionary, **kein** Export-Build, **kein** Import in Smolit-Assistant, **keine** `@smolitux/*`-Paketänderung, **keine** OceanData-Berührung. In Smolit-Assistant selbst: ADR-0001 verlinkt den Token Contract, `ui_architecture.md` markiert `avatar_palette.gd` explizit als lokalen Andockpunkt (kein Token-Consumer). |
 | 36 | D | **Settings-Shell-UX-Cleanup** nach Provider-Onboarding: visuelle Hierarchie, Kollapsierung alter Per-Kind-Editoren, klare Section-Header. Keine neuen IPC-Commands, keine Default-Änderung, kein Auto-Cloud. |
 | 37 | F | **Accessibility RPC Spike Decision (AT-SPI read-only).** ADR für einen echten `GetChildren`-Pfad auf Registry-Root; Toolkit-/Wayland-Fragmentierung und Portal-Pfad benennen, entscheiden **vor** Code. |
 | 38 | I | **Release/CI Foundation.** Minimale GitHub-Action: `cargo test` + `settings-shell-smoke`. **Kein** Packaging-Format, **keine** Signing-Stufe, **kein** Artifact-Upload in diesem Schritt. |

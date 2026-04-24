@@ -258,6 +258,39 @@ Badges, Statusanzeigen).
 der Vertragspunkt, an dem Godot und React gleichwertig andocken
 können.
 
+Die **Datenform** (Kategorien, Naming-Regeln, Value-Types,
+Pflicht-Semantic-/State-Tokens, Export-Target-Katalog, Versionierung,
+Validator-Erwartungen) ist seit PR 35 im
+[Smolitux Token Contract v0](https://github.com/Modularium/smolitux-ui/blob/main/docs/design/SMOLITUX_TOKEN_CONTRACT.md)
+(cross-repo in smolitux-ui, Docs/Schema-only) dokumentiert. Der
+Vertrag ist bewusst **vor** jeder Implementation fixiert; Smolit-
+Assistant ist heute kein Konsument.
+
+## Smolitux Token Contract
+
+Die cross-repo **Beschreibung der Datenform** zukünftiger Smolitux
+Design Tokens. Lebt in smolitux-ui unter
+[`docs/design/SMOLITUX_TOKEN_CONTRACT.md`](https://github.com/Modularium/smolitux-ui/blob/main/docs/design/SMOLITUX_TOKEN_CONTRACT.md)
+(v0, Draft, Docs/Schema-only). Definiert Token-Kategorien,
+Naming-Regeln (lowercase dot-path, runtime-neutral), Value-Types,
+Pflicht-Semantic-Tokens (`surface.default`, `text.primary`, …),
+State-Tokens (`status.success`, `action.completed`,
+`approval.high`, …), einen Katalog möglicher Export-Targets und
+Versionierungs-/Validator-Erwartungen.
+
+**Abgrenzung:**
+
+- Der Token Contract ist **keine** Token-Implementation und **kein**
+  Export. Er wählt kein Zielformat als verbindlich; er führt weder
+  Style Dictionary noch einen Generator ein.
+- Smolit-Assistant ist **heute kein Konsument**. Die lokale
+  Palette-Datei
+  [`ui/scripts/avatar/avatar_palette.gd`](./../ui/scripts/avatar/avatar_palette.gd)
+  ist ein lokaler **Andockpunkt**, kein Token-Consumer.
+- Der Vertrag adressiert **keine OceanData**-Artefakte; OceanData
+  bleibt Data-Layer und ist nicht Quelle des Smolitux-Design-
+  Systems.
+
 ## Godot-native UI
 
 Das Implementierungs-Modell der Smolit-Assistant-UI: Scenes,
