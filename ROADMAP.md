@@ -214,8 +214,8 @@ ohne vorgeschaltete Policy-Verdrahtung.
 | 26 | D | Provider-Onboarding UX v1 (2026-04-24, gelandet): kuratierter Onboarding-Block über den Text-Provider-Editoren — Primary + Chain mit Lokalitäts-Tags, cloud_http First-Run Checklist (`present` statt Wert), eine Quick-Action „Use local-first chain" (`["llamafile_local","local_http","abrain"]`). Keine neuen IPC-Commands, keine Default-Änderung, kein Auto-Cloud. |
 | 27 | C | STT Alternative v1 (2026-04-24, gelandet): `whisper_cpp` als zweites command-basiertes STT-Kind unter `SMOLIT_STT_WHISPER_CPP_CMD`. Whitelist `[command, whisper_cpp]`; Default bleibt `["command"]`. Keine Build-Abhängigkeit auf whisper.cpp, kein Modell-Manager, kein Runtime-Editor. Keine neuen IPC-Commands. |
 | 28 | A | `presence_desktop_interaction.md` auf Ist-Zustand getrimmt (2026-04-24, gelandet): 1096 → 491 Zeilen; Zielbild-Inhalte konsequent in §10 Future Work / §11 Non-goals verschoben; §4 Explicitly Unsupported benennt `type_text`/`send_shortcut`, Wayland-Fokus, AT-SPI-RPC, OCR/Vision, Cross-Window-Avatar-Motion hart; Altanker-Mapping im Anhang. Keine Code-Änderungen. |
-| 29 | G | Avatar-Render-Polish-Follow-up (rein visuell) |
-| 30 | I | README-Build-Setup + erste Install-Doku |
+| 29 | I | README Build Setup + First Install Docs (2026-04-24, gelandet): [`README.md`](./README.md) auf 13-Abschnitt-Quickstart getrimmt (608 → 286 Zeilen), neuer [`docs/SETUP.md`](./docs/SETUP.md) mit Env-Gruppen + Troubleshooting, aktualisiertes [`.env.example`](./.env.example) (PR-25/26/27-konform, whisper_cpp Env-only, no-auto-cloud, Policy-v0-Defaults). Kein Packaging, keine CI. |
+| 30 | G | Avatar-Render-Polish-Follow-up (rein visuell) *(PR-Nummern nach PR 29 Swap: G war vorher PR 29, I war vorher PR 30; reine Umreihung, Scope unverändert)* |
 | 31 | A | Glossar fixieren (`Approval`, `Audit`, `Workflow-Overlay`, `Presence`, …) |
 
 ---

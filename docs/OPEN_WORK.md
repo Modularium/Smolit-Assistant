@@ -286,9 +286,10 @@ sauberes Sicherheits-/Trust-Modell nicht machbar.
 entschieden.
 **Nächster kleinster PR:**
 
-- **PR 28 G-Avatar-Render-Polish-Follow-up:** rein visuelle
-  Feinarbeit auf den existierenden kuratierten Identities; *keine*
-  Asset-Imports.
+- **PR 30 G-Avatar-Render-Polish-Follow-up** *(verschoben von PR 28
+  → PR 30 nach PR-28 Presence-Trim und PR-29-Swap mit README-Setup):*
+  rein visuelle Feinarbeit auf den existierenden kuratierten
+  Identities; *keine* Asset-Imports.
 
 **Nicht-Ziele:**
 
@@ -331,26 +332,40 @@ seitigen technischen Blocker.
 
 ## I — Packaging / Release / CI
 
-**Status:** kein Release-Pfad dokumentiert, keine CI-Pipeline im
-Repo.
-**Warum wichtig:** Ohne reproduzierbaren Build kein Nutzer-Test.
-**Blocker:** unklar, welche Ziel-Distributionen unterstützt
-werden sollen.
-**Nächster kleinster PR:**
-
-- **PR 29 I-README-Build-Setup:** erste reale Install-Anleitung
-  (`cargo build`, Godot-Version, `SMOLIT_*`-Mindest-Env-Set).
+**Status:** README + Setup-Guide + `.env.example` landen mit
+**PR 29 (2026-04-24, gelandet)**:
+[`README.md`](../README.md) (13-Abschnitt-Struktur, 5–10 min
+Quickstart) + [`docs/SETUP.md`](./SETUP.md) (ausführliche
+Env-Gruppen + Troubleshooting) + aktualisiertes
+[`.env.example`](../.env.example). Keine CI-Pipeline, kein
+Packaging-Format — das bleibt eigener Folge-PR.
+**Warum wichtig:** Ohne reproduzierbaren Build-Pfad kein Nutzer-Test.
+PR 29 schließt die Einstiegs-Lücke, ohne Installations-Skripte
+einzuführen.
+**Blocker:** unklar, welche Ziel-Distributionen (Ubuntu 24.04 gesetzt;
+Fedora / Arch / NixOS offen) und welches Tooling (GitHub Actions vs.
+Self-Host) gelten sollen.
+**Nächster kleinster PR:** kein zwingender I-PR in der nahen Reihe.
+Mögliche Folgearbeit (ohne Priorität): eine kleine CI-Smoke-Linie
+(cargo test + settings-shell-smoke) als GitHub-Action, falls das
+Tooling-Frage beantwortet ist.
 
 **Nicht-Ziele:**
 
 - Keine Package-Manager-Pakete (deb/rpm/flatpak) in diesem Schritt.
 - Keine GitHub-Actions-CI; Entscheidung Tooling separat.
 - Keine Cloud-Build-Pipeline.
+- Keine Install-Skripte — PR 29 dokumentiert ausschließlich.
 
 **Tests / Verifikation:**
 
-- Neue README-Anleitung wird auf einem frischen Dev-Host getestet
-  (manuell, dokumentiert).
+- `cargo test` grün (382 Tests inkl. Policy-v0-Tripwire und
+  whisper_cpp-Fallback).
+- `scripts/run_overlay_verification.sh settings-shell-smoke`
+  bestätigt UI-Einstiegspfad.
+- README/SETUP wurden auf einem frischen Dev-Host manuell
+  durchgelesen; die dort dokumentierte Quick-Start-Sequenz spiegelt
+  den tatsächlichen Build-Pfad.
 
 ---
 
