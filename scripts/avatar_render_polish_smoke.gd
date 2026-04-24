@@ -37,6 +37,8 @@ const _RimRef := preload("res://scripts/avatar/avatar_rim_accent.gd")
 const _StateRef := preload("res://scripts/avatar/avatar_state.gd")
 const _IdentityRef := preload("res://scripts/avatar/avatar_identity.gd")
 const _IdentityVisualRef := preload("res://scripts/avatar/avatar_identity_visual.gd")
+const _PaletteRef := preload("res://scripts/avatar/avatar_palette.gd")
+const _CapsRef := preload("res://scripts/avatar/avatar_template_capabilities.gd")
 
 var _fail: int = 0
 
@@ -49,6 +51,13 @@ func _init() -> void:
 	_check_identity_visual_instantiation()
 	_check_identity_visual_all_identities_redraw()
 	_check_identity_visual_unknown_id_is_clamped()
+	# --- PR 30: Polish palette + capability regression lock ---
+	_check_palette_constant_names_are_declared()
+	_check_palette_float_constants_in_range()
+	_check_palette_color_alphas_are_sane()
+	_check_palette_rim_table_unchanged_by_polish()
+	_check_capabilities_unchanged_by_polish()
+	_check_default_identity_unchanged_by_polish()
 
 	print("---")
 	if _fail == 0:
@@ -205,3 +214,120 @@ func _check_identity_visual_unknown_id_is_clamped() -> void:
 		"identity_visual: unknown identity id does not crash _draw")
 	root.remove_child(node)
 	node.queue_free()
+
+
+# --- PR 30: Polish palette + regression locks ----------------------------
+
+
+func _check_palette_constant_names_are_declared() -> void:
+	# Das Palette-Modul listet in POLISH_CONSTANT_NAMES alle heute
+	# relevanten Polish-Konstanten. Smoke-seitig fordern wir, dass
+	# jeder Name im Array auch in der Klasse existiert — sonst driftet
+	# das Array still weg vom Code.
+	var names: Array = _PaletteRef.POLISH_CONSTANT_NAMES
+	_assert(names.size() == 9,
+		"palette (PR 30): POLISH_CONSTANT_NAMES enthält neun Einträge")
+	var samples := {
+		"ROBOT_FACEPLATE_INNER_RIM_COLOR": _PaletteRef.ROBOT_FACEPLATE_INNER_RIM_COLOR,
+		"ROBOT_PUPIL_SPECULAR_COLOR": _PaletteRef.ROBOT_PUPIL_SPECULAR_COLOR,
+		"ROBOT_ANTENNA_HIGHLIGHT_COLOR": _PaletteRef.ROBOT_ANTENNA_HIGHLIGHT_COLOR,
+		"ORB_CORE_GLOW_ALPHA": _PaletteRef.ORB_CORE_GLOW_ALPHA,
+		"ORB_CORE_GLOW_RADIUS_RATIO": _PaletteRef.ORB_CORE_GLOW_RADIUS_RATIO,
+		"HUMANOID_CHEEK_OUTER_ALPHA": _PaletteRef.HUMANOID_CHEEK_OUTER_ALPHA,
+		"HUMANOID_CHEEK_INNER_ALPHA": _PaletteRef.HUMANOID_CHEEK_INNER_ALPHA,
+		"HUMANOID_EYEBROW_COLOR": _PaletteRef.HUMANOID_EYEBROW_COLOR,
+		"HUMANOID_EYEBROW_THICKNESS_RATIO": _PaletteRef.HUMANOID_EYEBROW_THICKNESS_RATIO,
+	}
+	for name in names:
+		_assert(samples.has(String(name)),
+			"palette (PR 30): constant '%s' is declared" % String(name))
+
+
+func _check_palette_float_constants_in_range() -> void:
+	_assert(_PaletteRef.is_valid_ratio(_PaletteRef.ORB_CORE_GLOW_ALPHA),
+		"palette (PR 30): ORB_CORE_GLOW_ALPHA is in [0.0, 1.0]")
+	_assert(_PaletteRef.is_valid_ratio(_PaletteRef.ORB_CORE_GLOW_RADIUS_RATIO),
+		"palette (PR 30): ORB_CORE_GLOW_RADIUS_RATIO is in [0.0, 1.0]")
+	_assert(_PaletteRef.is_valid_ratio(_PaletteRef.HUMANOID_CHEEK_OUTER_ALPHA),
+		"palette (PR 30): HUMANOID_CHEEK_OUTER_ALPHA is in [0.0, 1.0]")
+	_assert(_PaletteRef.is_valid_ratio(_PaletteRef.HUMANOID_CHEEK_INNER_ALPHA),
+		"palette (PR 30): HUMANOID_CHEEK_INNER_ALPHA is in [0.0, 1.0]")
+	_assert(_PaletteRef.is_valid_ratio(_PaletteRef.HUMANOID_EYEBROW_THICKNESS_RATIO),
+		"palette (PR 30): HUMANOID_EYEBROW_THICKNESS_RATIO is in [0.0, 1.0]")
+	# Der Innenkreis darf dichter sein als der Außenring — Zweischicht-
+	# Blush würde sonst flach wirken.
+	_assert(
+		_PaletteRef.HUMANOID_CHEEK_INNER_ALPHA
+			> _PaletteRef.HUMANOID_CHEEK_OUTER_ALPHA,
+		"palette (PR 30): cheek inner alpha > outer alpha (soft-edge order)")
+	# Die Negativtests für `is_valid_ratio` laufen explizit, damit der
+	# Helper keine stillen Sonderfälle hat.
+	_assert(not _PaletteRef.is_valid_ratio(-0.01),
+		"palette: is_valid_ratio rejects negative values")
+	_assert(not _PaletteRef.is_valid_ratio(1.25),
+		"palette: is_valid_ratio rejects values above 1.0")
+
+
+func _check_palette_color_alphas_are_sane() -> void:
+	var polish_colors: Array[Color] = [
+		_PaletteRef.ROBOT_FACEPLATE_INNER_RIM_COLOR,
+		_PaletteRef.ROBOT_PUPIL_SPECULAR_COLOR,
+		_PaletteRef.ROBOT_ANTENNA_HIGHLIGHT_COLOR,
+		_PaletteRef.HUMANOID_EYEBROW_COLOR,
+	]
+	for c in polish_colors:
+		_assert(c.a >= 0.0 and c.a <= 1.0,
+			"palette (PR 30): polish color alpha stays in [0.0, 1.0]")
+
+
+func _check_palette_rim_table_unchanged_by_polish() -> void:
+	# PR 30 darf die Rim-Accent-Farbtabelle NICHT verschieben — die
+	# State-Unterscheidbarkeit ist schon durch das obere Set geprüft;
+	# diese Zusatzzeile fixiert die Werte gegenüber einer versehentlichen
+	# Umformulierung, die durch den Palette-Block rutschen könnte.
+	_assert(
+		_RimRef.COLOR_IDLE == Color(0.70, 0.85, 1.00, 0.28),
+		"rim (PR 30 lock): COLOR_IDLE unchanged")
+	_assert(
+		_RimRef.COLOR_THINKING == Color(0.80, 0.82, 1.00, 0.42),
+		"rim (PR 30 lock): COLOR_THINKING unchanged")
+	_assert(
+		_RimRef.COLOR_TALKING == Color(1.00, 0.90, 0.65, 0.55),
+		"rim (PR 30 lock): COLOR_TALKING unchanged")
+	_assert(
+		_RimRef.COLOR_ACTING == Color(0.78, 1.00, 0.82, 0.55),
+		"rim (PR 30 lock): COLOR_ACTING unchanged")
+	_assert(
+		_RimRef.COLOR_DISCONNECTED == Color(0.60, 0.60, 0.66, 0.18),
+		"rim (PR 30 lock): COLOR_DISCONNECTED unchanged")
+	_assert(
+		_RimRef.COLOR_ERROR == Color(1.00, 0.55, 0.55, 0.70),
+		"rim (PR 30 lock): COLOR_ERROR unchanged")
+
+
+func _check_capabilities_unchanged_by_polish() -> void:
+	# PR 30 darf den Template-Capability-Contract NICHT aufweichen.
+	# Wir fordern die bekannten Fixpunkte: orb.wiggle == NONE,
+	# orb.TALKING → ACTING-Fallback, Smolit reference-all-FULL.
+	var orb_wiggle: int = int(_CapsRef.expression_level(
+		_IdentityRef.Identity.ORB, _CapsRef.EXPR_WIGGLE))
+	_assert(orb_wiggle == _CapsRef.ExpressionLevel.NONE,
+		"caps (PR 30 lock): orb.wiggle stays NONE")
+	var orb_talking_resolved: int = int(_CapsRef.resolve_state(
+		_IdentityRef.Identity.ORB, _StateRef.State.TALKING))
+	_assert(orb_talking_resolved == _StateRef.State.ACTING,
+		"caps (PR 30 lock): orb.TALKING still falls back to ACTING")
+	var smolit_wiggle: int = int(_CapsRef.expression_level(
+		_IdentityRef.Identity.SMOLIT_SALAMANDER, _CapsRef.EXPR_WIGGLE))
+	_assert(smolit_wiggle == _CapsRef.ExpressionLevel.FULL,
+		"caps (PR 30 lock): smolit reference stays all-FULL (wiggle=FULL)")
+
+
+func _check_default_identity_unchanged_by_polish() -> void:
+	# PR 30 ist rein visueller Polish — die Default-Identität bleibt
+	# Smolit Salamander, und unbekannte IDs klemmen weiterhin auf Smolit.
+	_assert(_IdentityRef.DEFAULT == _IdentityRef.Identity.SMOLIT_SALAMANDER,
+		"identity (PR 30 lock): DEFAULT is SMOLIT_SALAMANDER")
+	var clamped: int = _IdentityRef.identity_from_string("this_kind_does_not_exist")
+	_assert(clamped == _IdentityRef.Identity.SMOLIT_SALAMANDER,
+		"identity (PR 30 lock): unknown string clamps to SMOLIT_SALAMANDER")
