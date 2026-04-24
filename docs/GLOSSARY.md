@@ -50,27 +50,37 @@ Siehe [`docs/security/AUDIT_TRAIL.md`](./security/AUDIT_TRAIL.md).
 
 ## Workflow Overlay
 
-**Veraltete Bezeichnung** für die drei-Knoten-Kurzprojektion aus
-Phase 3.1 (`ui/scripts/workflow_overlay/`,
-`ui/scenes/workflow_overlay/workflow_overlay_root.tscn`). Rendert
-Trigger → Action → Result als knappe Zusammenfassung laufender
-Action Events. **Nicht** das neuere, lineare Panel aus PR 16
-(siehe nächster Eintrag).
+**Seit PR 33 (2026-04-24) entfernt.** Der frühere drei-Knoten-
+Kurzprojektions-Spike aus Phase 3.1
+(`ui/scripts/workflow_overlay/`,
+`ui/scenes/workflow_overlay/workflow_overlay_root.tscn`) ist
+nicht mehr Teil der UI. Er rendete Trigger → Action → Result als
+knappe Zusammenfassung laufender Action Events, brachte aber
+gegenüber dem neuen *Workflow Visibility Overlay v1* (PR 16)
+keine zusätzliche Fähigkeit — nur einen konkurrierenden
+mentalen Modell-Rahmen. Die Koexistenz war seit PR 20
+(Docs Reality Check) als offene Konsolidierungsfrage markiert;
+PR 33 hat sie durch Entfernung beantwortet.
 
-Beide Overlays koexistieren bewusst — ein Konsolidierungs-PR ist
-als Follow-up vorgemerkt (siehe
-[`docs/OPEN_WORK.md`](./OPEN_WORK.md) Workstream A).
+**Heute gültig:** siehe nächster Eintrag
+„Workflow Visibility Overlay". Wenn in einem älteren Dokument
+„Workflow Overlay" steht, ist damit im Zweifel das
+Visibility-Overlay gemeint — der alte Spike existiert im
+Codebase nicht mehr.
 
-Siehe [`docs/ui_architecture.md`](./ui_architecture.md) §6a und §8a.
+Detail-Review:
+[`docs/reviews/PR33_WORKFLOW_OVERLAY_CONSOLIDATION.md`](./reviews/PR33_WORKFLOW_OVERLAY_CONSOLIDATION.md).
 
 ## Workflow Visibility Overlay
 
-Das **neuere** read-only Panel aus PR 16 neben dem Avatar. Rendert
-eine lineare Kartenliste über neun Schritt-Kategorien (HEARD,
-THINKING, RESPONSE, ACTION, STEP, SPEAKING, APPROVAL, COMPLETED,
-FAILED), je Eintrag Status + gekürzte ID + Snippet. Standardmäßig
-hidden, opt-in über `SMOLIT_WORKFLOW_OVERLAY=1` oder Dev-Toggle.
-Keine neuen IPC-Events; konsumiert bestehende Signale.
+Das **einzige** Workflow-UI im Smolit-Assistant (seit PR 33). Ein
+read-only Panel aus PR 16 neben dem Avatar. Rendert eine lineare
+Kartenliste über neun Schritt-Kategorien (HEARD, THINKING,
+RESPONSE, ACTION, STEP, SPEAKING, APPROVAL, COMPLETED, FAILED),
+je Eintrag Status + gekürzte ID + Snippet. Standardmäßig
+**hidden**, opt-in über `SMOLIT_WORKFLOW_OVERLAY=1` oder
+session-lokalen Dev-Toggle. Keine neuen IPC-Events; konsumiert
+bestehende Signale.
 
 Siehe [`docs/ui_architecture.md`](./ui_architecture.md) §8.4c.
 

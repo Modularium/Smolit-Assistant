@@ -95,9 +95,9 @@ Detaillierte Begriffswelt: siehe
 ### UI
 
 - 3 Autoloads (EventBus / IpcClient / MCPRuntime).
-- 9 Scenes (Avatar, Utterance, Workflow-Overlay-alt, Workflow-
-  Visibility-Panel, Approval-Card, Audit-Panel, Settings-Shell,
-  Dev-Controls, Main).
+- 8 Scenes (Avatar, Utterance, Workflow-Visibility-Panel,
+  Approval-Card, Audit-Panel, Settings-Shell, Dev-Controls, Main)
+  — seit PR 33 ohne den alten Workflow-Overlay-Spike.
 - Behavioral Expression Layer v1 (PR 15) als Multiplier-/Tint-
   Patch oberhalb der bestehenden Avatar-State-Maschine.
 - Workflow Visibility Overlay v1 (PR 16) linear über acht
@@ -256,7 +256,7 @@ PR 31 selbst ist dieser Roadmap-Checkpoint (Docs-only).
 | PR | Workstream | Gegenstand |
 | -- | ---------- | ---------- |
 | 32 | E | Audit Coverage für reale Interaction-Actions (2026-04-24, gelandet): `interaction_open_application` **und** `interaction_focus_window` laufen jetzt durch denselben Audit-Lifecycle wie der Demo-Pfad (IpcCommandReceived → ActionPlanned → ApprovalRequested → ApprovalResolved → ActionStarted → ActionCompleted / ActionCancelled / ActionFailed). Summaries tragen nur den Action-Titel — keine Command-Templates, keine Env-Namen, keine Secrets. Ring-Buffer bleibt in-memory, keine neuen IPC-Commands. Schließt die in PR 25 dokumentierte Audit-Lücke. Details: [`docs/reviews/PR32_AUDIT_INTERACTION_LIFECYCLE.md`](./docs/reviews/PR32_AUDIT_INTERACTION_LIFECYCLE.md). |
-| 33 | A | **Workflow-Overlay-Konsolidierungs-Entscheidung.** Entweder Merge der zwei koexistierenden Overlays (Phase 3.1 Spike + PR-16 Visibility Overlay) oder formales Deprecaten des älteren Spike-Pfads. Docs + evtl. Smoke-Update, **keine** neue Feature-Fläche. |
+| 33 | A | Workflow-Overlay-Konsolidierung (2026-04-24, gelandet, **Option C — Entfernen**): der alte Drei-Knoten-Phase-3.1-Spike (`ui/scripts/workflow_overlay/`, `ui/scenes/workflow_overlay/`, `scripts/workflow_overlay_state_smoke.gd`, zugehörige Dev-Control-Previews, Visual-Action-Staging-Keys) ist komplett aus dem Repo entfernt. Das Workflow Visibility Overlay v1 (PR 16) bleibt die einzige Workflow-UI. Kein neues Feature, keine neuen IPC-Events, keine neue Persistenz. Details: [`docs/reviews/PR33_WORKFLOW_OVERLAY_CONSOLIDATION.md`](./docs/reviews/PR33_WORKFLOW_OVERLAY_CONSOLIDATION.md). |
 | 34 | C | **Zweites TTS-Kind** (z. B. `piper_http`) analog zu `whisper_cpp`: command-basiert, env-only, Whitelist-Erweiterung, Default bleibt `[command]`. Keine Build-Abhängigkeit, kein Streaming. |
 | 35 | J | **Smolitux Token Contract Prep in smolitux-ui.** Cross-Repo-Docs-PR auf [smolitux-ui](https://github.com/Modularium/smolitux-ui): Token-Schema-Vorschlag, Export-Format, Namensraum. **Kein** Export-Build, **kein** Import in Smolit-Assistant. Voraussetzung für einen späteren Token-Spike auf der Assistant-Seite. |
 | 36 | D | **Settings-Shell-UX-Cleanup** nach Provider-Onboarding: visuelle Hierarchie, Kollapsierung alter Per-Kind-Editoren, klare Section-Header. Keine neuen IPC-Commands, keine Default-Änderung, kein Auto-Cloud. |

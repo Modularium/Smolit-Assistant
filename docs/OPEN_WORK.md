@@ -28,14 +28,13 @@ kollidierten; zwei Workflow-Overlays koexistieren ohne Abgrenzung;
 Vision und breite Desktop-Automation, die im Code schlicht nicht
 existierten. PR 28 hat diese Lücke geschlossen.
 **Blocker:** keine; reine Docs-Arbeit.
-**Nächster kleinster PR:**
-
-- **PR 33 A-Workflow-Overlay-Konsolidierungs-Entscheidung.** Der
-  alte Phase-3.1-Workflow-Overlay-Spike und das neuere Workflow
-  Visibility Overlay v1 (PR 16) laufen parallel im `main.tscn`.
-  Sauber abgegrenzt, aber verwirrend. PR 33 entscheidet zwischen
-  Merge und Deprecation — reine Docs-/UI-Cleanup-Arbeit, **keine**
-  neue Feature-Fläche.
+**Nächster kleinster PR:** kein zwingender A-PR in der nahen Reihe.
+**PR 33 (2026-04-24, gelandet)** hat die Workflow-Overlay-
+Konsolidierungsfrage entschieden (**Option C — Entfernen**): der
+Drei-Knoten-Phase-3.1-Spike ist komplett aus der UI entfernt; das
+Workflow Visibility Overlay v1 (PR 16) ist die einzige
+Workflow-UI. Details:
+[`docs/reviews/PR33_WORKFLOW_OVERLAY_CONSOLIDATION.md`](./reviews/PR33_WORKFLOW_OVERLAY_CONSOLIDATION.md).
 
 **Nicht-Ziele:**
 

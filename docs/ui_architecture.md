@@ -288,50 +288,42 @@ autoritative Quelle; diese Datei dupliziert das Schema nicht.
 
 ---
 
-## 6a. Workflow Overlay als passiver Action-Readout (MVP-Spike, Ist-Zustand)
+## 6a. Workflow-UI — eine einzige Wahrheit (PR 33, Ist-Zustand)
 
-Dieser Abschnitt beschreibt die Rolle des Workflow-Overlays an der
-Schnittstelle zum Event-Strom. Seit dem MVP-Spike existiert der
-Renderer im Repo
+Seit **PR 33 (2026-04-24)** gibt es genau **eine** Workflow-UI im
+Smolit-Assistant: das *Workflow Visibility Overlay v1* aus PR 16
+(detailliert in §8.4c). Der frühere Drei-Knoten-MVP-Spike
 (`ui/scripts/workflow_overlay/`,
-`ui/scenes/workflow_overlay/workflow_overlay_root.tscn`,
-eingebettet in `main.tscn` unterhalb des Avatars). Die Leitlinien
-unten gelten unverändert für den Spike — er ist bewusst klein und
-ergänzt §8a um ein konkretes erstes Rendering.
+`ui/scenes/workflow_overlay/workflow_overlay_root.tscn`) ist mit
+PR 33 vollständig entfernt worden; die Koexistenzlücke aus PR 20
+(Docs Reality Check) ist damit geschlossen.
 
-- **Definition.** Rein visuelle, read-only Darstellung von Core-
-  Zuständen. Das Overlay ist keine zweite Session-Logik, sondern
-  eine Projektion.
-- **Quelle der Wahrheit.** Ausschließlich Core / EventBus. Das
-  Overlay erzeugt keinen eigenen Zustand, sondern leitet sein
-  Bild aus den vom Core emittierten Action Events ab.
-- **Ziel.** Verständlicher Handlungszusammenhang (Trigger → Schritt
-  → Aktion → Ergebnis) statt rein textueller Log-Ausgabe, damit
-  der Nutzer sieht, *was* gerade passiert — nicht *wie* eine
-  Low-Level-Interaktion implementiert ist.
-- **Position.** Links vom Avatar/Icon bzw. als linker Overlay-
-  Flügel innerhalb derselben Presence-Hülle. Kein separates
-  Toplevel-Fenster, keine neue Plattformfähigkeit.
-- **MVP.** Kleine feste Darstellung (2–4 Knoten im Standardfall),
-  kein freier Canvas. Siehe §8a für Detailscope.
-- **Visuals.** Knoten, gerichtete Kanten, Hervorhebung des aktiven
-  Schrittes, semantische `Success-` / `Failure-` / `Active-`
-  Zustände — ohne feste Farbzusage an dieser Stelle, Farbregeln
-  leben in der späteren Implementierungsdoku.
-- **Interaktion.** Im MVP keine Interaktionsversprechen. Spätere
-  Formen wie Collapse/Expand oder Inspect sind architektonisch
-  nicht ausgeschlossen, aber ausdrücklich nicht Teil des MVP.
+Leitlinien für die verbleibende Workflow-UI:
+
+- **Rein visuelle, read-only Projektion von Core-Zuständen.** Die
+  UI erzeugt keinen eigenen Zustand, sondern leitet ihr Bild aus
+  den vom Core emittierten Action Events + Approval-Lifecycle-
+  Signalen ab.
+- **Quelle der Wahrheit.** Ausschließlich Core / EventBus.
+- **Ziel.** Verständlicher Handlungszusammenhang (HEARD → THINKING
+  → RESPONSE → ACTION → STEP → SPEAKING → APPROVAL → COMPLETED /
+  FAILED) statt rein textueller Log-Ausgabe.
+- **Position.** Als eigenes PanelContainer-Node in der Main-Scene,
+  neben dem Avatar. Kein separates Toplevel-Fenster, keine neue
+  Plattformfähigkeit.
+- **Interaktion.** Keine Interaktionsversprechen — read-only.
 
 Was §6a explizit **nicht** verspricht:
 
 - keine Ausführung, kein Executor, kein Zugriff auf den Desktop —
   Desktop-Interaktion bleibt vollständig im Core / Interaction
   Layer;
-- kein eigenes Protokoll neben den Action Events;
-- keine Pflichtaktivierung — das Overlay bleibt Teil derselben
-  Presence-Hülle und erscheint in denselben Presence-Kontexten
-  (Action Mode, siehe
-  [`presence_desktop_interaction.md`](./presence_desktop_interaction.md)).
+- kein eigenes Protokoll neben den bestehenden Action- und
+  Approval-Events;
+- keine Pflichtaktivierung — das Overlay ist per Default
+  **versteckt** (`SMOLIT_WORKFLOW_OVERLAY=1` oder session-lokaler
+  Dev-Toggle schalten es sichtbar). Siehe §8.4c für die
+  Rendering-Details.
 
 ---
 
@@ -1786,153 +1778,26 @@ anderer Sektionen in der Config-Datei). Harness-Case:
 
 ---
 
-## 8a. Workflow-Overlay-System (MVP-Spike, Ist-Zustand)
+## 8a. Workflow-Overlay-System *(entfernt, PR 33)*
 
-Dieser Abschnitt beschreibt das Workflow-Overlay als eigenständigen
-UI-Baustein. Seit dem ersten MVP-Spike existieren die drei
-Renderer-Scripts (`workflow_overlay_controller.gd`,
-`workflow_overlay_state.gd`, `workflow_node_view.gd`,
-`workflow_edge_view.gd`) und die Szene
-(`workflow_overlay_root.tscn`) im Repo. Die Nummer §8a markiert
-einen zusätzlichen Abschnitt neben §8 (Zustands- und Eventmodell
-Ist-Zustand) und kollidiert nicht mit bestehenden Cross-References
-auf §8/§9/§10/§11. Die ursprünglich in der Planungsphase geschriebenen
-Regeln (unten) gelten weiterhin; wo der Spike Feinentscheidungen
-getroffen hat, sind sie benannt.
+Dieser Abschnitt beschrieb den früheren Drei-Knoten-MVP-Spike
+(`ui/scripts/workflow_overlay/`,
+`ui/scenes/workflow_overlay/workflow_overlay_root.tscn`). Der
+Spike rekonstruierte Trigger → Action → Result aus dem
+Action-Event-Strom und ergänzte den Avatar.
 
-### 8a.1 Rolle
+**Stand heute (PR 33, 2026-04-24):** der Spike ist komplett aus
+der UI entfernt. Die Entscheidung und der fachliche Inhalt dieses
+Abschnitts sind unter §8.4c (Workflow Visibility Overlay v1)
+aufgegangen, das die gleichen Invarianten in einer linearen
+Kartenliste abbildet und zusätzlich `APPROVAL` / `SPEAKING` /
+`COMPLETED` / `FAILED` trägt. Detail-Review:
+[`docs/reviews/PR33_WORKFLOW_OVERLAY_CONSOLIDATION.md`](./reviews/PR33_WORKFLOW_OVERLAY_CONSOLIDATION.md).
 
-- Sichtbarer Ablauf: Workflow-Overlay macht den aktuellen Handlungs-
-  zusammenhang auf einen Blick erkennbar.
-- Ergänzung zum Avatar, nicht Ersatz. Avatar bleibt die primäre
-  Presence-Figur; das Overlay ist eine begleitende Sicht.
-- Keine zweite Wahrheit: der Core bleibt Source of Truth, das
-  Overlay ist reine UI-Projektion.
-
-### 8a.2 Darstellung
-
-- **Knotenarten (symbolisch).** `Trigger`, `Step`, `Action`,
-  `Result`. Keine feste Typhierarchie im MVP, nur diese vier
-  Kategorien.
-- **Kanten.** Gerichtet, folgen dem zeitlichen Ablauf der Action
-  Events.
-- **Semantische Zustände pro Knoten/Kante.** `geplant` / `aktiv` /
-  `erfolgreich` / `fehlgeschlagen` / `abgebrochen` / `unklar`.
-  Farbzuweisung und konkrete Glyphensprache werden in der späteren
-  Implementierungsdoku festgelegt, nicht hier fixiert.
-- **Aktivität.** Kleine, dezente Animationen auf Kanten /
-  Fokus-Knoten. Keine aufmerksamkeitsheischende Choreografie.
-
-### 8a.3 Scope-Grenzen
-
-- **Kein Editor.** Knoten und Kanten sind nicht nutzer-editierbar,
-  nicht verschiebbar, nicht verkabelbar.
-- **Kein unendlicher Canvas.** MVP-Darstellung passt in eine feste,
-  kleine Fläche links vom Avatar. Kein Zoom, kein Pan.
-- **Kein Graph-Authoring.** Smolit wird durch das Overlay
-  ausdrücklich **kein** visueller Workflow-Builder.
-- **Kein Debug-Graph als neue Runtime-Wahrheit.** Das Overlay
-  rekonstruiert bestehende Action-Event-Abläufe; es ist keine
-  eigene Execution-Engine.
-- **Kein zweites Logiksystem.** Keine Policy, kein Scheduler, keine
-  Retry-Logik in der UI — Recovery / Retry / Verification gehören
-  in den Core / Interaction Layer.
-
-### 8a.4 Datenbindung
-
-- **EventBus-Quelle.** Das Overlay konsumiert die bestehenden
-  Action Events (`action_planned`, `action_started`, `action_step`,
-  `action_completed`, `action_failed`; optional später zusätzlich
-  `action_verification`, `action_cancelled`). Siehe
-  [`api.md`](./api.md) §2.5 und „UI-Projektion: Workflow Overlay".
-- **Lokaler UI-State nur als Projektion / Ableitung.** Der
-  Workflow-State in der UI ist keine persistierte Wahrheit,
-  sondern die reine Ableitung aus dem beobachteten Event-Strom
-  seit Session-Start oder seit dem letzten `action_planned`.
-- **Kein Workflow-DSL-Zwang im MVP.** Das Overlay erwartet keinen
-  vorab gelieferten Workflow-Graphen. Es rekonstruiert einen
-  kleinen symbolischen Kurz-Flow aus dem bestehenden Eventstrom
-  (Trigger aus dem auslösenden Event, Schritte aus `action_step`,
-  Result aus `action_completed`/`action_failed`).
-
-### 8a.5 Nicht-Ziele
-
-- **Kein n8n-Klon.** Weder Authoring noch programmierbare Knoten,
-  weder Webhook-Management noch Integrations-Katalog.
-- **Keine Desktop-Automation in Godot.** Keine Klicks, keine
-  Tastatureingaben, kein OCR, kein Fensterzugriff aus der UI —
-  genau wie §4 der Nicht-Ziele festhält.
-- **Kein generisches Node-Framework in Phase 1.** Keine
-  wiederverwendbare Graph-Infrastruktur, keine Plug-in-Architektur
-  für fremde Graphen, kein Export.
-
-### 8a.6 Darstellungsmodi (Collapse / Expand) — PR 2
-
-Seit PR 2 kennt das Overlay zwei bewusst kleine Darstellungsstufen.
-Sie werden **automatisch** aus der aktuellen Phase abgeleitet
-(siehe `workflow_overlay_state.display_mode_for_phase`) — es gibt
-keinen Nutzerschalter, keine neue Presence-State-Maschine und keine
-zweite State-Quelle:
-
-- **`COLLAPSED`** — sehr kompakte Kurzprojektion. Wird bei
-  `PLANNED` (und defensiv bei `HIDDEN`) verwendet. Kleinere
-  Mindestgrößen der Node-Kapseln, kürzere Schrift, schmalere
-  Kanten, knappere Zeilenseparation.
-- **`EXPANDED`** — lesbarere Kurzprojektion. Wird bei `ACTIVE`,
-  `COMPLETED`, `FAILED`, `UNKNOWN` verwendet. Größere
-  Mindestgrößen, etwas mehr Schrift, optionale zusätzliche Hint-
-  Zeile.
-
-Zweck: in der ruhigen Planungsphase bleibt das Overlay klein und
-unauffällig; sobald wirklich etwas passiert (aktiver Schritt,
-Ergebnis), wird die Darstellung spürbar lesbarer — ohne den
-Scope in Richtung freier Canvas / Editor zu verschieben.
-
-Der Darstellungsmodus ist:
-
-- **keine Interaktion**, sondern eine reine Funktion der Phase.
-- **kein Ersatz für die Presence-Modi** (Docked / Expanded / Action
-  / Disconnected) — diese bleiben unabhängig und kollidieren nicht.
-- **keine neue Wahrheit** — der Modus wird pro Phase neu aus dem
-  State-Modul abgeleitet und nicht persistiert.
-
-### 8a.7 Robustere Event-Rekonstruktion — PR 2
-
-PR 2 härtet die Projektion an drei Stellen, ohne neue Event-Typen
-zu verlangen:
-
-- **Mehrere `action_step`-Events.** Das Overlay zählt Schritte in
-  einem flach gehaltenen `step_count` und zeigt ab dem 2. Schritt
-  einen kleinen Hint („Step 3") *nur im EXPANDED-Modus*. Kein
-  History-Log, kein Scrollback.
-- **Anti-Flicker bei leeren Payloads.** `action_step` mit leerem
-  `title`/`description` überschreibt den bestehenden Action-Titel
-  nicht mehr; frühere Label-Entscheidungen bleiben sichtbar, bis
-  ein neues belastbares Feld ankommt.
-- **Späte oder fehlende Vor-Events.** Wenn ein `action_step`
-  eintrifft, ohne dass zuvor `action_planned`/`action_started`
-  gesehen wurde (z. B. späte Verbindung), promotet das Overlay
-  den Flow still auf `ACTIVE` mit neutralen Trigger- und Action-
-  Defaults; ein darauffolgendes `action_completed`/`failed`
-  funktioniert normal.
-- **Label-Auflösung als pure Helfer.** Alle Label-Defaults leben
-  jetzt in `workflow_overlay_state.gd` als static Funktionen
-  (`trigger_label_from_payload`, `action_label_from_payload`,
-  `step_label_from_payload`, `result_label_from_payload`,
-  `cancel_label_from_payload`). Sie sind ohne Scene-Tree testbar
-  (siehe `scripts/workflow_overlay_state_smoke.gd`). Default-
-  Ketten sind dokumentiert im State-Modul.
-- **action_id informativ, nicht steuernd.** Das Overlay
-  speichert die `action_id` des laufenden Flows im State, nutzt
-  sie aber **nicht** zur Korrelation. Ein neuer `action_planned`
-  überschreibt immer — kein Queue, kein Merge.
-
-Verifikation: `scripts/workflow_overlay_state_smoke.gd` deckt diese
-Helfer mit ~40 Assertions ab und läuft über den Harness-Case
-`workflow-state-smoke` (`scripts/run_overlay_verification.sh
-workflow-state-smoke`). Der Controller selbst wird über Szenenlauf
-geprüft; für echte `action_*`-Events bleibt ein Lauf gegen einen
-laufenden Core die sinnvollste End-to-End-Verifikation.
+Die frühere Untergliederung §8a.1–§8a.7 (Rolle, Darstellung,
+Scope-Grenzen, Datenbindung, Nicht-Ziele, Collapse/Expand,
+Event-Rekonstruktion) ist in §8.4c konsolidiert. Ältere
+Dokumente, die §8a referenzieren, finden dort die gültige Fassung.
 
 ---
 
