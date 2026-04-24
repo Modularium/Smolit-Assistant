@@ -161,15 +161,32 @@ kaum erkennen, was primary ist, was lokal bleibt und was cloud_http
 vor dem First-Run noch braucht. PR 26 beantwortet das im Readout,
 ohne Defaults zu ändern.
 **Blocker:** keine; rein Produkt-/UX-Arbeit.
-**Nächster kleinster PR:**
+**Erledigt:**
 
-- **PR 36 D-Settings-Shell-UX-Cleanup.** Der PR-26-Onboarding-Block
-  sitzt oberhalb der bestehenden Per-Kind-Editoren; die visuelle
-  Hierarchie könnte klarer werden (Section-Header, Kollapsierung
-  alter Editoren nach Onboarding, bessere Trennung
-  Onboarding-Readout ↔ Edit-Pfade). **Keine** neuen IPC-Commands,
-  **keine** Default-Änderung, **kein** Auto-Cloud. `Add cloud_http
-  to chain` bleibt per Design disabled.
+- **PR 36 D-Settings-Shell-UX-Cleanup** *(2026-04-24, gelandet)*. Die
+  drei Provider-Sections (Text / STT / TTS) teilen jetzt dieselbe
+  dreiteilige Lesereihenfolge **Summary · Details · Editoren**.
+  Summary expandiert die Begriffe `Primary (intended)` (chain[0]),
+  `Active (running)` (`*_provider_active`), `Availability` und
+  `Local / Cloud` in eigene Zeilen, damit Fallback-Fälle auf den
+  ersten Blick sichtbar sind. Die Privacy-Section trägt einen
+  expliziten `— Safety notes —`-Block (Opt-in cloud, Secrets nie
+  angezeigt, env-only `SMOLIT_STT_WHISPER_CPP_CMD` /
+  `SMOLIT_TTS_PIPER_CMD`, Probes side-effect-frei). Der Text-
+  Chain-Editor hat eine zusätzliche Note, die `cloud_http` als
+  Opt-in ausweist (kein Auto-Add). **Keine** neuen IPC-Commands,
+  **keine** neuen `StatusPayload`-Felder, **keine** Core-Änderung,
+  **keine** Default-Änderung. Regression-Lock:
+  `_check_no_new_ipc_command_helpers_in_controller`. Details:
+  [`docs/provider_fallback_and_settings_architecture.md`](./provider_fallback_and_settings_architecture.md)
+  §13.
+
+**Nächster kleinster PR:** kein zwingender D-PR in der nahen Reihe.
+Mögliche Folgearbeit (ohne Priorität): Pro-Kind-Editoren nach
+Onboarding kollabierbar machen; der Chain-Editor bekommt nach
+Onboarding keinen zusätzlichen Hinweis, wenn die Reihenfolge bereits
+die empfohlene lokale Kette ist — beides wäre ein UX-Detail-PR ohne
+Protokoll-Auswirkung.
 
 **Nicht-Ziele:**
 
