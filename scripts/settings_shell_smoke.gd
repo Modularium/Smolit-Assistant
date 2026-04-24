@@ -86,6 +86,15 @@ func _init() -> void:
 	_check_audio_chain_editor_empty_guard("tts")
 	_check_audio_chain_editor_shows_single_kind_info_hint()
 	_check_audio_provider_lines_render_chain_field()
+	# --- PR 26: Provider-Onboarding ---
+	_check_onboarding_pure_logic()
+	_check_onboarding_block_renders_primary_and_chain()
+	_check_onboarding_cloud_readiness_rows_render()
+	_check_onboarding_cloud_secret_never_leaks_value()
+	_check_onboarding_local_first_hint_and_no_auto_cloud_present()
+	_check_onboarding_local_first_quick_action_sends_expected_chain()
+	_check_onboarding_add_cloud_button_stays_disabled_by_design()
+	_check_onboarding_empty_status_renders_dashes()
 
 	print("---")
 	if _fail == 0:
@@ -1306,3 +1315,247 @@ class _SignalListener:
 
 	func on_emit() -> void:
 		count += 1
+
+
+# --- PR 26: Provider-Onboarding -----------------------------------------
+
+
+const _OnboardingRef := preload("res://scripts/settings/provider_onboarding.gd")
+
+
+func _check_onboarding_pure_logic() -> void:
+	# primary_provider: active > first(chain) > configured > "".
+	var status_active := {
+		"text_provider_active": "abrain",
+		"text_provider_chain": ["llamafile_local", "abrain"],
+		"text_provider_configured": "local_http",
+	}
+	_assert(_OnboardingRef.primary_provider(status_active) == "abrain",
+		"onboarding: primary_provider bevorzugt text_provider_active")
+	var status_chain := {
+		"text_provider_chain": ["llamafile_local", "abrain"],
+		"text_provider_configured": "local_http",
+	}
+	_assert(_OnboardingRef.primary_provider(status_chain) == "llamafile_local",
+		"onboarding: primary_provider fällt auf erstes Chain-Kind zurück")
+	var status_configured := {"text_provider_configured": "abrain"}
+	_assert(_OnboardingRef.primary_provider(status_configured) == "abrain",
+		"onboarding: primary_provider fällt auf text_provider_configured zurück")
+	_assert(_OnboardingRef.primary_provider({}) == "",
+		"onboarding: primary_provider liefert leeren String bei leerem Status")
+
+	# locality_for: classification stays stable.
+	_assert(_OnboardingRef.locality_for("abrain") == _OnboardingRef.LOCALITY_LOCAL,
+		"onboarding: abrain ist local")
+	_assert(_OnboardingRef.locality_for("llamafile_local") == _OnboardingRef.LOCALITY_LOCAL,
+		"onboarding: llamafile_local ist local")
+	_assert(_OnboardingRef.locality_for("local_http") == _OnboardingRef.LOCALITY_LOCAL,
+		"onboarding: local_http ist local")
+	_assert(_OnboardingRef.locality_for("cloud_http") == _OnboardingRef.LOCALITY_CLOUD,
+		"onboarding: cloud_http ist cloud")
+	_assert(_OnboardingRef.locality_for("mystery_kind") == _OnboardingRef.LOCALITY_UNKNOWN,
+		"onboarding: unbekanntes Kind wird als unknown markiert, nie als local/cloud erfunden")
+
+	# chain_with_locality bewahrt Reihenfolge + klassifiziert pro Eintrag.
+	var chain := _OnboardingRef.chain_with_locality({
+		"text_provider_chain": ["abrain", "cloud_http"],
+	})
+	_assert(chain.size() == 2,
+		"onboarding: chain_with_locality liefert Reihenfolge")
+	_assert(String(chain[0]["locality"]) == "local"
+			and String(chain[1]["locality"]) == "cloud",
+		"onboarding: chain_with_locality markiert local vs cloud korrekt")
+
+	# cloud_http_readiness: Boolean-basiert; leerer Status → alle false.
+	var ready_empty := _OnboardingRef.cloud_http_readiness({})
+	_assert(not ready_empty["ready"],
+		"onboarding: cloud_http_readiness.ready ist false bei leerem Status")
+	_assert(not ready_empty["enabled"] and not ready_empty["endpoint_set"]
+			and not ready_empty["secret_present"] and not ready_empty["in_chain"],
+		"onboarding: cloud_http_readiness defaults sind alle false")
+
+	# add_cloud_disabled_reason folgt der Sanitising-Reihenfolge.
+	_assert(_OnboardingRef.add_cloud_disabled_reason({})
+			== _OnboardingRef.ADD_CLOUD_DISABLED_REASON_NOT_ENABLED,
+		"onboarding: disabled-Grund bei leerem Status nennt not_enabled")
+	_assert(_OnboardingRef.add_cloud_disabled_reason({
+			"cloud_http_enabled": true,
+		}) == _OnboardingRef.ADD_CLOUD_DISABLED_REASON_NO_ENDPOINT,
+		"onboarding: disabled-Grund wechselt auf no_endpoint, wenn enabled=true")
+	_assert(_OnboardingRef.add_cloud_disabled_reason({
+			"cloud_http_enabled": true,
+			"cloud_http_configured": true,
+		}) == _OnboardingRef.ADD_CLOUD_DISABLED_REASON_NO_SECRET,
+		"onboarding: disabled-Grund wechselt auf no_secret, wenn endpoint gesetzt ist")
+	_assert(_OnboardingRef.add_cloud_disabled_reason({
+			"cloud_http_enabled": true,
+			"cloud_http_configured": true,
+			"cloud_http_secret_present": true,
+			"cloud_http_in_chain": true,
+		}) == _OnboardingRef.ADD_CLOUD_DISABLED_REASON_ALREADY_IN_CHAIN,
+		"onboarding: disabled-Grund nennt already_in_chain, wenn der Provider bereits drin ist")
+	_assert(_OnboardingRef.add_cloud_disabled_reason({
+			"cloud_http_enabled": true,
+			"cloud_http_configured": true,
+			"cloud_http_secret_present": true,
+			"cloud_http_in_chain": false,
+		}) == "",
+		"onboarding: disabled-Grund ist leer, wenn alle Preconditions erfüllt und noch nicht in Chain")
+
+	# Button bleibt per Design disabled, selbst wenn alle Flags grün sind.
+	_assert(_OnboardingRef.add_cloud_button_should_stay_disabled({
+			"cloud_http_enabled": true,
+			"cloud_http_configured": true,
+			"cloud_http_secret_present": true,
+			"cloud_http_in_chain": false,
+		}),
+		"onboarding: add-cloud-Button bleibt per Design disabled, auch wenn bereit")
+
+	# LOCAL_FIRST_CHAIN enthält bewusst kein cloud_http.
+	_assert(not (_OnboardingRef.LOCAL_FIRST_CHAIN as Array).has("cloud_http"),
+		"onboarding: LOCAL_FIRST_CHAIN hat kein cloud_http")
+	_assert((_OnboardingRef.LOCAL_FIRST_CHAIN as Array).size() == 3,
+		"onboarding: LOCAL_FIRST_CHAIN besteht aus drei Kinds")
+
+
+func _check_onboarding_block_renders_primary_and_chain() -> void:
+	var panel := _spawn_panel()
+	panel.apply_status({
+		"text_provider_active": "abrain",
+		"text_provider_chain": ["abrain", "cloud_http"],
+	})
+	panel.open_panel()
+	var snap: Dictionary = panel.provider_onboarding_snapshot()
+	_assert(bool(snap.get("built", false)),
+		"onboarding-block: Widgets gebaut nach open_panel")
+	var primary := String(snap.get("primary", ""))
+	_assert(primary.find("abrain") >= 0 and primary.find("local") >= 0,
+		"onboarding-block: primary zeigt 'abrain [local]'")
+	var chain := String(snap.get("chain", ""))
+	_assert(chain.find("abrain") >= 0 and chain.find("cloud_http") >= 0,
+		"onboarding-block: chain zeigt beide Kinds")
+	_assert(chain.find("cloud") >= 0,
+		"onboarding-block: cloud_http wird explizit als cloud markiert")
+	_despawn_panel(panel)
+
+
+func _check_onboarding_cloud_readiness_rows_render() -> void:
+	var panel := _spawn_panel()
+	panel.apply_status({
+		"cloud_http_enabled": true,
+		"cloud_http_configured": false,
+		"cloud_http_secret_present": false,
+		"cloud_http_in_chain": false,
+		"text_provider_chain": ["abrain"],
+	})
+	panel.open_panel()
+	var snap: Dictionary = panel.provider_onboarding_snapshot()
+	var rows: Array = snap.get("cloud_rows", [])
+	var by_label: Dictionary = {}
+	for row in rows:
+		if typeof(row) == TYPE_DICTIONARY:
+			by_label[String(row.get("label", ""))] = String(row.get("value", ""))
+	_assert(String(by_label.get("cloud_http enabled", "")) == "yes",
+		"onboarding-cloud-rows: enabled=yes rendert")
+	_assert(String(by_label.get("cloud_http endpoint", "")) == "missing",
+		"onboarding-cloud-rows: endpoint=missing rendert als klarer First-Run-Hinweis")
+	_assert(String(by_label.get("cloud_http api key", "")) == "not set",
+		"onboarding-cloud-rows: api key=not set rendert ohne Wert")
+	_assert(String(by_label.get("cloud_http in chain", "")) == "no",
+		"onboarding-cloud-rows: in chain=no rendert")
+	var ready := String(by_label.get("cloud_http ready", ""))
+	_assert(ready.find("first-run") >= 0 or ready.find("pending") >= 0,
+		"onboarding-cloud-rows: ready-Zeile weist ehrlich auf First-Run-Schritte hin")
+	_despawn_panel(panel)
+
+
+func _check_onboarding_cloud_secret_never_leaks_value() -> void:
+	# Auch bei secret_present=true darf die Onboarding-Sektion keinen
+	# Key-Wert rendern — sie zeigt nur das Boolean-Präsent-Label.
+	var panel := _spawn_panel()
+	panel.apply_status({
+		"cloud_http_enabled": true,
+		"cloud_http_configured": true,
+		"cloud_http_secret_present": true,
+		"cloud_http_in_chain": false,
+	})
+	panel.open_panel()
+	var snap: Dictionary = panel.provider_onboarding_snapshot()
+	var rows: Array = snap.get("cloud_rows", [])
+	var api_key_value := ""
+	for row in rows:
+		if typeof(row) == TYPE_DICTIONARY and String(row.get("label", "")) == "cloud_http api key":
+			api_key_value = String(row.get("value", ""))
+	_assert(api_key_value == "present",
+		"onboarding-cloud-rows: api key-Zeile zeigt nur 'present', nie einen Wert")
+	_assert(api_key_value.find("sk-") < 0 and api_key_value.find("Bearer") < 0,
+		"onboarding-cloud-rows: keine Key-Artefakte im Wert")
+	_despawn_panel(panel)
+
+
+func _check_onboarding_local_first_hint_and_no_auto_cloud_present() -> void:
+	# Die beiden Explain-Texte müssen als Konstanten im UI liegen und
+	# stabil referenzierbar sein.
+	_assert(_OnboardingRef.LOCAL_FIRST_HINT_TEXT.find("lokal") >= 0
+			or _OnboardingRef.LOCAL_FIRST_HINT_TEXT.find("local") >= 0,
+		"onboarding: local-first Hinweis adressiert Lokalität")
+	_assert(_OnboardingRef.NO_AUTO_CLOUD_TEXT.find("automatisch") >= 0,
+		"onboarding: no-auto-cloud Hinweis sagt 'automatisch'")
+	_assert(_OnboardingRef.NO_AUTO_CLOUD_TEXT.find("cloud_http") >= 0,
+		"onboarding: no-auto-cloud Hinweis nennt cloud_http explizit")
+
+
+func _check_onboarding_local_first_quick_action_sends_expected_chain() -> void:
+	# Smoke simuliert den Button-Klick ohne IpcClient. Wir prüfen:
+	#   (a) die vom Helfer bereitgestellte Chain ist die kuratierte
+	#       lokale Liste (kein cloud_http).
+	#   (b) der Status-Label-Flow setzt "sent".
+	var panel := _spawn_panel()
+	panel.apply_status({"text_provider_chain": ["abrain"]})
+	panel.open_panel()
+	var sent: Array = panel.simulate_local_first_chain_for_test(null)
+	_assert(sent.size() == 3,
+		"onboarding-quick-action: local-first sendet drei Kinds")
+	_assert(String(sent[0]) == "llamafile_local"
+			and String(sent[1]) == "local_http"
+			and String(sent[2]) == "abrain",
+		"onboarding-quick-action: local-first Reihenfolge ist llamafile_local → local_http → abrain")
+	_assert(not sent.has("cloud_http"),
+		"onboarding-quick-action: local-first enthält kein cloud_http")
+	var snap: Dictionary = panel.provider_onboarding_snapshot()
+	_assert(String(snap.get("local_first_status", "")) == "sent",
+		"onboarding-quick-action: Status-Label zeigt 'sent' nach Klick")
+	_despawn_panel(panel)
+
+
+func _check_onboarding_add_cloud_button_stays_disabled_by_design() -> void:
+	# Auch wenn alle Flags grün sind, bleibt der „Add cloud_http"-Button
+	# disabled. PR 26 legt keine Auto-Aktivierung nahe.
+	var panel := _spawn_panel()
+	panel.apply_status({
+		"cloud_http_enabled": true,
+		"cloud_http_configured": true,
+		"cloud_http_secret_present": true,
+		"cloud_http_in_chain": false,
+		"text_provider_chain": ["abrain"],
+	})
+	panel.open_panel()
+	var snap: Dictionary = panel.provider_onboarding_snapshot()
+	_assert(bool(snap.get("add_cloud_disabled", false)),
+		"onboarding: Add-cloud-Button bleibt disabled trotz aller grünen Flags")
+	var reason := String(snap.get("add_cloud_reason", ""))
+	_assert(reason != "",
+		"onboarding: Disabled-Grund ist immer sichtbar (auch wenn ready)")
+	_despawn_panel(panel)
+
+
+func _check_onboarding_empty_status_renders_dashes() -> void:
+	var panel := _spawn_panel()
+	panel.apply_status({})
+	panel.open_panel()
+	var snap: Dictionary = panel.provider_onboarding_snapshot()
+	_assert(String(snap.get("primary", "")) == "—",
+		"onboarding: leerer Status rendert primary als dash, ohne Crash")
+	_assert(String(snap.get("chain", "")) == "—",
+		"onboarding: leerer Status rendert chain als dash, ohne Crash")
+	_despawn_panel(panel)
