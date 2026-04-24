@@ -1,2 +1,7 @@
 .env
 core/target/
+
+# Godot 4.x writes per-script UID sidecar files next to every .gd
+# under ui/scripts/; they are regenerated on editor load and should
+# not pollute docs-/infra-only PRs.
+*.uid
