@@ -186,6 +186,14 @@ func _build_ui() -> void:
 	root.add_child(_build_approval_demo_section())
 
 	# Separator
+	var sep_plan := HSeparator.new()
+	sep_plan.modulate = Color(1, 1, 1, 0.3)
+	root.add_child(sep_plan)
+
+	# Plan demo action (PR 18).
+	root.add_child(_build_plan_demo_section())
+
+	# Separator
 	var sep2 := HSeparator.new()
 	sep2.modulate = Color(1, 1, 1, 0.3)
 	root.add_child(sep2)
@@ -685,3 +693,72 @@ func _on_approval_demo_pressed(risk: String) -> void:
 		"Demo approval",
 		"Harmless UX demo. The core will not run any action after this decision.",
 		risk)
+
+
+# --- PR 18: Approval-Gated Demo-Action-Planner -------------------------
+#
+# Zwei Buttons: einer erzeugt einen harmlosen Plan **ohne** Approval
+# (Mock läuft sofort durch), einer einen Plan **mit** Approval (der
+# Core wartet auf die Approval-Card-Entscheidung, bevor der Mock
+# läuft). Beide Pfade sind ausdrücklich ohne Systemaktion.
+
+
+func _build_plan_demo_section() -> Control:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 4)
+
+	var title := Label.new()
+	title.text = "Plan demo action (harmless mock)"
+	title.add_theme_font_size_override("font_size", 10)
+	title.modulate = Color(1, 1, 1, 0.6)
+	box.add_child(title)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 4)
+	box.add_child(row)
+
+	var btn_direct := Button.new()
+	btn_direct.text = "Run (no approval)"
+	btn_direct.tooltip_text = "Plan a harmless demo action that runs immediately (mock only)."
+	btn_direct.pressed.connect(_on_plan_demo_direct_pressed)
+	row.add_child(btn_direct)
+
+	var btn_gated := Button.new()
+	btn_gated.text = "Run (needs approval)"
+	btn_gated.tooltip_text = "Plan a harmless demo action gated on approval; mock runs only after Approve."
+	btn_gated.pressed.connect(_on_plan_demo_gated_pressed)
+	row.add_child(btn_gated)
+
+	var hint := Label.new()
+	hint.text = "Core runs a mock only. No shell, no desktop, no provider."
+	hint.add_theme_font_size_override("font_size", 9)
+	hint.modulate = Color(1, 1, 1, 0.4)
+	box.add_child(hint)
+
+	return box
+
+
+func _on_plan_demo_direct_pressed() -> void:
+	_fire_plan_demo("Demo action (direct)", false, "low")
+
+
+func _on_plan_demo_gated_pressed() -> void:
+	_fire_plan_demo("Demo action (gated)", true, "medium")
+
+
+func _fire_plan_demo(title: String, requires_approval: bool, risk: String) -> void:
+	var client: Node = get_node_or_null("/root/IpcClient")
+	if client == null:
+		push_warning("[dev-controls] IpcClient autoload missing; cannot fire demo plan")
+		return
+	if not client.has_method("plan_demo_action"):
+		push_warning("[dev-controls] IpcClient missing plan_demo_action (older build)")
+		return
+	client.call(
+		"plan_demo_action",
+		title,
+		"Harmless demo plan. The core only emits a mock action chain.",
+		risk,
+		"demo_echo",
+		requires_approval,
+	)

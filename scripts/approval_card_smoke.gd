@@ -47,6 +47,7 @@ func _init() -> void:
 	_check_card_ipc_disconnected_disables_buttons()
 	_check_card_tolerates_missing_fields()
 	_check_card_reset_for_tests()
+	_check_card_handles_plan_gated_approval_payload()
 
 	print("---")
 	if _fail == 0:
@@ -168,6 +169,11 @@ func _check_ipc_client_has_new_commands() -> void:
 		"ipc_client.gd emits `approval_deny` frame type")
 	_assert(text.find("\"request_approval_demo\"") >= 0,
 		"ipc_client.gd emits `request_approval_demo` frame type")
+	# PR 18 — plan_demo_action helper and frame type.
+	_assert(text.find("func plan_demo_action") >= 0,
+		"ipc_client.gd exposes plan_demo_action() (PR 18)")
+	_assert(text.find("\"plan_demo_action\"") >= 0,
+		"ipc_client.gd emits `plan_demo_action` frame type (PR 18)")
 
 
 # --- Card scene ---------------------------------------------------------
@@ -345,6 +351,45 @@ func _check_card_tolerates_missing_fields() -> void:
 	snap = card.call("current_snapshot")
 	_assert(String(snap["approval_id"]) == "apr_bare",
 		"payload without approval_id does not replace the held slot")
+	_despawn(card)
+
+
+func _check_card_handles_plan_gated_approval_payload() -> void:
+	# PR 18 — ein `plan_demo_action` mit `requires_approval=true`
+	# emittiert ein echtes `approval_requested` mit gefülltem
+	# `action_id`. Die Card darf das Payload ohne Unterschied zum
+	# PR-17-Demo-Pfad rendern; eine Approve-/Resolve-Runde muss den
+	# Slot wie gewohnt aufräumen.
+	var card := _spawn_card()
+	card.call("_on_approval_requested", {
+		"approval_id": "apr_plan_000001",
+		"action_id": "act_000042",
+		"title": "Gated plan",
+		"message": "Demo plan pending approval.",
+		"risk": "medium",
+	})
+	var snap: Dictionary = card.call("current_snapshot")
+	_assert(card.visible,
+		"PR 18 plan payload still renders the Approval Card")
+	_assert(String(snap["approval_id"]) == "apr_plan_000001",
+		"PR 18 plan payload drives the Card slot")
+	# Lambda captures work correctly through a Dictionary reference —
+	# direct int captures in Godot 4 GDScript are by value and would
+	# silently swallow increments here.
+	var counter: Dictionary = {"n": 0}
+	card.approve_pressed.connect(func(_id): counter["n"] += 1)
+	card.call("_on_approve_pressed")
+	_assert(int(counter["n"]) == 1,
+		"Approve on a plan-triggered approval emits approve_pressed once")
+	card.call("_on_approval_resolved", {
+		"approval_id": "apr_plan_000001",
+		"action_id": "act_000042",
+		"decision": "approved",
+		"source": "user",
+	})
+	snap = card.call("current_snapshot")
+	_assert(String(snap["approval_id"]) == "",
+		"Card clears slot after plan-triggered approval resolves")
 	_despawn(card)
 
 

@@ -44,6 +44,8 @@ func _init() -> void:
 	_check_long_text_gets_trimmed_in_step_snippet()
 	_check_approval_requested_renders_active_step()
 	_check_approval_resolved_outcomes()
+	_check_plan_gated_happy_path()
+	_check_plan_gated_denied_path()
 	_check_panel_scene_defaults_to_hidden()
 	_check_panel_toggle_roundtrip()
 	_check_panel_reset_for_tests_clears_model()
@@ -333,6 +335,76 @@ func _check_approval_resolved_outcomes() -> void:
 
 
 # --- Panel scene --------------------------------------------------------
+
+
+func _check_plan_gated_happy_path() -> void:
+	# PR 18 — Approval-Gated Demo-Action-Planner. Die gesamte Kette
+	# läuft durch die bestehenden Projektions-Hooks; das Modell muss
+	# ACTION, APPROVAL, STEP und COMPLETED konsistent tragen.
+	var model = _ModelRef.new()
+	model.apply_action_planned({"action_id": "act_plan_1", "title": "Gated plan"})
+	model.apply_approval_requested({
+		"approval_id": "apr_plan_1",
+		"action_id": "act_plan_1",
+		"title": "Gated plan",
+		"risk": "medium",
+	})
+	model.apply_approval_resolved({
+		"approval_id": "apr_plan_1",
+		"action_id": "act_plan_1",
+		"decision": "approved",
+		"source": "user",
+	})
+	model.apply_action_step({"action_id": "act_plan_1", "label": "Demo step"})
+	model.apply_action_completed({"action_id": "act_plan_1"})
+
+	var snap: Dictionary = model.snapshot()
+	var kinds: Array = _collect_kinds(snap["steps"])
+	_assert(kinds == [
+			_ModelRef.StepKind.ACTION,
+			_ModelRef.StepKind.APPROVAL,
+			_ModelRef.StepKind.STEP,
+			_ModelRef.StepKind.COMPLETED,
+		],
+		"plan→approval→approved→completed renders full chain")
+	_assert(_status_for(snap["steps"], _ModelRef.StepKind.APPROVAL) == _ModelRef.Status.DONE,
+		"APPROVAL DONE after approved in plan flow")
+	_assert(_status_for(snap["steps"], _ModelRef.StepKind.ACTION) == _ModelRef.Status.DONE,
+		"ACTION DONE after completed in plan flow")
+	_assert(bool(snap["terminal"]),
+		"plan flow is terminal after action_completed")
+
+
+func _check_plan_gated_denied_path() -> void:
+	# PR 18 — Bei Deny darf der Executor nicht laufen. Das Modell
+	# spiegelt das: APPROVAL → FAILED, ACTION kippt durch das
+	# anschließende `action_cancelled` auf FAILED.
+	var model = _ModelRef.new()
+	model.apply_action_planned({"action_id": "act_plan_2", "title": "Gated plan"})
+	model.apply_approval_requested({
+		"approval_id": "apr_plan_2",
+		"action_id": "act_plan_2",
+		"title": "Gated plan",
+	})
+	model.apply_approval_resolved({
+		"approval_id": "apr_plan_2",
+		"action_id": "act_plan_2",
+		"decision": "denied",
+		"source": "user",
+	})
+	model.apply_action_cancelled({"action_id": "act_plan_2",
+			"message": "Action denied by user"})
+
+	var snap: Dictionary = model.snapshot()
+	_assert(_status_for(snap["steps"], _ModelRef.StepKind.APPROVAL) == _ModelRef.Status.FAILED,
+		"APPROVAL FAILED after denied in plan flow")
+	# `apply_action_cancelled` in PR 16 appends a FAILED terminal step
+	# (wird intern auf `apply_action_failed` umgebogen); ACTION selbst
+	# wird auf FAILED gekippt.
+	_assert(_status_for(snap["steps"], _ModelRef.StepKind.ACTION) == _ModelRef.Status.FAILED,
+		"ACTION FAILED after cancel in plan-denied flow")
+	_assert(bool(snap["terminal"]),
+		"plan-denied flow is terminal after cancel")
 
 
 func _check_panel_scene_defaults_to_hidden() -> void:

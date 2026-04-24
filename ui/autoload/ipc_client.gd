@@ -102,6 +102,36 @@ func request_approval_demo(
 	_send(payload)
 
 
+## PR 18 — Approval-Gated Demo-Action-Planner. Erzeugt einen
+## harmlosen `DemoPlan` am Core; der Core führt einen reinen Mock
+## aus (action_started → action_step → action_completed) — **keine**
+## Systemaktion, keine Shell, keine Dateisystem-Operation. Wenn
+## `requires_approval=true`, wartet der Core auf `approval_approve`
+## bzw. `approval_deny` via der Approval-Card (PR 17).
+##
+## Alle Felder sind optional; der Core füllt sichere Defaults ein
+## (Titel „Demo action", Summary-Hinweis, Kind `noop`, Risk `medium`).
+func plan_demo_action(
+	title: Variant = null,
+	summary: Variant = null,
+	risk: Variant = null,
+	kind: Variant = null,
+	requires_approval: Variant = null,
+) -> void:
+	var payload: Dictionary = {"type": "plan_demo_action"}
+	if typeof(title) == TYPE_STRING:
+		payload["title"] = String(title)
+	if typeof(summary) == TYPE_STRING:
+		payload["summary"] = String(summary)
+	if typeof(risk) == TYPE_STRING:
+		payload["risk"] = String(risk)
+	if typeof(kind) == TYPE_STRING:
+		payload["kind"] = String(kind)
+	if typeof(requires_approval) == TYPE_BOOL:
+		payload["requires_approval"] = bool(requires_approval)
+	_send(payload)
+
+
 ## Select a discovered target as the current Interaction context. The
 ## core validates and echoes back a `target_selected` envelope (or an
 ## `error` frame when the payload is malformed). Selection is *not*
