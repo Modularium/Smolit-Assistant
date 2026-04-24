@@ -314,6 +314,38 @@ static func tts_lines(status: Dictionary) -> Array:
 		lines.append(_row("Provider",
 			"Core liefert keine tts_provider_*-Felder (alter Build).",
 			true))
+	# PR 34 — piper-Sichtbarkeit. Dreistufig, wie bei whisper_cpp in
+	# der STT-Achse (PR 27) und llamafile_local in der Text-Achse:
+	#   * `tts_piper_in_chain` fehlt → alter Core, kein Hinweis.
+	#   * `tts_piper_in_chain = false` → ehrlich „nicht in Chain".
+	#   * `tts_piper_in_chain = true` → configured-Flag + env-Hinweis
+	#     bei Bedarf.
+	if status.has("tts_piper_in_chain"):
+		var piper_in_chain := _bool_or_default(status, "tts_piper_in_chain", false)
+		if piper_in_chain:
+			lines.append(_row("piper", "in Chain"))
+			var piper_configured := _bool_or_default(
+				status, "tts_piper_configured", false,
+			)
+			lines.append(_row("  configured (command set)",
+				"yes" if piper_configured else "no",
+				not piper_configured))
+			if not piper_configured:
+				lines.append(_row("  hint",
+					"command not set — configure via SMOLIT_TTS_PIPER_CMD",
+					true))
+		else:
+			var piper_configured := _bool_or_default(
+				status, "tts_piper_configured", false,
+			)
+			if piper_configured:
+				lines.append(_row("piper",
+					"configured (via SMOLIT_TTS_PIPER_CMD), aber nicht in der Chain.",
+					true))
+			else:
+				lines.append(_row("piper",
+					"nicht in der Chain (set SMOLIT_TTS_PIPER_CMD and add to chain to enable).",
+					true))
 	return lines
 
 

@@ -180,7 +180,11 @@ const _KNOWN_TEXT_KINDS: Array[String] = ["abrain", "llamafile_local", "local_ht
 ## whisper.cpp ist command-basiert (externer Binary via
 ## `SMOLIT_STT_WHISPER_CPP_CMD`), nicht als Library gebunden.
 const _KNOWN_STT_KINDS: Array[String] = ["command", "whisper_cpp"]
-const _KNOWN_TTS_KINDS: Array[String] = ["command"]
+## PR 34 — TTS-Whitelist um `piper` erweitert. Muss mit
+## [`crate::providers::tts::KNOWN_TTS_KINDS`] übereinstimmen. Piper
+## ist command-basiert (externer Binary via `SMOLIT_TTS_PIPER_CMD`),
+## nicht als Library gebunden.
+const _KNOWN_TTS_KINDS: Array[String] = ["command", "piper"]
 
 ## PR 13 — State-Spiegel der STT-/TTS-Chain-Editoren. Analog zum
 ## `_text_chain_state`-Modell. Jeder Eintrag:

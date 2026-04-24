@@ -93,6 +93,13 @@ func _init() -> void:
 	_check_stt_lines_whisper_cpp_in_chain_configured_hides_env_hint()
 	_check_stt_lines_whisper_cpp_not_in_chain_is_muted_note()
 	_check_stt_lines_legacy_core_without_whisper_cpp_fields_is_silent()
+	# --- PR 34: piper TTS ---
+	_check_tts_chain_editor_exposes_piper_kind()
+	_check_tts_chain_editor_renders_piper_then_command_order()
+	_check_tts_lines_piper_in_chain_shows_env_hint_when_unconfigured()
+	_check_tts_lines_piper_in_chain_configured_hides_env_hint()
+	_check_tts_lines_piper_not_in_chain_is_muted_note()
+	_check_tts_lines_legacy_core_without_piper_fields_is_silent()
 	# --- PR 26: Provider-Onboarding ---
 	_check_onboarding_pure_logic()
 	_check_onboarding_block_renders_primary_and_chain()
@@ -1198,9 +1205,11 @@ func _check_audio_chain_editor_builds_and_syncs_from_status(axis: String) -> voi
 	_assert(bool(snap.get("built", false)),
 		"%s-chain-editor: Widgets sind gebaut nach open_panel" % axis)
 	var rows: Array = snap.get("rows", [])
-	var expected_rows := 2 if axis == "stt" else 1
-	_assert(rows.size() == expected_rows,
-		"%s-chain-editor: bekannte Kinds werden gerendert (erwartet %d)" % [axis, expected_rows])
+	# PR 27 gab STT zwei Kinds (command + whisper_cpp). PR 34 gibt
+	# TTS ebenfalls zwei Kinds (command + piper). Beide Achsen
+	# rendern jetzt zwei Rows.
+	_assert(rows.size() == 2,
+		"%s-chain-editor: bekannte Kinds werden gerendert (erwartet 2)" % axis)
 	_assert(
 		String(rows[0].get("kind", "")) == "command"
 			and bool(rows[0].get("in_chain", false)),
@@ -1211,6 +1220,12 @@ func _check_audio_chain_editor_builds_and_syncs_from_status(axis: String) -> voi
 			String(rows[1].get("kind", "")) == "whisper_cpp"
 				and not bool(rows[1].get("in_chain", false)),
 			"stt-chain-editor (PR 27): whisper_cpp erscheint als Row 1 mit in_chain=false")
+	else:
+		# piper ist nicht in der Default-Chain → Row folgt als disabled.
+		_assert(
+			String(rows[1].get("kind", "")) == "piper"
+				and not bool(rows[1].get("in_chain", false)),
+			"tts-chain-editor (PR 34): piper erscheint als Row 1 mit in_chain=false")
 	_despawn_panel(panel)
 
 
@@ -1232,10 +1247,10 @@ func _check_audio_chain_editor_empty_guard(axis: String) -> void:
 
 
 func _check_audio_chain_editor_shows_single_kind_info_hint() -> void:
-	# TTS hat weiterhin nur `command`. Der Editor muss für Single-
-	# Kind-Achsen einen ehrlichen Info-Hint zeigen; für STT (seit PR 27
-	# zwei Kinds) bleibt der Hint bewusst leer, damit keine stale
-	# „nur command"-Aussage sichtbar ist.
+	# Seit PR 34 haben **beide** Audio-Achsen zwei Kinds (STT:
+	# command + whisper_cpp; TTS: command + piper). Der Single-
+	# Kind-Info-Hint muss in beiden Editoren leer bleiben, damit
+	# keine stale „nur command"-Aussage sichtbar ist.
 	var panel := _spawn_panel()
 	panel.apply_status({
 		"stt_provider_chain": ["command"],
@@ -1243,8 +1258,8 @@ func _check_audio_chain_editor_shows_single_kind_info_hint() -> void:
 	})
 	panel.open_panel()
 	var tts_info := String(panel.audio_chain_editor_snapshot("tts").get("info_hint", ""))
-	_assert(tts_info.find("command") >= 0 or tts_info.find("vorbereitet") >= 0,
-		"tts-chain-editor: Single-Kind-Hinweis ist sichtbar (TTS hat weiterhin nur `command`)")
+	_assert(tts_info == "",
+		"tts-chain-editor (PR 34): Info-Hint ist leer, weil zwei Kinds verfügbar sind")
 	var stt_info := String(panel.audio_chain_editor_snapshot("stt").get("info_hint", ""))
 	_assert(stt_info == "",
 		"stt-chain-editor (PR 27): Info-Hint ist leer, weil zwei Kinds verfügbar sind")
@@ -1716,3 +1731,144 @@ func _check_stt_lines_legacy_core_without_whisper_cpp_fields_is_silent() -> void
 	var values := _row_map(lines)
 	_assert(not values.has("whisper_cpp"),
 		"stt_lines (PR 27): ältere Cores ohne stt_whisper_cpp_* bleiben still")
+
+
+# --- PR 34: piper TTS ---------------------------------------------------
+
+
+func _check_tts_chain_editor_exposes_piper_kind() -> void:
+	# Der Chain-Editor muss beide TTS-Kinds (command + piper) als
+	# Rows zeigen, auch wenn die aktive Chain nur `command` ist.
+	# piper wird dann als disabled-Row angehängt.
+	var panel := _spawn_panel()
+	panel.apply_status({"tts_provider_chain": ["command"]})
+	panel.open_panel()
+	var snap: Dictionary = panel.audio_chain_editor_snapshot("tts")
+	_assert(bool(snap.get("built", false)),
+		"tts-chain-editor (PR 34): Widgets gebaut")
+	var rows: Array = snap.get("rows", [])
+	var kinds_found: Array = []
+	for row in rows:
+		if typeof(row) == TYPE_DICTIONARY:
+			kinds_found.append(String(row.get("kind", "")))
+	_assert("command" in kinds_found,
+		"tts-chain-editor (PR 34): command ist als Row sichtbar")
+	_assert("piper" in kinds_found,
+		"tts-chain-editor (PR 34): piper ist als Row sichtbar")
+	_despawn_panel(panel)
+
+
+func _check_tts_chain_editor_renders_piper_then_command_order() -> void:
+	# Wenn die aktive Chain `["piper", "command"]` ist, muss der
+	# Editor diese Reihenfolge (piper oben, command darunter)
+	# spiegeln — in-Chain-Kinds vor nicht-in-Chain-Kinds.
+	var panel := _spawn_panel()
+	panel.apply_status({
+		"tts_provider_chain": ["piper", "command"],
+		"tts_piper_in_chain": true,
+		"tts_piper_configured": true,
+	})
+	panel.open_panel()
+	var snap: Dictionary = panel.audio_chain_editor_snapshot("tts")
+	var rows: Array = snap.get("rows", [])
+	_assert(rows.size() >= 2,
+		"tts-chain-editor (PR 34): beide Kinds werden als Rows gerendert")
+	var first_kind := String((rows[0] as Dictionary).get("kind", ""))
+	var second_kind := String((rows[1] as Dictionary).get("kind", ""))
+	_assert(first_kind == "piper",
+		"tts-chain-editor (PR 34): piper ist Row 0, wenn primary in Chain")
+	_assert(second_kind == "command",
+		"tts-chain-editor (PR 34): command ist Row 1 im Fallback-Setup")
+	_assert(bool((rows[0] as Dictionary).get("in_chain", false)),
+		"tts-chain-editor (PR 34): piper-Row trägt in_chain=true")
+	_assert(bool((rows[1] as Dictionary).get("in_chain", false)),
+		"tts-chain-editor (PR 34): command-Row trägt in_chain=true (beide aktiv)")
+	_despawn_panel(panel)
+
+
+func _check_tts_lines_piper_in_chain_shows_env_hint_when_unconfigured() -> void:
+	# tts_lines rendert beim in-chain + unconfigured-Fall einen
+	# expliziten SMOLIT_TTS_PIPER_CMD-Hinweis.
+	var lines: Array = _SectionsRef.tts_lines({
+		"tts_enabled": true,
+		"tts_available": false,
+		"auto_speak": true,
+		"tts_provider_configured": "piper",
+		"tts_provider_active": "",
+		"tts_provider_availability": "unavailable",
+		"tts_provider_last_error": "not_configured",
+		"tts_provider_cloud": false,
+		"tts_provider_chain": ["piper"],
+		"tts_piper_in_chain": true,
+		"tts_piper_configured": false,
+	})
+	var values := _row_map(lines)
+	_assert(values.has("piper"),
+		"tts_lines (PR 34): piper-Block wird gerendert, wenn in Chain")
+	_assert(String(values.get("piper", "")) == "in Chain",
+		"tts_lines (PR 34): piper-Row markiert 'in Chain'")
+	_assert(String(values.get("  configured (command set)", "")) == "no",
+		"tts_lines (PR 34): configured=no, wenn SMOLIT_TTS_PIPER_CMD nicht gesetzt ist")
+	_assert(String(values.get("  hint", "")).find("SMOLIT_TTS_PIPER_CMD") >= 0,
+		"tts_lines (PR 34): env-Hinweis nennt SMOLIT_TTS_PIPER_CMD explizit")
+
+
+func _check_tts_lines_piper_in_chain_configured_hides_env_hint() -> void:
+	# Wenn piper in Chain UND configured ist, darf der Hint nicht
+	# mehr erscheinen — nur die Configured-Yes-Zeile.
+	var lines: Array = _SectionsRef.tts_lines({
+		"tts_enabled": true,
+		"tts_available": true,
+		"auto_speak": true,
+		"tts_provider_configured": "piper",
+		"tts_provider_active": "",
+		"tts_provider_availability": "available",
+		"tts_provider_cloud": false,
+		"tts_provider_chain": ["piper"],
+		"tts_piper_in_chain": true,
+		"tts_piper_configured": true,
+	})
+	var values := _row_map(lines)
+	_assert(String(values.get("  configured (command set)", "")) == "yes",
+		"tts_lines (PR 34): configured=yes, wenn SMOLIT_TTS_PIPER_CMD gesetzt ist")
+	_assert(not values.has("  hint"),
+		"tts_lines (PR 34): env-Hinweis entfällt, wenn configured=yes")
+
+
+func _check_tts_lines_piper_not_in_chain_is_muted_note() -> void:
+	# Kind in der Whitelist, aber nicht in der aktiven Chain.
+	var lines: Array = _SectionsRef.tts_lines({
+		"tts_enabled": true,
+		"tts_available": true,
+		"auto_speak": true,
+		"tts_provider_configured": "command",
+		"tts_provider_active": "command",
+		"tts_provider_availability": "available",
+		"tts_provider_cloud": false,
+		"tts_provider_chain": ["command"],
+		"tts_piper_in_chain": false,
+		"tts_piper_configured": false,
+	})
+	var values := _row_map(lines)
+	var piper_row := String(values.get("piper", ""))
+	_assert(piper_row.find("nicht in der Chain") >= 0,
+		"tts_lines (PR 34): piper-Row markiert 'nicht in der Chain' als muted")
+
+
+func _check_tts_lines_legacy_core_without_piper_fields_is_silent() -> void:
+	# Ältere Cores, die die beiden PR-34-Booleans nicht kennen, dürfen
+	# **keine** piper-Zeile rendern — sonst würde die UI einen
+	# Zustand implizieren, den der Core nicht bestätigt.
+	var lines: Array = _SectionsRef.tts_lines({
+		"tts_enabled": true,
+		"tts_available": true,
+		"auto_speak": true,
+		"tts_provider_configured": "command",
+		"tts_provider_active": "command",
+		"tts_provider_availability": "available",
+		"tts_provider_cloud": false,
+		"tts_provider_chain": ["command"],
+	})
+	var values := _row_map(lines)
+	_assert(not values.has("piper"),
+		"tts_lines (PR 34): ältere Cores ohne tts_piper_* bleiben still")
