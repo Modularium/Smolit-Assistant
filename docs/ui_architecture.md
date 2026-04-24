@@ -506,11 +506,18 @@ als Magic-Numbers in die `_draw_*`-Funktionen zu streuen. Die
 Palette duplizert **keine** bestehenden Paletten (Rim-Accent-Tabelle
 bleibt in `avatar_rim_accent.gd`, Theme-Tints in
 `avatar_appearance.gd`, State-Modulates in `avatar_controller.gd`);
-sie ist der Andockpunkt für einen späteren, reversiblen Token-
-Import-Spike gemäß [ADR-0001](./adr/ADR-0001-smolitux-design-contract.md)
-(Smolitux Design Contract, PR 24). Heute werden **keine** Tokens
-konsumiert, keine JSON/YAML/TOML-Dateien geladen, keine Generatoren
-ausgeführt.
+sie ist ein **lokaler Andockpunkt** für einen späteren, reversiblen
+Token-Import-Spike gemäß [ADR-0001](./adr/ADR-0001-smolitux-design-contract.md)
+(Smolitux Design Contract, PR 24) und dem daraus hervorgegangenen
+[Smolitux Token Contract v0](https://github.com/Modularium/smolitux-ui/blob/main/docs/design/SMOLITUX_TOKEN_CONTRACT.md)
+(PR 35, Docs/Schema-only, cross-repo in smolitux-ui). Die Palette ist
+**kein Token-Consumer**: sie lädt keine Tokens, definiert keine
+Mapping-Regeln und hat keine Runtime-Abhängigkeit auf smolitux-ui.
+Heute werden **keine** Tokens konsumiert, keine JSON/YAML/TOML-
+Dateien geladen, keine Generatoren ausgeführt. Wenn der Spike
+später kommt, ist `avatar_palette.gd` der logische Mapping-
+Zielpunkt für einen sehr kleinen Startausschnitt (z. B. eine Farbe,
+ein Ratio) — **nicht** die Token-Quelle selbst.
 
 Identity-spezifische Feinarbeit:
 

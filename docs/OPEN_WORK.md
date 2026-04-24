@@ -471,28 +471,46 @@ zu koppeln. Ohne expliziten Kopplungsvertrag driftet die UI
 entweder in eine Eigen-Sprache oder versucht eine unmögliche
 React-Godot-Brücke.
 
-**Blocker:** Token-Format und Export-Pipeline in smolitux-ui sind
-noch nicht entschieden. Bis dahin ist auf Smolit-Assistant-Seite
-nur die ADR-Ebene machbar, keine Implementation.
+**Blocker:** Export-Pipeline in smolitux-ui ist weiterhin **nicht**
+entschieden. Seit PR 35 existiert der
+[Smolitux Token Contract v0](https://github.com/Modularium/smolitux-ui/blob/main/docs/design/SMOLITUX_TOKEN_CONTRACT.md)
+als Docs/Schema-only — die *Datenform* ist damit dokumentiert, die
+*Implementation* weiterhin offen (kein Export-Format gewählt, kein
+Generator, kein Validator). Bis dahin bleibt auf Smolit-Assistant-
+Seite nur die ADR-Ebene plus der lokale Andockpunkt in
+[`ui/scripts/avatar/avatar_palette.gd`](../ui/scripts/avatar/avatar_palette.gd)
+machbar.
 
-**Nächster kleinster PR:**
+**Nächster kleinster PR (Future Work, nicht priorisiert):**
 
-- **PR 35 J-Smolitux-Token-Contract-Prep** *(cross-repo, primär
-  in smolitux-ui)*. Token-Schema-Vorschlag (Farben, Typo,
-  Spacings, Motion, Semantik-Status), Export-Format (JSON /
-  CSS-Custom-Properties / Style-Dictionary-kompatibel) und
-  Namensraum werden auf der smolitux-ui-Seite als **Docs/Schema**
-  vorgeschlagen. **Kein** Export-Build, **kein** Import in
-  Smolit-Assistant, **keine** @smolitux/*-Package-Änderung in
-  diesem Repo. Voraussetzung für einen späteren reversiblen
-  Token-Spike in Smolit-Assistant (Workstream G / Palette-
-  Andockpunkt aus PR 30).
+- **Token-Example-Validation-ADR** *(cross-repo, primär in
+  smolitux-ui)*. Entscheidet, ob das Beispiel
+  `docs/design/examples/smolitux.tokens.example.json` aus PR 35
+  durch einen kleinen, repo-lokalen Validator geprüft wird — oder
+  ob die Validation-Expectations (§11 des Token Contract) erst mit
+  einem echten Export-Target umgesetzt werden. **Kein** Export-
+  Build in Smolit-Assistant, **kein** Import, **keine**
+  `@smolitux/*`-Abhängigkeit in diesem Repo.
+- **Alternativ: Token-Generator-ADR** *(cross-repo, smolitux-ui)*.
+  Style Dictionary vs. eigener Transformer vs. „gar nicht".
+  Entscheidung *vor* Code. Ebenfalls keine Assistant-Änderung.
 
 **Erledigt** (kein offener J-PR mehr im Smolit-Assistant-Repo):
 
 - PR 24 J-Cross-Repo-ADR: ADR-0001 in beiden Repos, Glossar /
   ROADMAP / OPEN_WORK / `ui_architecture.md` um den
   Design-Contract-Orientierungsblock ergänzt.
+- **PR 35 J-Smolitux-Token-Contract-Prep** *(2026-04-24, gelandet,
+  cross-repo, primär in smolitux-ui)*. Token Contract v0 als
+  Docs/Schema-only auf der smolitux-ui-Seite
+  ([`docs/design/SMOLITUX_TOKEN_CONTRACT.md`](https://github.com/Modularium/smolitux-ui/blob/main/docs/design/SMOLITUX_TOKEN_CONTRACT.md))
+  inkl. non-authoritatives JSON-Beispiel. In Smolit-Assistant
+  selbst: ADR-0001 verlinkt den Token Contract, `ui_architecture.md`
+  markiert `avatar_palette.gd` als **lokalen** Andockpunkt (kein
+  Token-Consumer), ROADMAP und dieser Abschnitt spiegeln den
+  Docs-Status. **Keine** Code-Änderung, **keine** Token-
+  Implementation, **keine** Generatoren, **keine** OceanData-
+  Berührung.
 
 **Nicht-Ziele:**
 
