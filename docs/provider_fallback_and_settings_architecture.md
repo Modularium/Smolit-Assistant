@@ -372,11 +372,23 @@ Klassen (`ok` / `not_in_chain` / `disabled` / `not_configured` /
 ### 4.2 STT
 
 - **Lokaler Command-Provider (Ist-Zustand, PR 6).** `SMOLIT_STT_CMD`
-  — beliebiges Kommando (z. B. `whisper.cpp`, `vosk`, eigenes
-  Skript). Seit PR 6 hinter einer kleinen Provider-Abstraktion
+  — beliebiges Kommando (z. B. `vosk`, eigenes Skript). Seit PR 6
+  hinter einer kleinen Provider-Abstraktion
   ([`providers::stt`](../core/src/providers/stt.rs)) mit Resolver,
   Laufzeitstatus und Fehlerklassifikator — das bisherige Verhalten
   bleibt byte-kompatibel.
+- **`whisper_cpp`-Kind (PR 27, Ist-Zustand).** Zweiter command-
+  basierter Adapter unter einer eigenen Env-Variable
+  `SMOLIT_STT_WHISPER_CPP_CMD`. Inhaltlich identischer Spawn-Vertrag
+  wie das `command`-Kind (stdin-frei, stdout = erkannter Text,
+  trim, empty → Fehler); die Trennung ist bewusst — so macht die
+  Fallback-Kette `["whisper_cpp", "command"]` real Sinn (z. B.
+  whisper.cpp als primärer Lokal-Pfad, ein einfacheres Fallback-
+  Kommando auf `command`). **whisper.cpp selbst ist keine Build-
+  Abhängigkeit und kein Download-Manager** — der Nutzer orchestriert
+  Binary und Modell außerhalb des Cores; der Core ruft nur den
+  konfigurierten Command auf. Env-only konfigurierbar; keine
+  Persistenz und kein Runtime-Editor in der Settings-Shell.
 - **Lokaler HTTP-Provider.** Loopback-Dienst mit Audio-Endpoint.
   Gleiche Regeln wie beim Text-Provider. **Noch nicht implementiert.**
 - **Cloud-Provider.** Externe Erkennung; dieselbe Kennzeichnungs-
@@ -601,14 +613,30 @@ kompletten Readout in einer Nachricht.
 - `llamafile_idle_timeout_seconds` — Watchdog-Fenster in Sekunden.
   Nur gesetzt, wenn `llamafile_in_chain=true`.
 
-**STT-Achse (produktiv seit PR 6).** `stt_enabled` / `stt_available`
-bleiben als Legacy-Feature-Flags erhalten. Ergänzt um fünf additive
-Felder strukturell analog zur Text-Achse:
-`stt_provider_configured` / `stt_provider_active` /
+**STT-Achse (produktiv seit PR 6, zweites Kind seit PR 27).**
+`stt_enabled` / `stt_available` bleiben als Legacy-Feature-Flags
+erhalten. Ergänzt um fünf additive Felder strukturell analog zur
+Text-Achse: `stt_provider_configured` / `stt_provider_active` /
 `stt_provider_availability` / `stt_provider_last_error` /
-`stt_provider_cloud`. Das einzige produktive Kind heute ist
-`command` (der bisherige `SMOLIT_STT_CMD`-Pfad); Chain
-env-überschreibbar via `SMOLIT_STT_PROVIDER_CHAIN`.
+`stt_provider_cloud`. Produktive Kinds:
+
+- `command` — bestehender `SMOLIT_STT_CMD`-Pfad (PR 6).
+- `whisper_cpp` — zweiter command-basierter Adapter unter
+  `SMOLIT_STT_WHISPER_CPP_CMD` (PR 27). Env-only, keine
+  Persistenz, keine Build-Abhängigkeit auf whisper.cpp.
+
+Chain env-überschreibbar via `SMOLIT_STT_PROVIDER_CHAIN`. Default
+bleibt `["command"]` — PR 27 ändert den Compile-Time-Default
+nicht.
+
+PR 27 ergänzt zwei additive StatusPayload-Booleans:
+
+- `stt_whisper_cpp_in_chain` — Sichtbarkeits-Hebel für die UI.
+- `stt_whisper_cpp_configured` — spiegelt, ob
+  `SMOLIT_STT_WHISPER_CPP_CMD` einen nicht-leeren Wert trägt
+  (analog zu `llamafile_configured` / `local_http_configured` /
+  `cloud_http_configured`). Beide Felder sind Booleans; der
+  Command-String selbst landet **nicht** im StatusPayload.
 
 **TTS-Achse (produktiv seit PR 6).** `tts_enabled` / `tts_available`
 / `auto_speak` bleiben als Legacy-Feld-Tripel erhalten. Ergänzt um

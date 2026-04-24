@@ -83,18 +83,21 @@ nested-Wayland-Tool auf diesem Host verfügbar.
 
 ## C — Audio Pipeline v2
 
-**Status:** command-basierter Ein-Kind-Provider pro Achse (TTS/STT);
-keine Streaming-Audio-Pipeline; TTS-Lifecycle-Events aus PR 14
-liegen vor.
-**Warum wichtig:** Die Audio-Achsen sind real einsetzbar, aber eng
-— ein zweites Kind je Achse macht die Fallback-Kette glaubhaft.
-**Blocker:** keiner; der Provider-Resolver aus PR 6/13 akzeptiert
-neue Kinds additiv.
-**Nächster kleinster PR:**
-
-- **PR 27 C-STT-Alternative** *(neu nach ADR-Insertion; vorher als
-  PR 26 geführt):* `whisper.cpp` als zweites `STT`-Kind. Weiterhin
-  command-basiert, keine Binär-Abhängigkeit im Core-Build.
+**Status:** STT hat seit PR 27 (2026-04-24) **zwei** produktive Kinds
+(`command`, `whisper_cpp`), beide command-basiert; TTS bleibt bei
+einem Kind (`command`). TTS-Lifecycle-Events aus PR 14 liegen
+unverändert vor. Keine Streaming-Audio-Pipeline.
+**Warum wichtig:** Die Fallback-Kette `["whisper_cpp", "command"]`
+ist jetzt real nutzbar — der Resolver spiegelt `active=command` /
+`availability=fallback_active`, wenn whisper.cpp nicht konfiguriert
+ist oder fehlschlägt. Ehrliche Tests decken beide Pfade.
+**Blocker:** keiner; der Provider-Resolver aus PR 6/13 nimmt
+whisper_cpp jetzt als vollwertiges Chain-Kind.
+**Nächster kleinster PR:** kein zwingender C-PR in der nahen Reihe.
+Mögliche Folgearbeit (ohne Priorität): zweites TTS-Kind (z. B.
+`piper_http` analog zu whisper_cpp, command-basiert), oder ein
+zweites STT-Kind mit anderer Spawn-Semantik (z. B. `http_local`
+STT). Beides ist **nicht** Teil der nahen Reihe.
 
 **Nicht-Ziele:**
 
@@ -103,13 +106,22 @@ neue Kinds additiv.
 - Keine Cloud-STT/-TTS-Provider als Default.
 - Kein neuer Audio-Subsystem-Stack — bestehender
   `core/src/audio/` bleibt.
+- Keine Build-Abhängigkeit auf whisper.cpp; das Kind bleibt
+  external-command-based.
+- Kein Modell-/Download-Manager in PR 27.
+- Kein Runtime-Editor für `SMOLIT_STT_WHISPER_CPP_CMD` —
+  Kommando ist env-only.
 
 **Tests / Verifikation:**
 
-- Neue Kind-Konstante in `core/src/providers/stt.rs::KNOWN_STT_KINDS`.
+- `core/src/providers/stt.rs`: elf neue PR-27-Tests, u. a.
+  `validate_stt_chain_accepts_whisper_cpp_kind`,
+  `whisper_cpp_primary_without_command_reports_unavailable`,
+  `fallback_chain_whisper_cpp_then_command_uses_command_when_whisper_cpp_missing`.
 - Chain-Validator-Test (Whitelist, Duplikate, Empty-Reject) deckt
   das neue Kind ab.
-- `speech-sync-smoke` bleibt grün.
+- `speech-sync-smoke` und `settings-shell-smoke` bleiben grün;
+  letzterer erhält sechs neue PR-27-Checks.
 
 ---
 

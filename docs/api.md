@@ -135,14 +135,16 @@ PR 7 erweitert):
   gegen den geparsten Endpoint; **kein** Completion-Request,
   **kein** Bearer-Header auf der Leitung. Antwort:
   `settings_probe_result` mit `axis: "cloud_http"`.
-- `settings_set_stt_provider_chain` (PR 13) — editiert die
-  geordnete STT-Provider-Fallback-Kette. Pflichtfeld `chain:
-  string[]`. Whitelist: `command`. Der Core validiert
-  (Whitelist, Duplikate, Empty-Reject, Trim+Lowercase). Antwort:
-  `status` oder `error`.
+- `settings_set_stt_provider_chain` (PR 13, seit PR 27 zwei Kinds) —
+  editiert die geordnete STT-Provider-Fallback-Kette. Pflichtfeld
+  `chain: string[]`. Whitelist: `command`, `whisper_cpp`. Der Core
+  validiert (Whitelist, Duplikate, Empty-Reject, Trim+Lowercase).
+  Antwort: `status` oder `error`.
 - `settings_reset_stt_provider_chain` (PR 13) — setzt die Kette
   auf Default `["command"]` und löscht den persistierten
-  Override.
+  Override. PR 27 ändert den Compile-Time-Default *nicht* —
+  `whisper_cpp` kommt nur dann in die Kette, wenn der Nutzer sie
+  explizit setzt.
 - `settings_set_tts_provider_chain` / `settings_reset_tts_provider_chain`
   (PR 13) — spiegel für die TTS-Achse.
 
@@ -435,12 +437,45 @@ strukturell dem Text-Readout entsprechen:
   `settings_set_{stt,tts}_provider_chain` editierbar; ein
   Reset-Pfad stellt den Default `["command"]` wieder her.
 
-Die beiden Audio-Achsen haben heute nur **ein** produktives Kind
-(`command`), das den bisherigen `SMOLIT_STT_CMD` / `SMOLIT_TTS_CMD`-
-Pfad 1:1 übernimmt. Die Chain ist env-überschreibbar über
+Die TTS-Achse hat heute ein produktives Kind (`command`), das den
+bisherigen `SMOLIT_TTS_CMD`-Pfad 1:1 übernimmt. Die STT-Achse hat
+seit PR 27 zwei Kinds: `command` (bestehend, `SMOLIT_STT_CMD`) und
+`whisper_cpp` (PR 27, `SMOLIT_STT_WHISPER_CPP_CMD`). Beide sind
+command-basierte Adapter, keine eingebundene Bibliothek und kein
+Modell-/Download-Manager. Die Chain ist env-überschreibbar über
 `SMOLIT_STT_PROVIDER_CHAIN` / `SMOLIT_TTS_PROVIDER_CHAIN`; unbekannte
 Kinds werden im Resolver sichtbar verworfen und die Kette fällt
 dann auf den Default `["command"]` zurück.
+
+**PR 27 — whisper_cpp STT.** Das Kind ist ein zweiter command-
+basierter Spawn-Adapter. Eigene Env-Variable:
+
+- `SMOLIT_STT_WHISPER_CPP_CMD` — vollständiger Spawn-Befehl
+  (Binary + Args), z. B. `/opt/whisper.cpp/main -m model.bin -f {input}`.
+  **Leer/nicht gesetzt** → das Kind bleibt `unavailable`; der
+  Resolver fällt auf den nächsten Chain-Eintrag zurück.
+
+`SMOLIT_STT_ENABLED` gilt als globale Master-Flag für alle STT-
+Kinds; eine dedizierte Per-Kind-Enabled-Variable gibt es bewusst
+**nicht**. Die Error-Klassifikation aus dem Command-Kind
+(`not_configured` / `timeout` / `process_missing` / `exit_nonzero` /
+`empty_response` / `invalid_response` / `disabled` / `unknown`)
+gilt 1:1 auch für `whisper_cpp` — beide Kinds teilen den Spawn-
+Pfad, damit `stt_provider_last_error` stabil bleibt.
+
+Neue StatusPayload-Booleans (PR 27, additiv):
+
+- `stt_whisper_cpp_in_chain` — ob `whisper_cpp` Teil der
+  produktiv instanziierten STT-Chain ist.
+- `stt_whisper_cpp_configured` — ob `SMOLIT_STT_WHISPER_CPP_CMD`
+  einen nicht-leeren Wert hat. Unabhängig von der Chain-
+  Mitgliedschaft, analog zu `llamafile_configured` /
+  `local_http_configured` / `cloud_http_configured`.
+
+**Keine neuen IPC-Commands in PR 27.** Der bestehende
+`settings_set_stt_provider_chain`-Pfad akzeptiert `whisper_cpp` in
+der `chain`-Payload (Whitelist wurde erweitert); der Command-
+String selbst ist env-only und wird nicht über IPC gesetzt.
 
 ### 2.4 Flow-Beispiele
 
@@ -1894,7 +1929,12 @@ Der Core nimmt **kein Audio selbst** auf oder aus. Er ruft konfigurierte
 Kommandos auf:
 
 - `SMOLIT_STT_CMD`: Command, das einmal aufnimmt und den erkannten Text
-  auf `stdout` ausgibt. Leerer Output → Fehler.
+  auf `stdout` ausgibt. Leerer Output → Fehler. Wird vom `command`-Kind
+  konsumiert.
+- `SMOLIT_STT_WHISPER_CPP_CMD` (PR 27): gleicher Spawn-Kontrakt wie
+  `SMOLIT_STT_CMD`, aber vom `whisper_cpp`-Kind konsumiert. Env-only;
+  kein Runtime-Editor in der Settings-Shell. Wird ignoriert, solange
+  `whisper_cpp` nicht Teil der `stt_provider_chain` ist.
 - `SMOLIT_TTS_CMD`: Command, das den zu sprechenden Text auf `stdin`
   bekommt und selbst die Ausgabe macht.
 - Timeouts konfigurierbar über `SMOLIT_STT_TIMEOUT_SECONDS` bzw.
@@ -1912,7 +1952,10 @@ Abstraktion
 [`crate::providers::tts`](../core/src/providers/tts.rs)), strukturell
 analog zum Text-Resolver. Die Chain ist env-überschreibbar über
 `SMOLIT_STT_PROVIDER_CHAIN` / `SMOLIT_TTS_PROVIDER_CHAIN` und beginnt
-per Default mit dem einzigen heute implementierten Kind `command`.
+per Default mit `command`. Seit PR 27 hat die STT-Whitelist ein
+zweites Kind (`whisper_cpp`) — der Default bleibt aber
+`["command"]`; `whisper_cpp` landet nur dann in der Kette, wenn der
+Nutzer es explizit setzt.
 `App::handle_voice_once` und `App::handle_speak` gehen ausschließlich
 durch den Resolver — kein direkter Service-Call mehr. Bestehendes
 Verhalten (Timeouts, Fehlermeldungen, `available`-Semantik) bleibt

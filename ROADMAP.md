@@ -212,7 +212,7 @@ ohne vorgeschaltete Policy-Verdrahtung.
 | 24 | J | Cross-Repo ADR: Smolitux Design Contract (Docs-only, dieser PR; Spiegel-ADR in smolitux-ui). Siehe [`docs/adr/ADR-0001-smolitux-design-contract.md`](./docs/adr/ADR-0001-smolitux-design-contract.md) |
 | 25 | E | Policy v0 (2026-04-24, gelandet): `require_confirmation=true` als Default, `open_application` läuft per Default durch die Approval-Kette, `focus_window` bleibt doppeltes Opt-in; Defaults in `core/src/config.rs` als `DEFAULT_INTERACTION_*`-Konstanten mit Tripwire-Test fixiert. Details in [`docs/reviews/PR25_POLICY_V0_APPROVAL_DEFAULT.md`](./docs/reviews/PR25_POLICY_V0_APPROVAL_DEFAULT.md). |
 | 26 | D | Provider-Onboarding UX v1 (2026-04-24, gelandet): kuratierter Onboarding-Block über den Text-Provider-Editoren — Primary + Chain mit Lokalitäts-Tags, cloud_http First-Run Checklist (`present` statt Wert), eine Quick-Action „Use local-first chain" (`["llamafile_local","local_http","abrain"]`). Keine neuen IPC-Commands, keine Default-Änderung, kein Auto-Cloud. |
-| 27 | C | STT-Alternative (z. B. `whisper.cpp`), bleibt command-basiert |
+| 27 | C | STT Alternative v1 (2026-04-24, gelandet): `whisper_cpp` als zweites command-basiertes STT-Kind unter `SMOLIT_STT_WHISPER_CPP_CMD`. Whitelist `[command, whisper_cpp]`; Default bleibt `["command"]`. Keine Build-Abhängigkeit auf whisper.cpp, kein Modell-Manager, kein Runtime-Editor. Keine neuen IPC-Commands. |
 | 28 | A | `presence_desktop_interaction.md` auf Ist-Zustand trimmen |
 | 29 | G | Avatar-Render-Polish-Follow-up (rein visuell) |
 | 30 | I | README-Build-Setup + erste Install-Doku |
