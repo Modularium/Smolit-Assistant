@@ -11,6 +11,7 @@ use crate::app::{
     SettingsTtsUpdate, StatusPayload,
 };
 use crate::approvals::{ApprovalRequest, ApprovalResolvedPayload, IncomingApprovalDecision};
+use crate::audit::AuditEvent;
 use crate::interaction::{AccessibilityDiscovery, AccessibilityProbe, SelectedTarget};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -99,6 +100,16 @@ pub enum IncomingMessage {
         kind: Option<String>,
         #[serde(default)]
         requires_approval: Option<bool>,
+    },
+    /// PR 19 — Local Audit Trail. Liest die jüngsten Audit-Einträge
+    /// aus dem in-memory Ring Buffer. Keine Mutation; kein Export.
+    /// `limit` ist optional — ohne Limit liefert der Core die volle
+    /// Ring-Buffer-Länge (max. `SMOLIT_AUDIT_MAX_EVENTS`). Die Felder
+    /// sind bereits am Core sanitisiert; die UI muss nichts neu
+    /// redacten.
+    AuditRecent {
+        #[serde(default)]
+        limit: Option<u32>,
     },
     /// PR 5 — erster echter Schreibpfad für Settings. Aktualisiert die
     /// editierbaren Felder der `llamafile_local`-Provider-Config und
@@ -232,6 +243,9 @@ pub enum OutgoingMessage {
     /// kuratierten `class`-Tag und eine kurze, Secret-freie Meldung.
     /// Kein Binary-Pfad, kein Roh-Fehlerstring.
     SettingsProbeResult { payload: SettingsProbeResultPayload },
+    /// PR 19 — Antwort auf `audit_recent`. Trägt eine gekürzte Liste
+    /// sanitisierter `AuditEvent`s (neueste zuletzt).
+    AuditRecent { payload: AuditRecentPayload },
     /// PR 14 — TTS-Lebenszyklus. Wird vom Core genau einmal emittiert,
     /// wenn ein TTS-Provider tatsächlich anläuft. Kein Audio-Timing,
     /// kein Phonem-Stream, keine Text-Payload — der Core behält den
@@ -264,6 +278,16 @@ pub struct TargetClearedPayload {
 #[derive(Debug, Clone, Serialize)]
 pub struct ResponsePayload {
     pub text: String,
+}
+
+/// PR 19 — Payload für den `audit_recent`-Envelope. Trägt eine
+/// neueste-zuletzt-sortierte Liste von bereits sanitisierten
+/// Audit-Einträgen. Die Feldnamen stabil zu halten ist Teil des
+/// Wire-Kontrakts, damit Dev-UIs einen deterministischen Reader
+/// bauen können.
+#[derive(Debug, Clone, Serialize)]
+pub struct AuditRecentPayload {
+    pub events: Vec<AuditEvent>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -429,6 +453,58 @@ mod tests {
             }
             other => panic!("unexpected: {other:?}"),
         }
+    }
+
+    // PR 19 — audit_recent parser + encoder.
+
+    #[test]
+    fn parses_audit_recent_with_limit() {
+        let raw = r#"{"type":"audit_recent","limit":5}"#;
+        match parse_incoming(raw).unwrap() {
+            IncomingMessage::AuditRecent { limit } => {
+                assert_eq!(limit, Some(5));
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_audit_recent_without_limit() {
+        let raw = r#"{"type":"audit_recent"}"#;
+        match parse_incoming(raw).unwrap() {
+            IncomingMessage::AuditRecent { limit } => {
+                assert!(limit.is_none());
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn encodes_audit_recent_envelope() {
+        use crate::audit::{AuditEvent, AuditKind};
+        let encoded = encode_outgoing(&OutgoingMessage::AuditRecent {
+            payload: AuditRecentPayload {
+                events: vec![AuditEvent {
+                    audit_id: "aud_000001".into(),
+                    timestamp_ms: 42,
+                    kind: AuditKind::ActionPlanned,
+                    action_id: Some("act_000001".into()),
+                    approval_id: None,
+                    risk: Some("medium".into()),
+                    result: None,
+                    source: Some("core".into()),
+                    summary: Some("Demo action".into()),
+                }],
+            },
+        });
+        assert!(encoded.contains(r#""type":"audit_recent""#));
+        assert!(encoded.contains(r#""events":["#));
+        assert!(encoded.contains(r#""audit_id":"aud_000001""#));
+        assert!(encoded.contains(r#""kind":"action_planned""#));
+        assert!(encoded.contains(r#""risk":"medium""#));
+        // Empty approval_id and result must not leak into the wire.
+        assert!(!encoded.contains(r#""approval_id":null"#));
+        assert!(!encoded.contains(r#""result":null"#));
     }
 
     #[test]

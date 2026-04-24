@@ -183,6 +183,7 @@ async fn dispatch(app: &Arc<App>, raw: &str) -> Vec<OutgoingMessage> {
             kind,
             requires_approval,
         } => handle_plan_demo_action(app, title, summary, risk, kind, requires_approval).await,
+        IncomingMessage::AuditRecent { limit } => handle_audit_recent(app, limit),
         IncomingMessage::SettingsSetLlamafileConfig(update) => {
             handle_settings_set_llamafile_config(app, update)
         }
@@ -445,8 +446,33 @@ fn handle_approval_response(
 ) -> Vec<OutgoingMessage> {
     match app.resolve_approval(&approval_id, decision.to_decision()) {
         Ok(()) => Vec::new(),
-        Err(message) => vec![OutgoingMessage::Error { message }],
+        Err(message) => {
+            // PR 19 — ein fehlgeschlagener Resolve (z. B. unbekannte
+            // `approval_id` oder doppelter Approve) ist sicherheits-
+            // relevant und landet im Audit-Store. Das Envelope selbst
+            // bleibt unverändert.
+            app.audit().record(
+                crate::audit::AuditKind::IpcCommandRejected,
+                crate::audit::AuditFields::new()
+                    .with_approval_id(&approval_id)
+                    .with_result(crate::audit::RESULT_REJECTED)
+                    .with_source(crate::audit::SOURCE_UI)
+                    .with_summary(&message),
+            );
+            vec![OutgoingMessage::Error { message }]
+        }
     }
+}
+
+/// PR 19 — IPC-Handler für `audit_recent`. Liefert die `limit`
+/// jüngsten Einträge (neueste zuletzt) als `audit_recent`-Envelope.
+/// Kein Logging der Abfrage selbst — das wäre eine Endlosschleife.
+fn handle_audit_recent(app: &Arc<App>, limit: Option<u32>) -> Vec<OutgoingMessage> {
+    let bounded_limit = limit.map(|n| n.min(crate::audit::HARD_MAX_EVENTS as u32) as usize);
+    let events = app.audit().list_recent(bounded_limit);
+    vec![OutgoingMessage::AuditRecent {
+        payload: crate::ipc::protocol::AuditRecentPayload { events },
+    }]
 }
 
 /// PR 17 — IPC handler for `request_approval_demo`. Returns the
@@ -4152,6 +4178,237 @@ mod tests {
         // Unknown kind clamps to noop, whose step label is "No operation".
         assert!(step.contains("No operation"));
         let _completed = recv_text(&mut ws).await;
+    }
+
+    // PR 19 — Local Audit Trail v1.
+
+    #[tokio::test]
+    async fn audit_recent_returns_empty_list_on_fresh_server() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(r#"{"type":"audit_recent"}"#.into()))
+            .await
+            .unwrap();
+        let frame = recv_text(&mut ws).await;
+        assert!(frame.contains(r#""type":"audit_recent""#));
+        assert!(frame.contains(r#""events":[]"#));
+    }
+
+    #[tokio::test]
+    async fn audit_recent_records_plan_without_approval_full_chain() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"plan_demo_action","title":"Hi","kind":"demo_echo","requires_approval":false}"#.into(),
+        ))
+        .await
+        .unwrap();
+        // Drain the inline + executor frames.
+        let _planned = recv_text(&mut ws).await;
+        let _started = recv_text(&mut ws).await;
+        let _step = recv_text(&mut ws).await;
+        let _completed = recv_text(&mut ws).await;
+
+        // Now ask for the audit trail.
+        ws.send(Message::Text(r#"{"type":"audit_recent"}"#.into()))
+            .await
+            .unwrap();
+        let frame = recv_text(&mut ws).await;
+        assert!(frame.contains(r#""type":"audit_recent""#));
+        // The plan-without-approval chain must include at least:
+        // ipc_command_received, action_planned, action_started,
+        // action_completed.
+        for kind in [
+            "ipc_command_received",
+            "action_planned",
+            "action_started",
+            "action_completed",
+        ] {
+            assert!(
+                frame.contains(&format!(r#""kind":"{kind}""#)),
+                "audit frame missing {kind}: {frame}",
+            );
+        }
+        // No approval_requested / approval_resolved in this flow.
+        assert!(!frame.contains(r#""kind":"approval_requested""#));
+        assert!(!frame.contains(r#""kind":"approval_resolved""#));
+    }
+
+    #[tokio::test]
+    async fn audit_recent_records_plan_with_approval_approved_chain() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"plan_demo_action","title":"Gated","requires_approval":true}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let _planned = recv_text(&mut ws).await;
+        let requested = recv_text(&mut ws).await;
+        let approval_id = extract_approval_id(&requested);
+        let approve =
+            format!(r#"{{"type":"approval_approve","approval_id":"{approval_id}"}}"#);
+        ws.send(Message::Text(approve)).await.unwrap();
+        let _resolved = recv_text(&mut ws).await;
+        let _started = recv_text(&mut ws).await;
+        let _step = recv_text(&mut ws).await;
+        let _completed = recv_text(&mut ws).await;
+
+        ws.send(Message::Text(r#"{"type":"audit_recent"}"#.into()))
+            .await
+            .unwrap();
+        let frame = recv_text(&mut ws).await;
+        for kind in [
+            "ipc_command_received",
+            "action_planned",
+            "approval_requested",
+            "approval_resolved",
+            "action_started",
+            "action_completed",
+        ] {
+            assert!(
+                frame.contains(&format!(r#""kind":"{kind}""#)),
+                "audit frame missing {kind}: {frame}",
+            );
+        }
+        assert!(frame.contains(r#""result":"approved""#));
+        assert!(frame.contains(r#""result":"completed""#));
+        // No action_cancelled on the happy path.
+        assert!(!frame.contains(r#""kind":"action_cancelled""#));
+    }
+
+    #[tokio::test]
+    async fn audit_recent_records_denied_chain_without_completed() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"plan_demo_action","requires_approval":true}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let _planned = recv_text(&mut ws).await;
+        let requested = recv_text(&mut ws).await;
+        let approval_id = extract_approval_id(&requested);
+        let deny = format!(r#"{{"type":"approval_deny","approval_id":"{approval_id}"}}"#);
+        ws.send(Message::Text(deny)).await.unwrap();
+        let _resolved = recv_text(&mut ws).await;
+        let _cancelled = recv_text(&mut ws).await;
+
+        ws.send(Message::Text(r#"{"type":"audit_recent"}"#.into()))
+            .await
+            .unwrap();
+        let frame = recv_text(&mut ws).await;
+        assert!(frame.contains(r#""kind":"approval_resolved""#));
+        assert!(frame.contains(r#""result":"denied""#));
+        assert!(frame.contains(r#""kind":"action_cancelled""#));
+        assert!(!frame.contains(r#""kind":"action_started""#));
+        assert!(!frame.contains(r#""kind":"action_completed""#));
+    }
+
+    #[tokio::test]
+    async fn audit_recent_double_approve_does_not_double_completed() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"plan_demo_action","requires_approval":true}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let _planned = recv_text(&mut ws).await;
+        let requested = recv_text(&mut ws).await;
+        let approval_id = extract_approval_id(&requested);
+        let approve =
+            format!(r#"{{"type":"approval_approve","approval_id":"{approval_id}"}}"#);
+        ws.send(Message::Text(approve.clone())).await.unwrap();
+        let _resolved = recv_text(&mut ws).await;
+        let _started = recv_text(&mut ws).await;
+        let _step = recv_text(&mut ws).await;
+        let _completed = recv_text(&mut ws).await;
+        ws.send(Message::Text(approve)).await.unwrap();
+        let _error = recv_text(&mut ws).await;
+
+        ws.send(Message::Text(r#"{"type":"audit_recent"}"#.into()))
+            .await
+            .unwrap();
+        let frame = recv_text(&mut ws).await;
+        // Exactly one `action_completed` — double approve triggered
+        // an `ipc_command_rejected` audit entry, not a second
+        // completion.
+        let completed_count = frame.matches(r#""kind":"action_completed""#).count();
+        assert_eq!(completed_count, 1, "frame: {frame}");
+        assert!(frame.contains(r#""kind":"ipc_command_rejected""#));
+        assert!(frame.contains(r#""result":"rejected""#));
+    }
+
+    #[tokio::test]
+    async fn audit_recent_limit_bounds_response() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        // Generate a chain of at least ~4 audit events.
+        ws.send(Message::Text(
+            r#"{"type":"plan_demo_action","requires_approval":false}"#.into(),
+        ))
+        .await
+        .unwrap();
+        for _ in 0..4 {
+            let _ = recv_text(&mut ws).await;
+        }
+        ws.send(Message::Text(r#"{"type":"audit_recent","limit":2}"#.into()))
+            .await
+            .unwrap();
+        let frame = recv_text(&mut ws).await;
+        assert!(frame.contains(r#""type":"audit_recent""#));
+        let entries = frame.matches(r#""audit_id""#).count();
+        assert_eq!(entries, 2, "limited audit_recent should return two entries: {frame}");
+    }
+
+    #[tokio::test]
+    async fn audit_recent_unknown_approval_id_is_rejected_with_audit_trail() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"approval_approve","approval_id":"apr_ghost"}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let err = recv_text(&mut ws).await;
+        assert!(err.contains(r#""type":"error""#));
+
+        ws.send(Message::Text(r#"{"type":"audit_recent"}"#.into()))
+            .await
+            .unwrap();
+        let frame = recv_text(&mut ws).await;
+        assert!(frame.contains(r#""kind":"ipc_command_rejected""#));
+        assert!(frame.contains(r#""approval_id":"apr_ghost""#));
+        assert!(frame.contains(r#""result":"rejected""#));
     }
 
     #[tokio::test]

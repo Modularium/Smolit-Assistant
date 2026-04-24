@@ -71,6 +71,11 @@ pub struct App {
     approval_counter: AtomicU64,
     selection_counter: AtomicU64,
     pending_approvals: Arc<PendingApprovalRegistry>,
+    /// PR 19 — Local Audit Trail. Bounded in-memory ring buffer für
+    /// Lifecycle-Events der Approval-Gated Demo-Actions und ein paar
+    /// IPC-Grenzfälle. Keine Persistenz, keine vollständigen
+    /// User-Payloads. Details in `core/src/audit/mod.rs`.
+    audit: Arc<crate::audit::AuditStore>,
     /// Current Interaction target, if any. Held in-memory only —
     /// cleared on explicit `interaction_clear_target`. No persistence,
     /// no cross-session memory.
@@ -573,6 +578,7 @@ impl App {
             approval_counter: AtomicU64::new(0),
             selection_counter: AtomicU64::new(0),
             pending_approvals: Arc::new(PendingApprovalRegistry::new()),
+            audit: Arc::new(crate::audit::AuditStore::from_env()),
             selected_target: Mutex::new(None),
             events_tx,
             text_provider: RwLock::new(text_provider),
@@ -675,6 +681,13 @@ impl App {
     fn next_approval_id(&self) -> String {
         let n = self.approval_counter.fetch_add(1, Ordering::Relaxed) + 1;
         format!("apr_{n:06}")
+    }
+
+    /// PR 19 — schmaler Lesepfad auf den Audit-Store. IPC-Handler und
+    /// Tests nutzen diesen Accessor; Mutation (Aufnahme von Events)
+    /// läuft intern über die spezialisierten Lifecycle-Funktionen.
+    pub fn audit(&self) -> Arc<crate::audit::AuditStore> {
+        Arc::clone(&self.audit)
     }
 
     fn next_selection_id(&self) -> String {
@@ -1046,6 +1059,18 @@ impl App {
         );
         let mut out: Vec<OutgoingMessage> = Vec::new();
 
+        // PR 19 — Audit: der IPC-Command ist angekommen. Summary ist
+        // bereits vom Plan-Modell gekürzt; der Store kürzt ein
+        // zweites Mal defensiv.
+        self.audit.record(
+            crate::audit::AuditKind::IpcCommandReceived,
+            crate::audit::AuditFields::new()
+                .with_action_id(&plan.action_id)
+                .with_risk(&plan.risk)
+                .with_source(crate::audit::SOURCE_UI)
+                .with_summary(format!("plan_demo_action kind={}", plan.kind)),
+        );
+
         // `action_planned` trägt den demo-kuratierten Titel. `target`
         // ist `unknown`, weil die Aktion kein Ziel in der Welt hat.
         out.push(OutgoingMessage::ActionPlanned {
@@ -1058,6 +1083,14 @@ impl App {
                 mapping: None,
             },
         });
+        self.audit.record(
+            crate::audit::AuditKind::ActionPlanned,
+            crate::audit::AuditFields::new()
+                .with_action_id(&plan.action_id)
+                .with_risk(&plan.risk)
+                .with_source(crate::audit::SOURCE_CORE)
+                .with_summary(&plan.title),
+        );
 
         if requires_approval {
             let approval_id = self.next_approval_id();
@@ -1076,6 +1109,15 @@ impl App {
             };
             let rx = self.pending_approvals.register(&approval_id);
             out.push(OutgoingMessage::ApprovalRequested { payload: request });
+            self.audit.record(
+                crate::audit::AuditKind::ApprovalRequested,
+                crate::audit::AuditFields::new()
+                    .with_action_id(&plan.action_id)
+                    .with_approval_id(&approval_id)
+                    .with_risk(&plan.risk)
+                    .with_source(crate::audit::SOURCE_CORE)
+                    .with_summary(&plan.title),
+            );
 
             let app = Arc::clone(self);
             let plan_task = plan.clone();
@@ -1124,12 +1166,25 @@ impl App {
 
         self.broadcast(OutgoingMessage::ApprovalResolved {
             payload: ApprovalResolvedPayload {
-                approval_id,
+                approval_id: approval_id.clone(),
                 action_id: plan.action_id.clone(),
                 decision: decision.as_str().to_string(),
-                source,
+                source: source.clone(),
             },
         });
+        // PR 19 — Audit: die Resolution markiert das Ende der
+        // Approval-Klammer. `result` trägt die Decision, `source` die
+        // Herkunft.
+        self.audit.record(
+            crate::audit::AuditKind::ApprovalResolved,
+            crate::audit::AuditFields::new()
+                .with_action_id(&plan.action_id)
+                .with_approval_id(&approval_id)
+                .with_risk(&plan.risk)
+                .with_result(decision.as_str())
+                .with_source(&source)
+                .with_summary(&plan.title),
+        );
 
         match decision {
             ApprovalDecision::Approved => {
@@ -1140,33 +1195,53 @@ impl App {
                 plan.set_status(crate::actions::DemoPlanStatus::Denied);
                 self.broadcast(OutgoingMessage::ActionCancelled {
                     payload: crate::actions::ActionCancelledPayload {
-                        action_id: plan.action_id,
+                        action_id: plan.action_id.clone(),
                         status: crate::actions::ActionStatus::Cancelled,
                         message: Some("Action denied by user".to_string()),
                     },
                 });
+                self.record_plan_cancel_audit(&plan, crate::audit::RESULT_DENIED, &source);
             }
             ApprovalDecision::Cancelled => {
                 plan.set_status(crate::actions::DemoPlanStatus::Denied);
                 self.broadcast(OutgoingMessage::ActionCancelled {
                     payload: crate::actions::ActionCancelledPayload {
-                        action_id: plan.action_id,
+                        action_id: plan.action_id.clone(),
                         status: crate::actions::ActionStatus::Cancelled,
                         message: Some("Action cancelled".to_string()),
                     },
                 });
+                self.record_plan_cancel_audit(&plan, crate::audit::RESULT_CANCELLED, &source);
             }
             ApprovalDecision::TimedOut => {
                 plan.set_status(crate::actions::DemoPlanStatus::Expired);
                 self.broadcast(OutgoingMessage::ActionCancelled {
                     payload: crate::actions::ActionCancelledPayload {
-                        action_id: plan.action_id,
+                        action_id: plan.action_id.clone(),
                         status: crate::actions::ActionStatus::Cancelled,
                         message: Some("Approval expired".to_string()),
                     },
                 });
+                self.record_plan_cancel_audit(&plan, crate::audit::RESULT_EXPIRED, &source);
             }
         }
+    }
+
+    fn record_plan_cancel_audit(
+        &self,
+        plan: &crate::actions::DemoPlan,
+        result: &str,
+        source: &str,
+    ) {
+        self.audit.record(
+            crate::audit::AuditKind::ActionCancelled,
+            crate::audit::AuditFields::new()
+                .with_action_id(&plan.action_id)
+                .with_risk(&plan.risk)
+                .with_result(result)
+                .with_source(source)
+                .with_summary(&plan.title),
+        );
     }
 
     async fn execute_demo_plan(self: Arc<Self>, mut plan: crate::actions::DemoPlan) {
@@ -1174,7 +1249,7 @@ impl App {
             // Idempotenz: ein bereits abgeschlossener Plan darf nicht
             // ein zweites Mal laufen. Die Executor-Tasks sind zwar
             // schon einmalig gespawnt, aber diese Guard fängt
-            // zukünftige Re-Entry-Pfade ab.
+            // Re-Entry.
             return;
         }
         plan.set_status(crate::actions::DemoPlanStatus::Running);
@@ -1184,6 +1259,14 @@ impl App {
                 phase: crate::actions::ActionPhase::Started,
             },
         });
+        self.audit.record(
+            crate::audit::AuditKind::ActionStarted,
+            crate::audit::AuditFields::new()
+                .with_action_id(&plan.action_id)
+                .with_risk(&plan.risk)
+                .with_source(crate::audit::SOURCE_CORE)
+                .with_summary(&plan.title),
+        );
         self.broadcast(OutgoingMessage::ActionStep {
             payload: crate::actions::ActionStepPayload {
                 action_id: plan.action_id.clone(),
@@ -1200,11 +1283,20 @@ impl App {
         plan.set_status(crate::actions::DemoPlanStatus::Completed);
         self.broadcast(OutgoingMessage::ActionCompleted {
             payload: crate::actions::ActionCompletedPayload {
-                action_id: plan.action_id,
+                action_id: plan.action_id.clone(),
                 status: crate::actions::ActionStatus::Completed,
                 message: Some("Demo plan completed (no side effects)".to_string()),
             },
         });
+        self.audit.record(
+            crate::audit::AuditKind::ActionCompleted,
+            crate::audit::AuditFields::new()
+                .with_action_id(&plan.action_id)
+                .with_risk(&plan.risk)
+                .with_result(crate::audit::RESULT_COMPLETED)
+                .with_source(crate::audit::SOURCE_CORE)
+                .with_summary(&plan.title),
+        );
     }
 
     /// Entry point for IPC handlers. Plans the interaction, checks
