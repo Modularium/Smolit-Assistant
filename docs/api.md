@@ -1454,6 +1454,17 @@ mit dediziertem Secret-Pfad (PR 10), sicheres HTTPS/TLS für
 Probe-Roundtrip (PR 12) und seit PR 13 zusätzlich editierbare
 STT-/TTS-Provider-Fallback-Ketten.
 
+> **PR 36 (Settings Shell UX Cleanup) ändert am IPC-Vertrag
+> nichts.** Weder neue Commands noch neue `StatusPayload`-Felder
+> werden eingeführt; der Cleanup lebt ausschließlich im UI-Renderer
+> ([`SettingsSections`](../ui/scripts/settings/settings_sections.gd))
+> und fügt visuelle Gruppierung (Summary / Details / Safety notes)
+> plus eine Opt-in-Note im Text-Chain-Editor hinzu. Der Smoke-Guard
+> `_check_no_new_ipc_command_helpers_in_controller` hält diese
+> Invariante live. Details:
+> [`docs/provider_fallback_and_settings_architecture.md`](./provider_fallback_and_settings_architecture.md)
+> §13.
+
 **Eingang:** `settings_set_llamafile_config`.
 
 ```json

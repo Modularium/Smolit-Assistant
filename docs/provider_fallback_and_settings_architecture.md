@@ -1408,3 +1408,114 @@ halten die Erklärtexte an einem Ort:
 - Keine Änderung am Core-Policy-v0-Verhalten (PR 25).
 - Kein Smolitux-Design-Token-Mapping in diesem PR (siehe ADR-0001,
   PR 24).
+
+---
+
+## 13. Settings-Shell UX Cleanup (PR 36, Ist-Zustand)
+
+PR 36 ist die Settings-Shell-Konsolidierung nach der Provider-
+Expansions-Serie (PR 26 Onboarding, PR 27 whisper_cpp, PR 34 piper).
+**Ziel:** Die Shell bleibt lesbar, ohne die Runtime-Capability
+auszudehnen. Keine neuen Provider, keine neuen IPC-Commands, kein
+neues Secret-Modell.
+
+### 13.1 Sichtbare Struktur pro Provider-Achse
+
+Text / STT / TTS folgen seit PR 36 derselben dreiteiligen
+Lesereihenfolge in jeder Section:
+
+1. **Summary** (neu, via [`SettingsSections._axis_summary_lines`](../ui/scripts/settings/settings_sections.gd)):
+   - `Primary (intended)` — erster Eintrag der Chain
+     (`*_provider_chain[0]`), Fallback auf `*_provider_configured`.
+   - `Active (running)` — `*_provider_active` (was der Core aktuell
+     betreibt — kann sich bei Fallback unterscheiden).
+   - `Availability` — `*_provider_availability` (`available`,
+     `unavailable`, `fallback_active`, …).
+   - `Local / Cloud` — reflektiert `*_provider_cloud` als
+     `local` / `cloud`.
+2. **Details** (bestehende Zeilen, mit `— Details —`-Header
+   gruppiert): Configured / Active / Chain / Last error / Cloud plus
+   die dreistufigen Per-Kind-Blöcke (`llamafile_local`, `local_http`,
+   `whisper_cpp`, `piper`).
+3. **Editoren** (unverändert): Chain-Editor, Per-Kind-Editoren
+   (Llamafile, local_http, cloud_http auf der Text-Achse;
+   STT/TTS-Command-Editor).
+
+### 13.2 Begriffsbereinigung
+
+| Begriff                 | Bedeutung seit PR 36                                                                                                  |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `Primary (intended)`    | Erstes Kind der Chain — was der Nutzer als Default *will*.                                                            |
+| `Active (running)`      | Was der Core *aktuell* bedient (Fallback kann Primary ≠ Active erzwingen).                                            |
+| `Availability`          | Letzter Resolver-Zustand pro Achse (dem entspricht `*_provider_availability` im Status).                               |
+| `Configured` *(Detail)* | Feld `*_provider_configured` — welcher Kind-Name im Config-Store oder Default steht.                                   |
+| `In chain`              | Kind ist Teil der aktiven Fallback-Reihenfolge (`llamafile_in_chain`, `local_http_in_chain`, `stt_whisper_cpp_in_chain`, `tts_piper_in_chain`). |
+| `Cloud`                 | Nur für `cloud_http`. Summary-Zeile zeigt `local` / `cloud`; Details behalten die bestehende `Cloud: yes/no`-Zeile.    |
+| `Secret present`        | Bool aus `cloud_http_secret_present`. Wird *nie* als Key-Wert angezeigt.                                               |
+| `Env-only`              | `whisper_cpp` (`SMOLIT_STT_WHISPER_CPP_CMD`) und `piper` (`SMOLIT_TTS_PIPER_CMD`) — nur via Env, kein Runtime-Editor. |
+
+### 13.3 Safety-Notes-Block (Privacy-Section)
+
+Die Privacy-Section trägt seit PR 36 einen expliziten
+`— Safety notes —`-Block mit vier konstanten Zeilen (Quelle:
+[`SettingsSections.safety_notes_lines`](../ui/scripts/settings/settings_sections.gd)):
+
+| Zeile            | Inhalt                                                                                                                           |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `Opt-in cloud`   | `cloud_http` aktiviert sich nicht von selbst — Opt-in über den cloud_http-Editor, kein Default in der Chain.                     |
+| `Secrets`        | API-Keys werden nie im UI angezeigt; Secret-Store unter `user://secrets.json` mit 0600-Permissions.                              |
+| `Env-only`       | Env-only Kommandos: `SMOLIT_STT_WHISPER_CPP_CMD` (PR 27) und `SMOLIT_TTS_PIPER_CMD` (PR 34) — nicht im UI editierbar, nicht persistiert. |
+| `Probes`         | Probes melden Konfigurations-Zustand, triggern keine realen Requests.                                                            |
+
+Der alte Hinweis „kein Editor in dieser Shell (PR 5)" ist entfernt;
+die dortige Aussage war seit PR 10 (cloud_http-Secret-Editor) nicht
+mehr präzise.
+
+### 13.4 Chain-Editor cloud_http-Opt-in-Hinweis
+
+Der Text-Chain-Editor listet bewusst nur die drei lokalen Kinds
+(`abrain`, `llamafile_local`, `local_http`). PR 36 ergänzt dort
+eine explizite Note direkt unter dem Editor-Titel:
+
+> *cloud_http wird hier bewusst nicht aufgelistet — Opt-in über den
+> cloud_http-Editor weiter unten; automatisches Hinzufügen zur Chain
+> ist blockiert.*
+
+Die Note ist reine UI-Transparenz; das Verhalten (kein cloud_http im
+Chain-Editor, `Add cloud_http to chain` per Design disabled, siehe
+§12.2) ist unverändert.
+
+### 13.5 Was PR 36 ausdrücklich *nicht* tut
+
+- **Keine neuen Provider, keine neuen Kinds.** Whitelists bleiben
+  `text=[abrain, llamafile_local, local_http, cloud_http]`,
+  `stt=[command, whisper_cpp]`, `tts=[command, piper]`.
+- **Keine neuen IPC-Commands, keine neuen `StatusPayload`-Felder.**
+  Smoke-Lock `_check_no_new_ipc_command_helpers_in_controller` hält
+  das live.
+- **Keine Core-Änderung.** Keine Policy-v0-Anpassung, kein Probe-
+  Semantik-Wechsel, kein Secret-Modell-Umbau.
+- **Keine Default-Änderung.** Text-Default bleibt `["abrain"]`,
+  STT/TTS-Default bleiben `["command"]`. Smoke-Lock
+  `_check_chain_reset_defaults_documented`.
+- **Keine Token-Implementation** (ADR-0001 / PR 24; Smolitux Token
+  Contract v0 aus PR 35 bleibt Docs/Schema-only).
+- **Keine neue Scene-/Autoload-Architektur.** Änderung lebt in
+  [`settings_sections.gd`](../ui/scripts/settings/settings_sections.gd)
+  plus einer kleinen Note im Text-Chain-Editor
+  ([`settings_panel_controller.gd`](../ui/scripts/settings/settings_panel_controller.gd)).
+
+### 13.6 Tests / Smokes
+
+- `scripts/settings_shell_smoke.gd` erhält 16 neue PR-36-Cases:
+  Placeholder-Wording-Checks, Summary-Header-Reihenfolge, Primary
+  ≠ Active im Fallback-Fall, Local/Cloud-Marker-Mapping, Safety-
+  Notes-Block-Rendering (mit expliziten Konstanten-Lookups für
+  Env-only / Secrets / Opt-in cloud), Chain-Editoren-Regression
+  (STT: command+whisper_cpp; TTS: command+piper), cloud_http-Opt-in-
+  Note im Text-Chain-Editor, Default-Tooltip-Dokumentation und ein
+  Guard gegen neu eingeschleuste IPC-Write-Helfer.
+- `cargo test` und `scripts/run_overlay_verification.sh` bleiben
+  unverändert grün (UI-only PR).
+- Keine echten Netzwerkrequests, keine echten STT/TTS-Binaries — der
+  Smoke bleibt headless.

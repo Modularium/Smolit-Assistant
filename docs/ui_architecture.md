@@ -2430,6 +2430,17 @@ Einstieg in ein späteres Settings-Menü. Dieser PR liefert bewusst nur
 die **Shell** — Struktur, Navigation und read-only Readout. Keine
 Schreib-Aktionen, keine Secrets-Eingabe, kein Cloud-Pfad.
 
+> **Seit PR 36 (UX Cleanup):** Die drei Provider-Sections (Text /
+> STT / TTS) folgen derselben dreiteiligen Lesereihenfolge **Summary
+> · Details · Editoren**. Die Privacy-Section trägt einen expliziten
+> `— Safety notes —`-Block mit konstanten Zeilen (Opt-in cloud,
+> Secrets nie angezeigt, env-only Kommandos, Probes side-effect-frei).
+> Der Text-Chain-Editor hat eine zusätzliche Note, die cloud_http als
+> Opt-in ausweist. Keine neuen IPC-Commands, keine neuen Provider —
+> die Shell bleibt Shell. Details:
+> [`docs/provider_fallback_and_settings_architecture.md`](./provider_fallback_and_settings_architecture.md)
+> §13.
+
 Crosslinks:
 [`docs/provider_fallback_and_settings_architecture.md`](./provider_fallback_and_settings_architecture.md)
 §6 (Settings-Scope), §9 (PR-Reihenfolge); `docs/api.md` §2.3

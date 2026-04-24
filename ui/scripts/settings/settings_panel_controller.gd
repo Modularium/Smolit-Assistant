@@ -1698,6 +1698,19 @@ func _build_text_chain_editor_block() -> Control:
 	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	box.add_child(note)
 
+	# PR 36 — expliziter cloud_http-Hinweis direkt am Chain-Editor.
+	# Der Chain-Editor listet bewusst nur die drei lokalen Kinds
+	# (`abrain`, `llamafile_local`, `local_http`); `cloud_http` hat
+	# seinen eigenen Editor weiter unten und wird **nicht** automatisch
+	# in die Chain hinzugefügt (PR 26 „no auto-cloud activation").
+	var cloud_note := Label.new()
+	cloud_note.name = "TextChainCloudNote"
+	cloud_note.text = "cloud_http wird hier bewusst nicht aufgelistet — Opt-in über den cloud_http-Editor weiter unten; automatisches Hinzufügen zur Chain ist blockiert."
+	cloud_note.modulate = Color(1, 1, 1, 0.45)
+	cloud_note.add_theme_font_size_override("font_size", 10)
+	cloud_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(cloud_note)
+
 	_text_chain_rows_vbox = VBoxContainer.new()
 	_text_chain_rows_vbox.add_theme_constant_override("separation", 2)
 	box.add_child(_text_chain_rows_vbox)

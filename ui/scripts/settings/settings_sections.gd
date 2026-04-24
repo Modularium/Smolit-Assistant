@@ -62,6 +62,12 @@ static func label_for(section: int) -> String:
 ## Kurzer, ehrlicher Shell-Hinweis unter dem Section-Titel. Der
 ## Hinweis benennt, was diese Shell **schon** sichtbar macht und was
 ## noch fehlt — keine versprochenen Editoren.
+##
+## PR 36 Rewording: Section-Hinweise spiegeln den aktuellen Stand
+## (Chain-Editoren existieren auf allen drei Provider-Achsen seit
+## PR 9/13; STT hat `command` + `whisper_cpp`, TTS hat `command` +
+## `piper`). Die Privacy-Section verweist auf den expliziten Safety-
+## Notes-Block weiter unten.
 static func placeholder_for(section: int) -> String:
 	match section:
 		SectionId.GENERAL:
@@ -69,13 +75,13 @@ static func placeholder_for(section: int) -> String:
 		SectionId.PRESENCE_UI:
 			return "Anzeige der aktuellen Presence-/UI-Stellgrößen (read-only)."
 		SectionId.TEXT_PROVIDER:
-			return "Read-only Blick auf die aktuelle Text-Provider-Kette. Keine Pfad-/Secret-/Start-Eingabe in dieser Shell."
+			return "Summary · Chain · Per-Kind-Details. Der Chain-Editor unten setzt die Reihenfolge (abrain, llamafile_local, local_http); cloud_http hat einen eigenen Editor und bleibt Opt-in."
 		SectionId.STT:
-			return "Status des STT-Kommandos. Provider-Auswahl kommt in einem Folge-PR."
+			return "Summary · Chain · Per-Kind-Details. Chain-Editor bietet command und whisper_cpp (env-only Kommando seit PR 27)."
 		SectionId.TTS:
-			return "Status des TTS-Kommandos und Auto-Speak. Provider-Auswahl kommt in einem Folge-PR."
+			return "Summary · Chain · Per-Kind-Details. Chain-Editor bietet command und piper (env-only Kommando seit PR 34). Auto-Speak siehe Details."
 		SectionId.PRIVACY:
-			return "Cloud-Kennzeichnung ist sichtbar. Einwilligungs-Flow und Offline-Only-Schalter folgen (kein Cloud-Pfad heute)."
+			return "Cloud-Kennzeichnung pro Achse plus expliziter Safety-Notes-Block (Opt-in, Secrets, env-only Kommandos)."
 		SectionId.CONNECTION:
 			return "Read-only Diagnose: IPC, Interaction-Backend, Accessibility-Probe."
 		_:
@@ -112,6 +118,90 @@ static func _row(label: String, value: String, muted: bool = false) -> Dictionar
 		"value": value,
 		"muted": muted,
 	}
+
+
+## PR 36 — Subsection-Header innerhalb einer Section. Wird vom Renderer
+## gleich behandelt wie ein gewöhnlicher Row — Label-Spalte trägt den
+## Header-Text, Wert-Spalte bleibt leer, `muted=true`. Kein eigenes
+## Rendering-Primitiv, damit der bestehende `_build_row`-Pfad im
+## Controller nichts Neues lernen muss.
+static func _header_row(text: String) -> Dictionary:
+	return {
+		"label": "— " + text + " —",
+		"value": "",
+		"muted": true,
+	}
+
+
+## PR 36 — Label-Vokabular (konstant). Der Smoke-Test matcht gegen
+## diese Strings, damit Label-Drift sichtbar wird, ohne dass der Test
+## Bytes einer verschachtelten Satzzeile zitieren muss.
+const HEADER_SUMMARY: String = "— Summary —"
+const HEADER_DETAILS: String = "— Details —"
+const HEADER_SAFETY: String = "— Safety notes —"
+const LABEL_PRIMARY: String = "Primary (intended)"
+const LABEL_ACTIVE: String = "Active (running)"
+const LABEL_AVAILABILITY: String = "Availability"
+const LABEL_LOCAL_CLOUD: String = "Local / Cloud"
+
+## PR 36 — Standardisierte Safety-Notes-Zeilen. Werden aus der Privacy-
+## Section angezogen und konservieren über die Achsen hinweg denselben
+## Wortlaut (kein Drift zwischen „secret"/„api key"/„cloud token").
+const SAFETY_CLOUD_OPT_IN: String = "cloud_http aktiviert sich nicht von selbst — Opt-in über den cloud_http-Editor, kein Default in der Chain."
+const SAFETY_SECRETS_NEVER_DISPLAYED: String = "API-Keys werden nie im UI angezeigt; der Secret-Store liegt unter user://secrets.json mit 0600-Permissions."
+const SAFETY_ENV_ONLY_COMMANDS: String = "Env-only Kommandos: SMOLIT_STT_WHISPER_CPP_CMD (PR 27) und SMOLIT_TTS_PIPER_CMD (PR 34) — werden nicht im UI editierbar und nicht in Settings persistiert."
+const SAFETY_PROBES_SIDE_EFFECT_FREE: String = "Probes melden Konfigurations-Zustand, triggern keine realen Requests — siehe Per-Kind-Editoren."
+
+
+## PR 36 — Generischer Axis-Summary-Builder. Liest ausschließlich
+## vorhandene StatusPayload-Felder (siehe `docs/api.md` §2.3) und gibt
+## die vier Summary-Zeilen zurück: Primary, Active, Availability,
+## Local / Cloud.
+##
+## `prefix` ist `"text_provider"`, `"stt_provider"` oder
+## `"tts_provider"`. Defensiv: fehlende Felder → Dash, `muted=true`.
+##
+## „Primary" = intended first choice = Kette[0], mit Fallback auf
+## `*_configured`. „Active" = was der Core **jetzt** treibt — kann
+## sich vom Primary unterscheiden, wenn ein Fallback gegriffen hat.
+static func _axis_summary_lines(status: Dictionary, prefix: String) -> Array:
+	var lines: Array = []
+	var chain_raw: Variant = status.get(prefix + "_chain", null)
+	var primary := ""
+	if typeof(chain_raw) == TYPE_ARRAY and (chain_raw as Array).size() > 0:
+		primary = String((chain_raw as Array)[0])
+	if primary == "":
+		primary = String(status.get(prefix + "_configured", ""))
+	lines.append(_row(LABEL_PRIMARY,
+		primary if primary != "" else _DASH,
+		primary == "",
+	))
+	var active_field := prefix + "_active"
+	lines.append(_row(LABEL_ACTIVE,
+		_stringify_or_dash(status, active_field)))
+	lines.append(_row(LABEL_AVAILABILITY,
+		_stringify_or_dash(status, prefix + "_availability")))
+	var cloud_key := prefix + "_cloud"
+	var cloud := _bool_or_default(status, cloud_key, false)
+	lines.append(_row(LABEL_LOCAL_CLOUD,
+		"cloud" if cloud else "local",
+		not status.has(cloud_key),
+	))
+	return lines
+
+
+## PR 36 — Safety-Notes-Block. Vier konstante, achsen-übergreifende
+## Zeilen, die in der Privacy-Section gerendert werden. Kein
+## Status-Feld fließt ein: das sind Haltungen des UI-Vertrags, nicht
+## dynamische Werte.
+static func safety_notes_lines() -> Array:
+	return [
+		_header_row("Safety notes"),
+		_row("Opt-in cloud", SAFETY_CLOUD_OPT_IN),
+		_row("Secrets", SAFETY_SECRETS_NEVER_DISPLAYED),
+		_row("Env-only", SAFETY_ENV_ONLY_COMMANDS),
+		_row("Probes", SAFETY_PROBES_SIDE_EFFECT_FREE),
+	]
 
 
 ## General: heute nur App-Name und ein ehrliches Shell-Marker-Feld.
@@ -156,8 +246,16 @@ static func presence_ui_lines(extras: Dictionary) -> Array:
 ## gerendert, ohne den Abschnitt zu bricken. Ältere Cores, die die
 ## PR-4-Felder noch nicht kennen, bleiben also lesbar — die neuen
 ## Zeilen kommen dann schlicht mit Dash-Werten.
+##
+## PR 36 Layout: Summary (Primary/Active/Availability/Local-Cloud)
+## zuerst, dann `— Details —` mit Chain + Per-Kind-Zeilen. Die Details
+## decken dieselben Felder ab, die vor PR 36 inline waren — nur
+## neu sortiert.
 static func text_provider_lines(status: Dictionary) -> Array:
 	var lines: Array = []
+	lines.append(_header_row("Summary"))
+	lines.append_array(_axis_summary_lines(status, "text_provider"))
+	lines.append(_header_row("Details"))
 	lines.append(_row("Configured",
 		_stringify_or_dash(status, "text_provider_configured")))
 	lines.append(_row("Active",
@@ -251,8 +349,17 @@ static func text_provider_lines(status: Dictionary) -> Array:
 ## stillschweigend auf dem Legacy-Minimalpfad. Seit PR 27
 ## zusätzlich eine dreistufige whisper_cpp-Sichtbarkeit (analog zu
 ## llamafile_local / local_http in der Text-Achse).
+##
+## PR 36 Layout: Summary zuerst, dann `— Details —` mit den
+## bestehenden enabled/available/provider-Detail-Zeilen. Fällt der
+## Core unter das PR-6-Vokabular (alte Builds), bleibt der Legacy-
+## Minimalpfad unter „Details" sichtbar; der Summary-Block zeigt dann
+## `—`-Werte.
 static func stt_lines(status: Dictionary) -> Array:
 	var lines: Array = []
+	lines.append(_header_row("Summary"))
+	lines.append_array(_axis_summary_lines(status, "stt_provider"))
+	lines.append(_header_row("Details"))
 	lines.append(_row("Enabled", _bool_label(status, "stt_enabled"),
 		not status.has("stt_enabled")))
 	lines.append(_row("Available", _bool_label(status, "stt_available"),
@@ -300,8 +407,16 @@ static func stt_lines(status: Dictionary) -> Array:
 
 ## TTS: Legacy-Feature-Flags (enabled/available/auto_speak) **plus**
 ## die neuen `tts_provider_*`-Felder aus PR 6.
+##
+## PR 36 Layout: Summary zuerst, dann `— Details —` mit enabled /
+## available / auto_speak und den Provider-Detail-Zeilen. Auto-Speak
+## bleibt eine Detail-Zeile — sie ist zwar UX-nah, ist aber nicht
+## Teil der Primary/Active/Availability-Verkürzung.
 static func tts_lines(status: Dictionary) -> Array:
 	var lines: Array = []
+	lines.append(_header_row("Summary"))
+	lines.append_array(_axis_summary_lines(status, "tts_provider"))
+	lines.append(_header_row("Details"))
 	lines.append(_row("Enabled", _bool_label(status, "tts_enabled"),
 		not status.has("tts_enabled")))
 	lines.append(_row("Available", _bool_label(status, "tts_available"),
@@ -432,8 +547,10 @@ static func privacy_lines(status: Dictionary) -> Array:
 			_DASH + " (heute nicht modelliert)", true))
 	lines.append(_row("Offline-Only",
 		"nicht konfiguriert (kommt in Folge-PR)", true))
-	lines.append(_row("Secrets",
-		"kein Editor in dieser Shell (PR 5)", true))
+	# PR 36 — Safety-Notes-Block. Vier konstante Zeilen, die den
+	# UI-Vertrag dokumentieren (Opt-in cloud_http, Secrets nie
+	# angezeigt, env-only Kommandos, Probe-Side-Effect-Freiheit).
+	lines.append_array(safety_notes_lines())
 	return lines
 
 
