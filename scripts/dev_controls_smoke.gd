@@ -1,15 +1,17 @@
 extends SceneTree
 ## Dev-Controls-Smoketest.
 ##
-## Verifiziert die beiden Dev-Hooks der kleinen MVP-Steuerung aus
+## Verifiziert die Dev-Hooks der kleinen MVP-Steuerung aus
 ## `ui/scripts/dev_controls/` *ohne* die UI-Szene zu laden:
 ##
-##   * `workflow_overlay_controller.preview_phase(name)` akzeptiert
-##     die sechs erwarteten Phase-Namen und ignoriert unbekannte
-##     Eingaben sauber (Fallback zu HIDDEN).
 ##   * `avatar_appearance.make_appearance(…)` produziert für alle
 ##     Theme/Profile/Intensity-Kombinationen, die das Dev-Panel
 ##     bietet, ein konsistentes Appearance-Dict.
+##
+## **PR 33** hat den Workflow-Overlay-Preview-Hook zusammen mit dem
+## alten Drei-Knoten-Overlay entfernt; die frühere
+## `_check_phase_names`-Case wandert mit diesem PR aus dem Smoke
+## (der Phase-State-Enum existiert nicht mehr).
 ##
 ## Der Controller selbst braucht einen Scene-Tree (er greift auf
 ## @onready NodePaths zu) und wird daher hier NICHT instanziiert —
@@ -22,13 +24,11 @@ extends SceneTree
 ##   scripts/run_overlay_verification.sh dev-controls-smoke
 
 const _AppearanceRef := preload("res://scripts/avatar/avatar_appearance.gd")
-const _WorkflowStateRef := preload("res://scripts/workflow_overlay/workflow_overlay_state.gd")
 
 var _fail: int = 0
 
 
 func _init() -> void:
-	_check_phase_names()
 	_check_theme_profile_coverage()
 	_check_make_appearance_matrix()
 	_check_identity_preserved()
@@ -51,24 +51,6 @@ func _assert(condition: bool, message: String) -> void:
 
 
 # --- Cases ---------------------------------------------------------------
-
-
-func _check_phase_names() -> void:
-	# Jeder Preview-Name, den das Dev-Panel anbietet, muss als gültige
-	# Ziel-Phase im State-Modul existieren (oder ausdrücklich
-	# "hidden" sein, das dort auch bekannt ist).
-	var allowed_phases := {
-		"hidden": _WorkflowStateRef.Phase.HIDDEN,
-		"planned": _WorkflowStateRef.Phase.PLANNED,
-		"active": _WorkflowStateRef.Phase.ACTIVE,
-		"completed": _WorkflowStateRef.Phase.COMPLETED,
-		"failed": _WorkflowStateRef.Phase.FAILED,
-		"cancelled": _WorkflowStateRef.Phase.UNKNOWN,  # kein eigener Enum, wird als UNKNOWN gerendert
-	}
-	var panel_phases := ["hidden", "planned", "active", "completed", "failed", "cancelled"]
-	for name in panel_phases:
-		_assert(allowed_phases.has(name),
-			"phase name '%s' is known to the state module" % name)
 
 
 func _check_theme_profile_coverage() -> void:

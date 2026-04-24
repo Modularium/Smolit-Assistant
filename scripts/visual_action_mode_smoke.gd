@@ -153,15 +153,18 @@ func _check_all_modes_order() -> void:
 
 
 func _check_staging_none() -> void:
+	# PR 33: `workflow_overlay_*`-Keys wurden mit dem alten
+	# Drei-Knoten-Overlay entfernt; die Staging-Tabelle trägt heute
+	# nur noch banner_visible + banner_alpha.
 	var s: Dictionary = _ModeRef.staging_for(_ModeRef.Mode.NONE)
 	_assert(bool(s.get("banner_visible", true)) == false,
 		"staging NONE: banner_visible=false")
 	_assert(float(s.get("banner_alpha", 1.0)) == 0.0,
 		"staging NONE: banner_alpha=0.0")
-	_assert(bool(s.get("workflow_overlay_allowed", true)) == false,
-		"staging NONE: workflow_overlay_allowed=false")
-	_assert(float(s.get("workflow_overlay_alpha", 1.0)) == 0.0,
-		"staging NONE: workflow_overlay_alpha=0.0")
+	_assert(not s.has("workflow_overlay_allowed"),
+		"staging NONE: workflow_overlay_allowed entfernt (PR 33)")
+	_assert(not s.has("workflow_overlay_alpha"),
+		"staging NONE: workflow_overlay_alpha entfernt (PR 33)")
 
 
 func _check_staging_minimal() -> void:
@@ -171,19 +174,15 @@ func _check_staging_minimal() -> void:
 	_assert(float(s.get("banner_alpha", 0.0)) > 0.0
 		and float(s.get("banner_alpha", 0.0)) < 1.0,
 		"staging MINIMAL: banner_alpha is in (0, 1) — dezent")
-	_assert(bool(s.get("workflow_overlay_allowed", true)) == false,
-		"staging MINIMAL: workflow_overlay_allowed=false (ruhig, nur Banner)")
 
 
 func _check_staging_guided() -> void:
 	var s: Dictionary = _ModeRef.staging_for(_ModeRef.Mode.GUIDED_MOVEMENT)
 	_assert(bool(s.get("banner_visible", false)) == true,
 		"staging GUIDED: banner_visible=true")
-	_assert(bool(s.get("workflow_overlay_allowed", false)) == true,
-		"staging GUIDED: workflow_overlay_allowed=true")
-	_assert(float(s.get("workflow_overlay_alpha", 0.0)) > 0.0
-		and float(s.get("workflow_overlay_alpha", 0.0)) <= 1.0,
-		"staging GUIDED: workflow_overlay_alpha in (0, 1]")
+	_assert(float(s.get("banner_alpha", 0.0)) > 0.0
+		and float(s.get("banner_alpha", 0.0)) <= 1.0,
+		"staging GUIDED: banner_alpha in (0, 1]")
 
 
 func _check_staging_full() -> void:
@@ -192,10 +191,6 @@ func _check_staging_full() -> void:
 		"staging FULL: banner_visible=true")
 	_assert(float(s.get("banner_alpha", 0.0)) == 1.0,
 		"staging FULL: banner_alpha=1.0 (volle Intensität)")
-	_assert(bool(s.get("workflow_overlay_allowed", false)) == true,
-		"staging FULL: workflow_overlay_allowed=true")
-	_assert(float(s.get("workflow_overlay_alpha", 0.0)) == 1.0,
-		"staging FULL: workflow_overlay_alpha=1.0")
 
 
 func _check_staging_monotonicity() -> void:
@@ -213,21 +208,6 @@ func _check_staging_monotonicity() -> void:
 			break
 	_assert(monotonic,
 		"staging: banner_alpha grows monotonically from NONE to FULL")
-
-	# Overlay-Alpha darf ebenfalls nur monoton steigen.
-	var overlay_alphas: Array = [
-		float(_ModeRef.staging_for(_ModeRef.Mode.NONE)["workflow_overlay_alpha"]),
-		float(_ModeRef.staging_for(_ModeRef.Mode.MINIMAL_FEEDBACK)["workflow_overlay_alpha"]),
-		float(_ModeRef.staging_for(_ModeRef.Mode.GUIDED_MOVEMENT)["workflow_overlay_alpha"]),
-		float(_ModeRef.staging_for(_ModeRef.Mode.FULL_THEATRICAL)["workflow_overlay_alpha"]),
-	]
-	var overlay_monotonic: bool = true
-	for i in range(overlay_alphas.size() - 1):
-		if overlay_alphas[i] > overlay_alphas[i + 1]:
-			overlay_monotonic = false
-			break
-	_assert(overlay_monotonic,
-		"staging: workflow_overlay_alpha grows monotonically from NONE to FULL")
 
 
 # --- Preferences ---------------------------------------------------------

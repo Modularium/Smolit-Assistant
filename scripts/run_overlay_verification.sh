@@ -34,11 +34,9 @@
 #                   Prüft neun synthetische Session/Driver/Desktop-
 #                   Kombinationen gegen die erwartete backend_id.
 #                   Exit 0 = alle PASS.
-#   workflow-state-smoke
-#                 — Führt scripts/workflow_overlay_state_smoke.gd aus.
-#                   Unit-ähnliche Assertions für Skeleton,
-#                   Label-Auflösung, Phase→DisplayMode, Step-Hint.
-#                   Exit 0 = alle PASS.
+#   (PR 33: `workflow-state-smoke` wurde mit dem alten Drei-Knoten-
+#    Workflow-Overlay entfernt. Für die neue Workflow-UI bleibt
+#    `workflow-visibility-smoke` als einziger Workflow-Smoke.)
 #   avatar-appearance-smoke
 #                 — Führt scripts/avatar_appearance_smoke.gd aus.
 #                   Prüft Themes / Profiles / Overrides / Clamping
@@ -304,12 +302,6 @@ case "${CASE}" in
     # Classification-Smoketest gegen den Resolver.
     exec godot --headless --path "${UI_DIR}" \
       --script "${REPO_ROOT}/scripts/resolver_classification_smoke.gd"
-    ;;
-  workflow-state-smoke)
-    # Spezialfall: pure Logiktests des Workflow-Overlay-State-Moduls.
-    # Kein Scene-Tree, kein Fenster — reine Assertions.
-    exec godot --headless --path "${UI_DIR}" \
-      --script "${REPO_ROOT}/scripts/workflow_overlay_state_smoke.gd"
     ;;
   avatar-appearance-smoke)
     # Spezialfall: pure Logiktests des Avatar-Appearance-Moduls
