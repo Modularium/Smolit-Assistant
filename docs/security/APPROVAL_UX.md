@@ -115,6 +115,103 @@ UI-Smoke (`scripts/approval_card_smoke.gd`, Harness-Case
   `APPROVAL` rendert Approval-Requests als zusätzliche Karte in
   der linearen Workflow-Kette. Kein eigenes Historien-System.
 
+## Approval-Gated Execution (PR 18)
+
+PR 18 erweitert die Linie um einen **Approval-Gated Demo-Action-
+Planner**. Ein kleiner, harmloser Mock-Pfad (`plan_demo_action`)
+zeigt, wie eine geplante Aktion erst nach expliziter Zustimmung
+ausgeführt werden darf. PR 18 führt ausdrücklich **keine** realen
+System-, Shell-, Desktop- oder Provider-Mutationen ein — der
+Executor ist ein Mock, der genau die Action-Event-Klammer durchläuft
+und nichts sonst tut.
+
+### Lebenszyklus
+
+```text
+plan_demo_action
+ ├── action_planned                                   (immer)
+ ├── approval_requested            (nur bei requires_approval=true)
+ │    └── ↳ wartet auf approval_approve | approval_deny | timeout
+ ├── approval_resolved             (nur bei requires_approval=true)
+ ├── on approved  → action_started → action_step → action_completed
+ ├── on denied    → action_cancelled("Action denied by user")
+ ├── on cancelled → action_cancelled("Action cancelled")
+ └── on expired   → action_cancelled("Approval expired")
+```
+
+Ohne `requires_approval` fällt die Approval-Klammer weg und der Mock
+läuft direkt — aber weiterhin nur als Event-Abfolge, ohne
+Seiteneffekt.
+
+### Invarianten
+
+- **Deny by default.** Bis `approved` eintrifft, läuft der Executor
+  nicht. `denied` / `cancelled` / `timed_out` verhindern die Mock-
+  Ausführung hart und emittieren stattdessen ein sprechendes
+  `action_cancelled`.
+- **Idempotente Resolution.** Die `PendingApprovalRegistry` aus
+  PR 17 gilt unverändert: ein zweiter `approval_approve`/
+  `approval_deny` für dieselbe `approval_id` landet als
+  `error`-Frame, nie als zweite Mock-Ausführung. Kein Action-Event
+  wird doppelt emittiert.
+- **No hidden execution.** Der Core führt außer der Event-Abfolge
+  nichts aus. Der Demo-Executor sleept bei `demo_wait` 100 ms
+  *intern*, damit das `action_step`-Frame als eigener Moment auf
+  der Leitung landet — kein externes Kommando, keine Datei-Aktion.
+- **Sanitisierte Felder.** Titel ≤ 80 Zeichen, Summary ≤ 140
+  Zeichen (Kürzung mit Ellipsis). Unbekannte `kind`-Werte werden
+  auf `noop` geklemmt (die sicherste Default-Aktion: macht nichts).
+  Unbekannte `risk`-Werte fallen auf `medium`.
+- **Kein Persistenz-/Historien-System.** Ein Plan lebt nur so lange,
+  bis sein Mock abgeschlossen, verweigert oder abgebrochen ist.
+- **Kein Tool-Gating.** PR 18 zeigt das Muster; die Verdrahtung
+  zwischen `requires_approval` und einer realen Policy-Engine ist
+  ausdrücklich Folgearbeit.
+
+### UI-Integration
+
+- **Approval-Card (PR 17)** — rendert die Gating-Frage unverändert,
+  unabhängig davon, ob der Approval aus `request_approval_demo`
+  (leeres `action_id`) oder aus `plan_demo_action` (gesetztes
+  `action_id`) stammt.
+- **Workflow Visibility Overlay (PR 16)** — zeigt die vollständige
+  Kette: `ACTION` (aus `action_planned`) → `APPROVAL` (aus
+  `approval_requested`) → nach `approved`: `APPROVAL` done, `STEP`
+  active, `COMPLETED` terminal; nach `denied`/`cancelled`/`expired`:
+  `APPROVAL` failed/skipped, `ACTION` failed, Terminal.
+- **Avatar-Expression (PR 15)** — unverändert: `approval_requested`
+  zieht weich auf `curious`, `denied`/`cancelled`/`timed_out`/
+  `expired` auf `error_soft`. PR-14-Guards (kein Überschreiben von
+  ACTING/ERROR) bleiben bindend.
+
+### Verifikation (PR 18)
+
+Core-IPC-Tests (`cargo test`) decken die Kette ab:
+
+- `plan_demo_action_without_approval_runs_inline_mock` —
+  `planned → started → step → completed`, keine Folge-Frames.
+- `plan_demo_action_with_approval_blocks_until_approve` —
+  ohne Approve keine Action-Frames; nach Approve läuft der Mock.
+- `plan_demo_action_with_approval_denied_emits_cancelled_without_running`
+  — `denied` → `action_cancelled` ohne `action_started`/`completed`.
+- `plan_demo_action_with_approval_timeout_emits_cancelled` —
+  Watchdog emittiert `approval_resolved(timed_out, timeout)` plus
+  `action_cancelled("Approval expired")`.
+- `plan_demo_action_double_approve_does_not_double_execute` —
+  zweiter Approve = `error`, kein zweites `action_completed`.
+- `plan_demo_action_unknown_kind_falls_back_to_noop_label` —
+  unbekannte `kind`-Werte werden stillschweigend auf `noop`
+  geklemmt.
+
+UI-Smokes (`approval-card-smoke`, `workflow-visibility-smoke`):
+
+- Approval-Card rendert plan-getriggerte Approvals mit gesetztem
+  `action_id` identisch zum Demo-Pfad; Approve emittiert das
+  `approve_pressed`-Signal einmal; Resolve räumt den Slot auf.
+- Workflow-Visibility-Modell projiziert die vollständige
+  plan-gated Kette korrekt: approved → DONE, denied → APPROVAL
+  FAILED + ACTION FAILED + Terminal.
+
 ## Betrieb
 
 Der Demo-Pfad ist für Entwicklung/UX-Evaluation gedacht. In einer

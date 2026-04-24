@@ -1330,6 +1330,83 @@ resolvet nach Approve/Deny mit **keiner** weiteren Aktion. Kein
 - **Multi-Seat / Multi-Window.** Die UX nimmt weiterhin genau einen
   entscheidenden UI-Client an.
 
+### 8.4e Approval-Gated Action Planner v1 (PR 18, Ist-Zustand)
+
+Konsequenter Folgeschritt zu PR 17: eine geplante Aktion darf erst
+ausgeführt werden, wenn ihre Approval-Bedingung erfüllt ist. PR 18
+liefert ausdrücklich **nur** einen harmlosen Mock-Pfad — es ist
+keine echte Tool-, Shell-, Desktop- oder Provider-Verdrahtung.
+
+**Zusammenspiel Core ↔ UI.**
+
+- **Core** (`core/src/actions/plan.rs` + `App::plan_demo_action`)
+  erzeugt einen [`DemoPlan`](../../core/src/actions/plan.rs) mit
+  sanitisiertem Titel (≤ 80), Summary (≤ 140), Kind (`demo_echo` /
+  `demo_wait` / `noop`; unbekannt → `noop`) und Risk (`low` /
+  `medium` / `high`; unbekannt → `medium`). `action_planned` geht
+  immer raus; bei `requires_approval=true` folgt ein
+  `approval_requested`, der Executor blockiert bis zum
+  `approval_approve`/`approval_deny`/Timeout. Ein Mock-Executor
+  emittiert `action_started → action_step → action_completed`
+  **nur** bei `approved`; bei Deny/Cancel/Expire kommt
+  `action_cancelled` mit sprechender `message`. Kein Seiteneffekt.
+- **Approval-Card (§8.4d)** rendert plan-getriggerte
+  `approval_requested`-Frames unverändert. Unterschied zur
+  PR-17-Demo-Approval: `action_id` ist jetzt gesetzt (nicht leer).
+  Die Card bleibt action_id-agnostisch und räumt ihren Slot nach
+  `approval_resolved` auf.
+- **Workflow Visibility Overlay (§8.4c)** spiegelt die Gating-
+  Kette: `ACTION` (von `action_planned`) → `APPROVAL` (von
+  `approval_requested`) → nach `approved`: `APPROVAL` DONE + `STEP`
+  active + `COMPLETED` DONE; nach `denied`/`cancelled`: `APPROVAL`
+  FAILED + `ACTION` FAILED (durch nachfolgendes `action_cancelled`).
+  Bei `timed_out`: `APPROVAL` SKIPPED plus `ACTION` FAILED.
+- **Avatar-Expression (§8.4b)** reagiert weich wie bei jedem
+  Approval: `curious` bei Request, `error_soft` bei Deny/Cancel/
+  Timeout. PR-14-Guards gelten unverändert.
+
+**Neue Dev-Control-Zeile.** Bei `SMOLIT_UI_DEV_CONTROLS=1` erscheinen
+zwei Buttons neben der Approval-Demo-Zeile aus PR 17:
+
+- **Run (no approval)** — sendet `plan_demo_action` mit
+  `requires_approval=false`. Der Mock läuft inline durch
+  (`planned → started → step → completed`).
+- **Run (needs approval)** — sendet `plan_demo_action` mit
+  `requires_approval=true`. Die Approval-Card erscheint, der
+  Executor wartet.
+
+Beide Buttons verwenden feste, harmlose Default-Texte; kein
+Auto-Save, keine Persistenz. Fehlt der IPC-Client-Hook (älterer
+Build), bleiben die Zeilen stumm.
+
+**Bindende Grenzen.**
+
+- **Keine echten Aktionen.** Der Mock-Executor emittiert genau die
+  Event-Klammer. Kein Shell, kein Dateisystem, kein Desktop-
+  Automation-Call, keine Provider-Mutation, kein AdminBot.
+- **Keine neue Approval-Semantik.** Deny, Cancel, Timeout gehen
+  durch die bestehende [`PendingApprovalRegistry`](../../core/src/approvals/state.rs)
+  aus PR 17; Idempotenz ist dort enforced.
+- **Kein Persistenz-/Historien-Pfad.** Plans leben nur bis zu
+  ihrem Terminal-Event.
+- **Keine Policy-Engine.** Der Caller entscheidet per
+  `requires_approval`-Flag; der Core interpretiert das nicht
+  intelligent. Ein echtes Tool-Gating bleibt Folgearbeit.
+- **Keine neuen Action-Typen.** PR 18 nutzt `ActionKind::System`
+  für alle Demo-Plans — keine neue Protokoll-Kategorie.
+
+**Offene Restschuld (nicht Teil von PR 18).**
+
+- **Tool-Gating-Verdrahtung.** Eine reale Policy, die Provider-/
+  Interaction-/Settings-Pfade durch den Approval-Pfad zwingt, ist
+  ausdrücklich Folgearbeit. PR 18 zeigt das Muster, nicht die
+  Integration.
+- **Weitere Demo-Kinds.** `demo_echo` / `demo_wait` / `noop` sind
+  ein kuratiertes Minimum. Eine Erweiterung müsste ihre
+  Seiteneffekt-Freiheit selbst garantieren.
+- **Persistenz / Audit-Log.** Weiterhin offen, genauso wie für
+  PR 17.
+
 ### 8.5 Visual Action Mode (UI-Staging MVP, Phase 3.3, Ist-Zustand)
 
 Kleine, ehrliche MVP-Umsetzung der Produktachse aus

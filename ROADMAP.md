@@ -515,6 +515,37 @@ Desktop Interaction Layer, die UI projiziert nur.
       Full-Payloads im UI, langer Text. Der Core-Approval-Kanal
       ist weiterhin Loopback-WebSocket; PR 17 erweitert nur die
       UX-Oberfläche darüber.
+- [x] **Approval-Gated Action Planner v1 (PR 18)** —
+      `control > autonomy`, jetzt mit konkreter Gating-Kette.
+      Neues pures Modul `core/src/actions/plan.rs` (`DemoPlan`,
+      `DemoPlanStatus`, drei kuratierte Kinds `demo_echo` /
+      `demo_wait` / `noop`, sanitisierte Titel/Summary/Risk).
+      `App::plan_demo_action` emittiert `action_planned`, optional
+      `approval_requested`, und führt erst nach `approved` eine
+      **reine Mock-Kette** (`action_started → action_step →
+      action_completed`) aus. Deny/Cancel/Timeout emittieren
+      `action_cancelled` ohne Mock-Lauf. Idempotenz durch die
+      bestehende `PendingApprovalRegistry`: ein zweiter Approve
+      landet als `error`-Frame, nie als zweite Ausführung. Neuer
+      IPC-Command `plan_demo_action { title?, summary?, risk?,
+      kind?, requires_approval? }` plus UI-Helfer
+      `IpcClient.plan_demo_action` und zwei Dev-Panel-Buttons
+      („Run (no approval)" / „Run (needs approval)"). Approval-
+      Card (PR 17) rendert die Frage unverändert; Workflow
+      Visibility Overlay (PR 16) spiegelt die volle Kette
+      (ACTION/APPROVAL/STEP/COMPLETED oder APPROVAL-FAILED +
+      ACTION-FAILED). Details in
+      [docs/api.md §2.7](./docs/api.md),
+      [docs/ui_architecture.md §8.4e](./docs/ui_architecture.md)
+      und [docs/security/APPROVAL_UX.md](./docs/security/APPROVAL_UX.md).
+      Verifiziert durch sechs neue Core-IPC-Tests + erweiterte
+      `approval-card-smoke` und `workflow-visibility-smoke`.
+      **Ausdrücklich NICHT Teil von PR 18:** echte Systemaktionen,
+      Shell, Dateisystem-Ops, AdminBot, Desktop-Automation, echte
+      Provider-Mutationen, Policy-Engine, Persistenz, Approval-
+      Historie, kryptografische Signaturen. Der Executor ist ein
+      Mock — Grundlage für eine spätere sichere Tool-/Desktop-/
+      AdminBot-Gating-Schicht, nicht der Schalter dafür.
 - [ ] Emotion-Mapping Core → UI (setzt Protokollerweiterung um
       `emotion` voraus)
 - [x] Speech-Sync (TTS-Lebenszyklus-Events → Animation) — MVP via
@@ -1655,9 +1686,16 @@ ein **harmloser Demo-Pfad** (`request_approval_demo`) — **keine**
 echte Tool-Ausführung, keine Desktop-Automation, kein AdminBot
 (siehe [docs/ui_architecture.md §8.4d](./docs/ui_architecture.md)
 und [docs/security/APPROVAL_UX.md](./docs/security/APPROVAL_UX.md)).
+PR 18 macht aus dem UX-Muster eine **Gating-Kette**
+(`plan_demo_action`): eine geplante Demo-Aktion darf erst nach
+`approved` als Mock durchlaufen; Deny/Cancel/Timeout blockieren
+die Ausführung hart (siehe
+[docs/ui_architecture.md §8.4e](./docs/ui_architecture.md)). Der
+Executor ist weiterhin ein Mock — PR 18 ist Grundlage, nicht
+Schalter, für eine spätere sichere Tool-Gating-Schicht.
 Tieferer Speech-Sync (Phonem, Audio-Timeline) und Emotion-Mapping
-aus ABrain bleiben in Phase C geparkt — weder PR 15, PR 16 noch
-PR 17 ändern das Protokoll über additive Felder hinaus.
+aus ABrain bleiben in Phase C geparkt — weder PR 15, PR 16, PR 17
+noch PR 18 ändern das Protokoll über additive Felder hinaus.
 
 Für den Desktop Interaction Layer läuft jetzt ein konkreter
 **Approval / Confirmation Flow MVP**: freigabepflichtige Aktionen

@@ -844,6 +844,41 @@ sie eindeutig einem `action_id` zuordnen.
   **Nicht** erlaubt in diesem Command: echte Aktionen, Shell-
   Invokation, Desktop-Automation, Provider-Aufrufe.
 
+- `plan_demo_action` — **Approval-Gated Demo-Action-Planner** (PR 18).
+  Erzeugt einen kleinen, harmlosen `DemoPlan` im Core und spielt
+  dessen Lebenszyklus durch den bestehenden Action-Event-Strom. Der
+  Core führt einen **reinen Mock** aus (`action_planned` → optional
+  `approval_requested` → `approval_resolved` → `action_started` →
+  `action_step` → `action_completed` bzw. `action_cancelled`). Es
+  gibt **keinen** Shell-, Dateisystem-, Desktop- oder Provider-
+  Aufruf. Felder (alle optional):
+  - `title: string` (Default: "Demo action")
+  - `summary: string` (Default: kurzer Sicherheitshinweis)
+  - `risk: "low" | "medium" | "high"` (Default: `medium`)
+  - `kind: "demo_echo" | "demo_wait" | "noop"` (Default: `noop`;
+    unbekannte Werte fallen auf `noop` — die sicherste Default-Aktion)
+  - `requires_approval: bool` (Default: `false`)
+
+  Ist `requires_approval=false`, läuft der Mock unmittelbar
+  (`planned → started → step → completed`) ohne Approval-Klammer.
+  Ist `requires_approval=true`, emittiert der Core ein
+  `approval_requested` und **blockiert** den Executor, bis eine
+  `approval_approve`/`approval_deny`-Entscheidung (oder ein Timeout)
+  vorliegt:
+  - `approved` → `approval_resolved(approved, user)` gefolgt von
+    `action_started → action_step → action_completed`.
+  - `denied` / `cancelled` → `approval_resolved(denied|cancelled)`
+    gefolgt von `action_cancelled` mit sprechender `message`. Kein
+    Mock-Step läuft.
+  - `timed_out` → `approval_resolved(timed_out, timeout)` gefolgt
+    von `action_cancelled(message="Approval expired")`. Kein
+    Mock-Step läuft.
+
+  **Idempotenz:** ein zweiter `approval_approve`/`approval_deny` auf
+  dieselbe `approval_id` landet als `error`-Frame; der Executor läuft
+  nicht ein zweites Mal. **Nicht** erlaubt: echte Aktionen, Shell,
+  Desktop-Automation, Provider-Mutationen, Dateioperationen.
+
 #### Ausgehend (Core → UI)
 
 - `approval_requested` — Core bittet um Freigabe. `payload` ist eine
