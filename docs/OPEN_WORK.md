@@ -6,7 +6,9 @@
 > Nicht-Ziele, Tests / Verifikation. Ein-Datei-Format, damit Reviewer
 > den gesamten „State of Open Work" in einem Scroll erfassen.
 
-Stand: 2026-04-24 (nach PR 20 Docs Reality Check).
+Stand: 2026-04-24 (nach PR 31 Roadmap Checkpoint — konsolidiert den
+Zustand nach der PR-21–30-Stabilisierungsserie). Sammelblick:
+[`docs/reviews/PR31_ROADMAP_CHECKPOINT.md`](./reviews/PR31_ROADMAP_CHECKPOINT.md).
 
 ---
 
@@ -26,9 +28,14 @@ kollidierten; zwei Workflow-Overlays koexistieren ohne Abgrenzung;
 Vision und breite Desktop-Automation, die im Code schlicht nicht
 existierten. PR 28 hat diese Lücke geschlossen.
 **Blocker:** keine; reine Docs-Arbeit.
-**Nächster kleinster PR:** kein zwingender A-PR in der nahen Reihe.
-PR 21 (tote Links, Reviews-Index, Glossar-Embryo) ist abgearbeitet;
-PR 31 (Glossar fixieren) bleibt als Pflegepunkt in §6 der ROADMAP.
+**Nächster kleinster PR:**
+
+- **PR 33 A-Workflow-Overlay-Konsolidierungs-Entscheidung.** Der
+  alte Phase-3.1-Workflow-Overlay-Spike und das neuere Workflow
+  Visibility Overlay v1 (PR 16) laufen parallel im `main.tscn`.
+  Sauber abgegrenzt, aber verwirrend. PR 33 entscheidet zwischen
+  Merge und Deprecation — reine Docs-/UI-Cleanup-Arbeit, **keine**
+  neue Feature-Fläche.
 
 **Nicht-Ziele:**
 
@@ -97,11 +104,15 @@ ist jetzt real nutzbar — der Resolver spiegelt `active=command` /
 ist oder fehlschlägt. Ehrliche Tests decken beide Pfade.
 **Blocker:** keiner; der Provider-Resolver aus PR 6/13 nimmt
 whisper_cpp jetzt als vollwertiges Chain-Kind.
-**Nächster kleinster PR:** kein zwingender C-PR in der nahen Reihe.
-Mögliche Folgearbeit (ohne Priorität): zweites TTS-Kind (z. B.
-`piper_http` analog zu whisper_cpp, command-basiert), oder ein
-zweites STT-Kind mit anderer Spawn-Semantik (z. B. `http_local`
-STT). Beides ist **nicht** Teil der nahen Reihe.
+**Nächster kleinster PR:**
+
+- **PR 34 C-TTS-Alternative.** Zweites TTS-Kind (z. B. `piper_http`
+  oder ein weiterer command-basierter Adapter) analog zur
+  whisper_cpp-Linie: eigene Env-Variable, Whitelist-Erweiterung
+  (`[command, <neu>]`), Default bleibt `[command]`. **Keine**
+  Build-Abhängigkeit, **kein** Streaming-Audio, **kein** Runtime-
+  Editor. TTS-Fallback-Monokultur (heute nur `command`) wird damit
+  adressiert; siehe PR-31-Checkpoint-Watchlist.
 
 **Nicht-Ziele:**
 
@@ -146,11 +157,15 @@ kaum erkennen, was primary ist, was lokal bleibt und was cloud_http
 vor dem First-Run noch braucht. PR 26 beantwortet das im Readout,
 ohne Defaults zu ändern.
 **Blocker:** keine; rein Produkt-/UX-Arbeit.
-**Nächster kleinster PR:** kein zwingender D-PR in der nahen Reihe.
-Mögliche Folgearbeit (ohne Priorität): `Add cloud_http to chain` von
-per-Design-disabled auf kontrollierten Klick umstellen; dafür müsste
-eine bewusste „ich nehme Cloud in Kauf"-Confirmation-UX kommen, die
-in PR 26 ausdrücklich *nicht* gebaut ist.
+**Nächster kleinster PR:**
+
+- **PR 36 D-Settings-Shell-UX-Cleanup.** Der PR-26-Onboarding-Block
+  sitzt oberhalb der bestehenden Per-Kind-Editoren; die visuelle
+  Hierarchie könnte klarer werden (Section-Header, Kollapsierung
+  alter Editoren nach Onboarding, bessere Trennung
+  Onboarding-Readout ↔ Edit-Pfade). **Keine** neuen IPC-Commands,
+  **keine** Default-Änderung, **kein** Auto-Cloud. `Add cloud_http
+  to chain` bleibt per Design disabled.
 
 **Nicht-Ziele:**
 
@@ -187,11 +202,21 @@ Pfad mehr. Der Tripwire-Test `policy_v0_defaults_are_locked` in
 [`core/src/config.rs`](../core/src/config.rs) schlägt an, wenn
 jemand die Baseline flippt.
 **Blocker:** keine.
-**Nächster kleinster PR:** Kein eigener E-PR in der nahen Reihe.
-Folge-Arbeiten (neue Real-Interaction-Kinds, Audit-Abdeckung des
-`open_application`-Lifecycles, feinere Risk-Klassifikation) sind
-bewusst noch nicht priorisiert — jede davon würde eine eigene
-Design-Entscheidung brauchen.
+**Nächster kleinster PR:**
+
+- **PR 32 E-Audit-Coverage-Real-Interaction.** Erweitert den
+  bestehenden Audit-Ring-Buffer (PR 19, bisher nur
+  `plan_demo_action`-Pfad) auf den **realen
+  `open_application`-Lifecycle**:
+  `IpcCommandReceived → ActionPlanned → ApprovalRequested →
+  ApprovalResolved → ActionStarted → ActionStep →
+  ActionVerification → ActionCompleted / ActionCancelled`.
+  Felder defensiv redacted (analog zum bestehenden `summary ≤
+  80`-Kürzen), `source` und `risk` wie in PR 17. **Kein
+  Persistenz-Pfad**, kein Export. Tripwire-Test für die neue
+  Kette. Schließt die ehrliche Lücke aus PR 25 (siehe
+  [`PR25_POLICY_V0_APPROVAL_DEFAULT.md`](./reviews/PR25_POLICY_V0_APPROVAL_DEFAULT.md)
+  §3).
 
 **Nicht-Ziele:**
 
@@ -201,10 +226,12 @@ Design-Entscheidung brauchen.
   Seiteneffekten.
 - **Kein `type_text` / `send_shortcut`-Backend** als Folgeschritt —
   solche Fähigkeiten bräuchten eigene ADR-/Policy-Runde.
-- **Keine automatische Ausweitung des Audit-Ring-Buffers** auf den
-  realen `open_application`-Pfad; heute deckt Audit ausschließlich
-  den `plan_demo_action`-Lifecycle ab. Siehe
-  [`docs/reviews/PR25_POLICY_V0_APPROVAL_DEFAULT.md`](./reviews/PR25_POLICY_V0_APPROVAL_DEFAULT.md).
+- **Keine Audit-Persistenz**, auch nach PR 32 nicht. Der
+  Ring-Buffer bleibt in-memory; ein Persistenz-/Export-Pfad
+  braucht eine eigene Security-Review
+  ([`docs/security/AUDIT_TRAIL.md`](./security/AUDIT_TRAIL.md)).
+- **Keine feinere Risk-Klassifikation** als heute (`low` /
+  `medium` / `high`) vor einer eigenen Policy-Runde.
 
 **Tests / Verifikation:**
 
@@ -243,12 +270,14 @@ stub-unterstützt ohne Backend.
 Entscheidung vor Backend-Arbeit.
 **Nächster kleinster PR:**
 
-- **Kein eigener F-PR in der nahen Reihe.** `focus_window` ist mit
-  PR 23 abgeschlossen; die offene Next-Step-Arbeit ist Workstream E
-  (Policy v0, PR 25, gelandet). `type_text` / `send_shortcut`
-  bekommen auch nach Policy v0 **keinen** Backend-Pfad — die
-  Default-Flags bleiben `false` und das Backend meldet
-  `BackendUnsupported`.
+- **PR 37 F-Accessibility-RPC-Spike-Decision.** ADR für einen
+  echten AT-SPI-`GetChildren`-Pfad am Registry-Root — **read-only**,
+  ohne Eingabe/Klick/Fokus. Der ADR benennt Toolkit-Fragmentierung
+  (GTK / Qt / Electron), Wayland-Portal-Abhängigkeit und den
+  Confidence-Pfad (`discovered` → `verified`). Entscheidet *vor*
+  Code, ob / mit welcher Bibliothek (zbus/atspi) der Spike kommt.
+  `focus_window` bleibt mit PR 23 abgeschlossen; `type_text` /
+  `send_shortcut` bekommen auch hier **keinen** Backend-Pfad.
 
 **Nicht-Ziele:**
 
@@ -291,13 +320,12 @@ sauberes Sicherheits-/Trust-Modell nicht machbar. PR 30 arbeitet
 bewusst *innerhalb* des bestehenden Capability-Contracts statt
 Stage-C-Territorium aufzumachen.
 **Blocker:** Sicherheits-Hierarchie + Manifest-Format für Stage C
-noch nicht entschieden.
+noch nicht entschieden. Für einen Token-Import-Spike blockiert
+zusätzlich Workstream J (smolitux-ui Token-Contract steht aus).
 **Nächster kleinster PR:** kein zwingender G-PR in der nahen Reihe.
-Mögliche Folgearbeit (ohne Priorität): wenn ADR-0001-Token-Export
-in smolitux-ui landet, ein kleiner reversibler Spike, der die
-PR-30-Palette-Konstanten aus einer Token-Quelle speist. Vor so
-einem Spike braucht es den Token-Export auf der
-[smolitux-ui](https://github.com/Modularium/smolitux-ui)-Seite.
+Die Palette-Datei aus PR 30 ist der Andockpunkt; sie wartet auf
+PR 35 (Token-Contract-Prep auf smolitux-ui-Seite). Erst danach wäre
+ein kleiner reversibler Smolit-Assistant-Spike sinnvoll.
 
 **Nicht-Ziele:**
 
@@ -331,7 +359,12 @@ Response und Tool-Calls sind nur mit nativer API machbar.
 seitigen technischen Blocker.
 **Nächster kleinster PR:**
 
-- Keine Priorität in PR 21–30. Pflegepunkt.
+- **PR 39 H-ABrain-Native-Integration-ADR.** ADR *vor* Code: der
+  Native-API-Scope, die Ownership der API-Definition
+  (Smolit-Assistant vs. ABrain), die Migration aus dem CLI-Pfad
+  und der Umgang mit Streaming-Response + Tool-Calls werden
+  entschieden, bevor eine Implementation startet. Reines Docs-
+  PR.
 
 **Nicht-Ziele:**
 
@@ -359,11 +392,15 @@ PR 29 schließt die Einstiegs-Lücke, ohne Installations-Skripte
 einzuführen.
 **Blocker:** unklar, welche Ziel-Distributionen (Ubuntu 24.04 gesetzt;
 Fedora / Arch / NixOS offen) und welches Tooling (GitHub Actions vs.
-Self-Host) gelten sollen.
-**Nächster kleinster PR:** kein zwingender I-PR in der nahen Reihe.
-Mögliche Folgearbeit (ohne Priorität): eine kleine CI-Smoke-Linie
-(cargo test + settings-shell-smoke) als GitHub-Action, falls das
-Tooling-Frage beantwortet ist.
+Self-Host) gelten sollen. Für die minimale CI-Smoke-Linie reicht
+eine GitHub-Actions-Entscheidung; Packaging bleibt weiter aufgeschoben.
+**Nächster kleinster PR:**
+
+- **PR 38 I-Release-CI-Foundation.** Eine minimale GitHub-Action:
+  `cargo test` + `scripts/run_overlay_verification.sh
+  settings-shell-smoke`. **Keine** Packaging-Formate
+  (`.deb`/`.rpm`/Flatpak/Snap), **keine** Signing-Stufe, **kein**
+  Artifact-Upload. Erster CI-Schritt, nicht der letzte.
 
 **Nicht-Ziele:**
 
@@ -403,10 +440,22 @@ nur die ADR-Ebene machbar, keine Implementation.
 
 **Nächster kleinster PR:**
 
-- **PR 24 J-Cross-Repo-ADR:** ADR-0001 in diesem Repo +
-  Spiegel-ADR in smolitux-ui; ROADMAP/OPEN_WORK/GLOSSARY/
-  `ui_architecture.md` um den Design-Contract-Orientierungsblock
-  ergänzen. **Reiner Docs-PR**, keine Code-Änderungen.
+- **PR 35 J-Smolitux-Token-Contract-Prep** *(cross-repo, primär
+  in smolitux-ui)*. Token-Schema-Vorschlag (Farben, Typo,
+  Spacings, Motion, Semantik-Status), Export-Format (JSON /
+  CSS-Custom-Properties / Style-Dictionary-kompatibel) und
+  Namensraum werden auf der smolitux-ui-Seite als **Docs/Schema**
+  vorgeschlagen. **Kein** Export-Build, **kein** Import in
+  Smolit-Assistant, **keine** @smolitux/*-Package-Änderung in
+  diesem Repo. Voraussetzung für einen späteren reversiblen
+  Token-Spike in Smolit-Assistant (Workstream G / Palette-
+  Andockpunkt aus PR 30).
+
+**Erledigt** (kein offener J-PR mehr im Smolit-Assistant-Repo):
+
+- PR 24 J-Cross-Repo-ADR: ADR-0001 in beiden Repos, Glossar /
+  ROADMAP / OPEN_WORK / `ui_architecture.md` um den
+  Design-Contract-Orientierungsblock ergänzt.
 
 **Nicht-Ziele:**
 
@@ -431,6 +480,49 @@ nur die ADR-Ebene machbar, keine Implementation.
 - `rg "OceanData" docs README.md ROADMAP.md` liefert keine
   Treffer, die OceanData als UI-Library oder Design-System-Quelle
   darstellen.
+
+---
+
+## K — OceanData Data-Layer Boundary *(neu, rein ADR-Vorlauf)*
+
+**Status:** **Kein** Berührungspunkt zu Smolit-Assistant heute.
+OceanData wird an mehreren Stellen (ADR-0001 / PR 24,
+[`README.md`](../README.md) §11–§12, [`GLOSSARY.md`](./GLOSSARY.md)
+Smolitux-UI-Eintrag) konsequent als **Data-Layer / Datenplattform
+im Smolitux-Ökosystem** abgegrenzt — ausdrücklich **keine**
+UI-Library, **kein** Design-System, **kein** UI-Komponenten-
+Lieferant.
+**Warum wichtig:** Die Abgrenzung ist heute rein negativ
+(„OceanData ist *nicht* …"). Sobald OceanData-seitig ein
+konsumierbares Data-Layer-Interface existiert, das Smolit-
+Assistant sinnvoll nutzen könnte (lokale Persistenz,
+sync-Hooks, Notification-Stream o. ä.), braucht es einen ADR
+*vor* Code — nicht ein Spike, nicht ein „wir probieren mal".
+**Blocker:** OceanData-seitiges Interface / Scope-Definition
+liegt außerhalb dieses Repos. Vor ADR nichts zu entscheiden.
+**Nächster kleinster PR:**
+
+- **PR 40 K-OceanData-Integration-ADR** *(cross-repo, falls
+  nötig)*. Beschreibt *hypothetisch* den Anbindungsweg eines
+  OceanData-Data-Layers an Smolit-Assistant: welche IPC-/Core-
+  Grenze, welches Persistenz-Modell, wie die
+  Smolit-Assistant-Invarianten (lokal-first, Approval vor
+  Ausführung, in-memory Audit) vor einer Data-Layer-Abhängigkeit
+  geschützt werden. **Rein ADR, keine Implementation**, keine
+  Abhängigkeit in diesem Repo.
+
+**Nicht-Ziele:**
+
+- **Keine OceanData-Code-Integration** vor dem ADR.
+- **Keine Uminterpretation** von OceanData als UI-/Design-System.
+- **Keine neuen Kern-Abhängigkeiten** auf OceanData-Pakete.
+
+**Tests / Verifikation:**
+
+- `rg "OceanData"` im gesamten Repo darf **nie** OceanData als
+  UI-Library, Design-System-Quelle oder Smolit-Assistant-
+  Backend beschreiben. Heute erfüllt.
+- Markdown-Links bleiben konsistent.
 
 ---
 

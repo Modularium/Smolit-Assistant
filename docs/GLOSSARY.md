@@ -186,6 +186,34 @@ sind Webanwendungen im EcoSphere Network.
 
 Siehe [`docs/adr/ADR-0001-smolitux-design-contract.md`](./adr/ADR-0001-smolitux-design-contract.md).
 
+## OceanData
+
+**Data-Layer / Datenplattform** im Smolitux-Ökosystem. OceanData
+liegt **außerhalb** dieses Repos und ist **kein** Teil des
+Smolit-Assistant-Stacks — weder heute noch in absehbarer PR-Linie.
+
+**Was OceanData ausdrücklich nicht ist** (rein negative
+Abgrenzung, konsistent zu ADR-0001 und
+[`README.md`](../README.md) §11–§12):
+
+- **Keine UI-Library.** OceanData liefert keine Komponenten,
+  keine Widgets, keine Scenes.
+- **Kein Design-System.** OceanData liefert keine Design-Tokens,
+  keine Theme-Definitionen, keine Styling-Quelle.
+- **Keine Smolit-Assistant-Runtime-Abhängigkeit.** Weder Core,
+  UI noch ABrain-Adapter nehmen OceanData in Anspruch.
+
+Eine *zukünftige* Anbindung (z. B. als optionaler Persistenz-/
+Sync-Layer) wäre eine eigene Design-Entscheidung. PR 40
+([OPEN_WORK.md Workstream K](./OPEN_WORK.md)) ist als
+**ADR-Vorlauf** vorgesehen, bevor Code entsteht. Bis dahin
+erscheint OceanData in der Docs-Landschaft ausschließlich als
+Abgrenzungs-Marker.
+
+Siehe [`docs/adr/ADR-0001-smolitux-design-contract.md`](./adr/ADR-0001-smolitux-design-contract.md)
+(Abschnitt *Non-goals*) und
+[`docs/OPEN_WORK.md`](./OPEN_WORK.md) Workstream K.
+
 ## Smolitux Design Contract
 
 Die cross-repo Vereinbarung, wie Smolit-Assistant visuelle und

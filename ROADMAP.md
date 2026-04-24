@@ -1,8 +1,10 @@
 # Smolit AI Assistant — Developer Roadmap
 
-> Stand: 2026-04-24 (nach PR 20 Docs Reality Check). Diese Datei ist
+> Stand: 2026-04-24 (nach PR 31 Roadmap Checkpoint). Diese Datei ist
 > eine **Roadmap**, kein PR-Changelog. Detailhistorie pro PR lebt in
-> [`docs/reviews/`](./docs/reviews/).
+> [`docs/reviews/`](./docs/reviews/) — insbesondere der Sammelblick
+> auf die PR-21–30-Serie liegt in
+> [`docs/reviews/PR31_ROADMAP_CHECKPOINT.md`](./docs/reviews/PR31_ROADMAP_CHECKPOINT.md).
 
 ---
 
@@ -65,10 +67,18 @@ Detaillierte Begriffswelt: siehe
 - `core/src/audit/` AuditStore (Ring-Buffer; Default 100 / Hard
   1000 / Env `SMOLIT_AUDIT_MAX_EVENTS`).
 - `core/src/interaction/` InteractionExecutor + CommandBackend.
-  Nur `open_application` ist real verdrahtet; `focus_window` /
-  `type_text` / `send_shortcut` sind `BackendUnsupported`.
+  `open_application` real verdrahtet und seit PR 25 (Policy v0)
+  **approval-gated by default**; `focus_window` template-basiert auf
+  X11 mit **doppeltem Opt-in**
+  (`SMOLIT_INTERACTION_ALLOW_FOCUS_WINDOW=1` plus
+  `SMOLIT_INTERACTION_FOCUS_WINDOW_CMD`), unter Wayland honest
+  `BackendUnsupported`; `type_text` / `send_shortcut` bleiben
+  `BackendUnsupported`. `DEFAULT_INTERACTION_*`-Konstanten in
+  `core/src/config.rs` mit Tripwire-Test.
 - `core/src/providers/` text (abrain / llamafile_local /
-  local_http / cloud_http), stt (command), tts (command).
+  local_http / cloud_http), stt (**command + whisper_cpp** seit
+  PR 27, beide command-basiert; Default bleibt `[command]`),
+  tts (command).
 - `core/src/settings_store.rs` + `secrets_store.rs` JSON-
   Persistenz pro Achse; Secrets separat 0600.
 
@@ -156,6 +166,17 @@ Detaillierte Begriffswelt: siehe
   PR 18 (Approval-Gated Demo Action Planner), PR 19 (Local Audit
   Trail v1), PR 20 (Docs Reality Check), PR 25 (Policy v0 —
   Approval-Default für echte Interaction Actions).
+- **PR 21–30 Stabilization Series.** Zehn PRs in Folge, die
+  Sicherheit, Provider-Onboarding, Docs-Hygiene und den
+  Einstiegspfad konsolidiert haben: PR 21 (Docs-Follow-ups),
+  PR 22 (Wayland-Hostinventur), PR 23 (`focus_window` Reality
+  Decision), PR 24 (Smolitux Design Contract ADR — cross-repo),
+  PR 25 (Policy v0 — siehe oben), PR 26 (Provider-Onboarding
+  UX v1), PR 27 (`whisper_cpp` STT Provider Kind), PR 28
+  (`presence_desktop_interaction.md` Reality Trim),
+  PR 29 (README / SETUP / `.env.example`), PR 30 (Avatar Render
+  Polish Follow-up + `avatar_palette.gd`). Sammelblick:
+  [`docs/reviews/PR31_ROADMAP_CHECKPOINT.md`](./docs/reviews/PR31_ROADMAP_CHECKPOINT.md).
 
 Detaillierte PR-Historie: [`docs/reviews/`](./docs/reviews/).
 
@@ -166,30 +187,47 @@ Detaillierte PR-Historie: [`docs/reviews/`](./docs/reviews/).
 Single-Source für offene Punkte:
 [`docs/OPEN_WORK.md`](./docs/OPEN_WORK.md).
 
-- **A. Docs & Architecture Hygiene** — PR 20 (läuft), Nachläufer
-  PR 21.
-- **B. Window / Overlay / Click-through / AOT Reality** — echte
-  Wayland-Compositor-Messungen noch ausstehend.
-- **C. Audio Pipeline v2** — zweites STT-/TTS-Kind, *kein*
+- **A. Docs & Architecture Hygiene** — PR 20 / 21 / 24 / 28 / 29
+  gelandet. PR 31 selbst ist der Checkpoint für die Serie; nächster
+  A-Kandidat ist die Workflow-Overlay-Konsolidierungs-Entscheidung
+  (siehe §6, PR 33).
+- **B. Window / Overlay / Click-through / AOT Reality** — MVP lebt
+  (Overlay + Click-through + X11-AOT). PR 22 hat den Dev-Host als
+  GNOME/X11 bestätigt; echte Wayland-Compositor-Messung bleibt
+  externer Messauftrag ohne Timing.
+- **C. Audio Pipeline v2** — STT hat seit PR 27 zwei command-
+  basierte Kinds (`command` + `whisper_cpp`); TTS bleibt bei einem
+  Kind. Nächster Kandidat: zweites TTS-Kind (PR 34). *Kein*
   Streaming-Audio in Sichtweite.
-- **D. Provider / Settings Consolidation** — Default-Ketten-UX,
-  cloud_http-Onboarding.
-- **E. Approval / Policy / Tool-Gating** — erste echte Gating-
-  Verdrahtung (z. B. für `open_application`).
-- **F. Desktop Interaction Layer** — `focus_window`-Backend-
-  Entscheidung.
-- **G. Avatar Animation / Stage C Research** — research-gated.
+- **D. Provider / Settings Consolidation** — Provider-Onboarding
+  UX v1 gelandet (PR 26); Quick-Action „Use local-first chain"
+  verdrahtet; `Add cloud_http` per Design disabled. Nächster
+  Kandidat: Settings-Shell-UX-Cleanup nach Onboarding (PR 36).
+- **E. Approval / Policy / Tool-Gating** — Policy v0 (PR 25)
+  gelandet, Tripwire-Test fix. **Offene Lücke:** Audit-Ring-Buffer
+  deckt nur `plan_demo_action`; der reale
+  `open_application`-Lifecycle ist nicht auditiert. → PR 32.
+- **F. Desktop Interaction Layer** — `focus_window` mit PR 23
+  entschieden. Nächster Kandidat ohne Priorität: AT-SPI-RPC-Spike-
+  Entscheidung (PR 37).
+- **G. Avatar Animation / Stage C Research** — PR 30 gelandet;
+  Stage C bleibt Research-Gate. Nächster Kandidat wartet auf
+  Token-Export auf der smolitux-ui-Seite (siehe J / PR 35).
 - **H. ABrain Native Integration** — heute CLI; native API ist
-  Ziel-Zustand.
-- **I. Packaging / Release / CI** — noch nicht aufgesetzt.
+  Ziel-Zustand. Nächster Kandidat: ADR (PR 39) vor Code.
+- **I. Packaging / Release / CI** — README/SETUP/.env.example
+  gelandet (PR 29). Nächster Kandidat: minimale CI-Smoke-Linie
+  (PR 38); **keine** Packaging-Formate in dieser Stufe.
 - **J. Smolitux Design Contract / Cross-Runtime UI Consistency** —
-  neuer Docs-/ADR-only-Workstream. Smolit-Assistant bleibt Godot-
-  native; [smolitux-ui](https://github.com/Modularium/smolitux-ui)
-  bleibt Web-/React-Komponentenbibliothek; gemeinsamer Nenner sind
-  Design Tokens + Status-Semantik + Accessibility-/Motion-
-  Konventionen. Kein React in Godot, kein WebView, keine
-  Core-Abhängigkeit. **OceanData** ist Data-Layer und **nicht**
-  Teil dieses Workstreams.
+  ADR-0001 gelandet (PR 24), Avatar-Palette (PR 30) als
+  Token-Andockpunkt. Smolit-Assistant bleibt Godot-native;
+  [smolitux-ui](https://github.com/Modularium/smolitux-ui) bleibt
+  Web-/React-Komponentenbibliothek; gemeinsamer Nenner sind Design
+  Tokens + Status-Semantik + Accessibility-/Motion-Konventionen.
+  Kein React in Godot, kein WebView, keine Core-Abhängigkeit.
+  **OceanData** ist Data-Layer und **nicht** Teil dieses
+  Workstreams. Nächster Kandidat: Token-Contract-Prep in
+  smolitux-ui (PR 35, cross-repo, Docs/Schema only).
 
 ---
 
@@ -199,24 +237,33 @@ Reihenfolge ist **nicht bindend**, aber navigierbar. Jeder Schritt
 bleibt klein; keiner führt eine neue gefährliche Fähigkeit ein,
 ohne vorgeschaltete Policy-Verdrahtung.
 
-> **Hinweis:** Die ursprüngliche Tabelle hatte PR 24 als Policy-v0.
-> Mit Einfügen des Cross-Repo-ADR als PR 24 verschieben sich die
-> Folge-Nummern um eins. *PR numbers may shift after ADR insertion* —
-> Reihenfolge und Inhalt der Folge-PRs bleiben identisch.
+### 6.1 Gelandet — PR 21–30 Stabilization Series
+
+Zehn PRs in Folge sind gelandet (2026-04-24). Der Sammelblick mit
+Closed-Items, Drift-Watchlist und Tabelle steht in
+[`docs/reviews/PR31_ROADMAP_CHECKPOINT.md`](./docs/reviews/PR31_ROADMAP_CHECKPOINT.md).
+Kurz: PR 21 Docs-Follow-ups, PR 22 Wayland-Hostinventur, PR 23
+`focus_window` Reality Decision, PR 24 Smolitux Design Contract
+ADR, PR 25 Policy v0, PR 26 Provider-Onboarding UX v1, PR 27
+`whisper_cpp` STT Kind, PR 28 Presence Reality Trim, PR 29
+README/SETUP/.env.example, PR 30 Avatar Render Polish Follow-up
+inkl. `avatar_palette.gd`.
+
+PR 31 selbst ist dieser Roadmap-Checkpoint (Docs-only).
+
+### 6.2 Next Mandatory — PR 32–40 (Vorschlag)
 
 | PR | Workstream | Gegenstand |
 | -- | ---------- | ---------- |
-| 21 | A | Docs-Follow-ups aus PR 20: tote Links, `docs/reviews/`-Index, Glossar-Embryo |
-| 22 | B | Wayland-Compositor-Live-Messung auf separatem Host |
-| 23 | F | `focus_window` Reality Decision — Option 1 bestätigt (template-basierter X11-Backend via `wmctrl -a {name}` bleibt), Details in [`docs/reviews/PR23_FOCUS_WINDOW_DECISION.md`](./docs/reviews/PR23_FOCUS_WINDOW_DECISION.md) |
-| 24 | J | Cross-Repo ADR: Smolitux Design Contract (Docs-only, dieser PR; Spiegel-ADR in smolitux-ui). Siehe [`docs/adr/ADR-0001-smolitux-design-contract.md`](./docs/adr/ADR-0001-smolitux-design-contract.md) |
-| 25 | E | Policy v0 (2026-04-24, gelandet): `require_confirmation=true` als Default, `open_application` läuft per Default durch die Approval-Kette, `focus_window` bleibt doppeltes Opt-in; Defaults in `core/src/config.rs` als `DEFAULT_INTERACTION_*`-Konstanten mit Tripwire-Test fixiert. Details in [`docs/reviews/PR25_POLICY_V0_APPROVAL_DEFAULT.md`](./docs/reviews/PR25_POLICY_V0_APPROVAL_DEFAULT.md). |
-| 26 | D | Provider-Onboarding UX v1 (2026-04-24, gelandet): kuratierter Onboarding-Block über den Text-Provider-Editoren — Primary + Chain mit Lokalitäts-Tags, cloud_http First-Run Checklist (`present` statt Wert), eine Quick-Action „Use local-first chain" (`["llamafile_local","local_http","abrain"]`). Keine neuen IPC-Commands, keine Default-Änderung, kein Auto-Cloud. |
-| 27 | C | STT Alternative v1 (2026-04-24, gelandet): `whisper_cpp` als zweites command-basiertes STT-Kind unter `SMOLIT_STT_WHISPER_CPP_CMD`. Whitelist `[command, whisper_cpp]`; Default bleibt `["command"]`. Keine Build-Abhängigkeit auf whisper.cpp, kein Modell-Manager, kein Runtime-Editor. Keine neuen IPC-Commands. |
-| 28 | A | `presence_desktop_interaction.md` auf Ist-Zustand getrimmt (2026-04-24, gelandet): 1096 → 491 Zeilen; Zielbild-Inhalte konsequent in §10 Future Work / §11 Non-goals verschoben; §4 Explicitly Unsupported benennt `type_text`/`send_shortcut`, Wayland-Fokus, AT-SPI-RPC, OCR/Vision, Cross-Window-Avatar-Motion hart; Altanker-Mapping im Anhang. Keine Code-Änderungen. |
-| 29 | I | README Build Setup + First Install Docs (2026-04-24, gelandet): [`README.md`](./README.md) auf 13-Abschnitt-Quickstart getrimmt (608 → 286 Zeilen), neuer [`docs/SETUP.md`](./docs/SETUP.md) mit Env-Gruppen + Troubleshooting, aktualisiertes [`.env.example`](./.env.example) (PR-25/26/27-konform, whisper_cpp Env-only, no-auto-cloud, Policy-v0-Defaults). Kein Packaging, keine CI. |
-| 30 | G | Avatar Render Polish Follow-up (2026-04-24, gelandet): kuratierter Polish in den bestehenden prozeduralen `_draw_*`-Pfaden — Robot-Face-Plate Inner-Rim + Pupil-Specular + Antenna-Highlight, Orb Inner-Core-Glow, Humanoid Two-Layer-Cheeks + statische Augenbrauen; Smolit-Texture unverändert. Neue kuratierte Polish-Palette [`ui/scripts/avatar/avatar_palette.gd`](./ui/scripts/avatar/avatar_palette.gd) als Andockpunkt für einen späteren Token-Import (ADR-0001). Smoke wächst 19 → 52 Assertions mit Regressions-Locks. Keine neuen Assets, keine neuen Identities/States/Capabilities. |
-| 31 | A | Glossar fixieren (`Approval`, `Audit`, `Workflow-Overlay`, `Presence`, …) |
+| 32 | E | **Audit Coverage für realen `open_application`-Lifecycle.** Ring-Buffer (PR 19) auf die Real-Interaction-Kette ausweiten (planned / approval_requested / approval_resolved / started / step / verification / completed / cancelled); Felder defensiv redacted; Tripwire-Test. Kein Persistenz-Pfad. Schließt die in PR 25 dokumentierte Audit-Lücke. |
+| 33 | A | **Workflow-Overlay-Konsolidierungs-Entscheidung.** Entweder Merge der zwei koexistierenden Overlays (Phase 3.1 Spike + PR-16 Visibility Overlay) oder formales Deprecaten des älteren Spike-Pfads. Docs + evtl. Smoke-Update, **keine** neue Feature-Fläche. |
+| 34 | C | **Zweites TTS-Kind** (z. B. `piper_http`) analog zu `whisper_cpp`: command-basiert, env-only, Whitelist-Erweiterung, Default bleibt `[command]`. Keine Build-Abhängigkeit, kein Streaming. |
+| 35 | J | **Smolitux Token Contract Prep in smolitux-ui.** Cross-Repo-Docs-PR auf [smolitux-ui](https://github.com/Modularium/smolitux-ui): Token-Schema-Vorschlag, Export-Format, Namensraum. **Kein** Export-Build, **kein** Import in Smolit-Assistant. Voraussetzung für einen späteren Token-Spike auf der Assistant-Seite. |
+| 36 | D | **Settings-Shell-UX-Cleanup** nach Provider-Onboarding: visuelle Hierarchie, Kollapsierung alter Per-Kind-Editoren, klare Section-Header. Keine neuen IPC-Commands, keine Default-Änderung, kein Auto-Cloud. |
+| 37 | F | **Accessibility RPC Spike Decision (AT-SPI read-only).** ADR für einen echten `GetChildren`-Pfad auf Registry-Root; Toolkit-/Wayland-Fragmentierung und Portal-Pfad benennen, entscheiden **vor** Code. |
+| 38 | I | **Release/CI Foundation.** Minimale GitHub-Action: `cargo test` + `settings-shell-smoke`. **Kein** Packaging-Format, **keine** Signing-Stufe, **kein** Artifact-Upload in diesem Schritt. |
+| 39 | H | **ABrain Native Integration ADR.** API-Scope, Ownership der API-Definition, Migration aus dem CLI-Pfad. Noch kein Code; Entscheidung über Schnittstellen-Besitz kommt vor Implementation. |
+| 40 | — | **OceanData Data-Layer Integration ADR** (cross-repo falls nötig). Beschreibt einen *hypothetischen* Anbindungsweg eines Data-Layers an Smolit-Assistant. OceanData bleibt explizit **kein** UI-/Design-System. Nur ADR, keine Implementation. |
 
 ---
 
@@ -251,10 +298,23 @@ davon würde eine eigene Design-Entscheidung brauchen:
   in-memory. Ein Persistenz-Pfad braucht eine eigene Security-
   Review (siehe
   [`docs/security/AUDIT_TRAIL.md`](./docs/security/AUDIT_TRAIL.md)).
+  Die **Audit-Abdeckung des realen `open_application`-Lifecycles**
+  ist eine eigene, kleinere Arbeit (PR 32) — kein Persistenz-Pfad,
+  nur Ring-Buffer-Erweiterung.
 - **Multi-Seat / Multi-User / kryptografische Signatur.**
 - **Emotion-Feld in `response`-Payloads.** Kein Core-Signal heute.
 - **Native ABrain-API / Tool-Calls / Streaming-Response.**
-  `docs/api.md §5` beschreibt das Ziel; kein Code.
+  `docs/api.md §5` beschreibt das Ziel; kein Code. Vor Code kommt
+  ein ADR (PR 39).
+- **Smolitux Token Implementation.** ADR-0001 (PR 24) beschreibt
+  den cross-runtime Design-Vertrag. Token-Schema + Export-Pipeline
+  entstehen auf [smolitux-ui](https://github.com/Modularium/smolitux-ui)
+  (PR 35 als cross-repo Docs-Vorarbeit); ein späterer Token-
+  Import-Spike in Smolit-Assistant wäre eigener PR.
+- **OceanData-Integration.** OceanData ist Data-Layer /
+  Datenplattform im Smolitux-Ökosystem, **keine** UI-Library und
+  **kein** Design-System. Heute ohne Berührungspunkt zu
+  Smolit-Assistant. Vor Code / Abhängigkeit kommt ein ADR (PR 40).
 
 ---
 
