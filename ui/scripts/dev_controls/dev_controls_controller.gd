@@ -12,20 +12,20 @@ extends PanelContainer
 ##   * keine Persistenz — Änderungen gelten nur für die laufende
 ##     Session; Default-Werte kommen aus Env / Appearance-Modul;
 ##   * keine Core-/IPC-Kommunikation — das Panel spricht nur lokal
-##     mit den beiden UI-Controllern (Avatar, Workflow-Overlay);
-##   * keine neuen Action-Events — Workflow-Preview setzt den
-##     internen Flow-Zustand direkt über
-##     `workflow_overlay_controller.preview_phase()`, ohne EventBus-
-##     Injection.
+##     mit dem Avatar-Controller (und seit PR 16 optional mit dem
+##     Workflow-Visibility-Panel für den session-lokalen Toggle);
+##   * keine neuen Action-Events — der Workflow Visibility Overlay
+##     (PR 16) hat einen eigenen `set_overlay_visible(flag)`-Hook,
+##     ohne EventBus-Injection. Der alte Drei-Knoten-Overlay-Spike
+##     und sein Preview-Block sind mit PR 33 entfernt worden.
 ##
 ## Scope dieses MVP-Panels:
 ##
 ##   * Avatar-Appearance: Theme / Profile / Intensity live
 ##     umschalten, direkt an `avatar_controller.set_appearance()`
 ##     weiterreichen. Identity bleibt `smolit_salamander`.
-##   * Workflow-Overlay: sechs Preview-Knöpfe (Hidden / Planned /
-##     Active / Completed / Failed / Cancelled), die die
-##     Darstellung durchschalten.
+##   * Workflow Visibility Overlay v1 (PR 16): session-lokaler
+##     Visibility-Toggle.
 ##
 ## Explizit **nicht** im Scope:
 ##
@@ -65,10 +65,6 @@ const _PROFILE_OPTIONS: Array = [
 	{"id": _AppearanceRef.BehaviorProfile.RESERVED, "label": "Reserved"},
 ]
 
-const _PHASE_PREVIEWS: Array = [
-	"hidden", "planned", "active", "completed", "failed", "cancelled",
-]
-
 ## Visual-Action-Mode-Picker (Phase 3.3 MVP). Reihenfolge folgt der
 ## Produktachse aus `docs/presence_desktop_interaction.md §7`
 ## (aufsteigende UI-Sichtbarkeit). Kein Smolit-First hier — das ist
@@ -84,7 +80,6 @@ const _VISUAL_ACTION_MODE_OPTIONS: Array = [
 ## `_ready` einmalig aufgelöst; fehlen sie (z. B. unter headless),
 ## bleibt das Panel still.
 @export var avatar_path: NodePath = ^"../Avatar"
-@export var workflow_overlay_path: NodePath = ^"../WorkflowOverlay"
 @export var main_controller_path: NodePath = ^".."
 ## PR 16: optionaler Zugriff auf das Workflow-Visibility-Panel für den
 ## Toggle. Fehlt der Knoten (älterer Build), bleibt der Toggle-Button
@@ -92,7 +87,6 @@ const _VISUAL_ACTION_MODE_OPTIONS: Array = [
 @export var workflow_visibility_path: NodePath = ^"../WorkflowVisibilityPanel"
 
 var _avatar: Node = null
-var _workflow_overlay: Node = null
 var _main_controller: Node = null
 var _workflow_visibility: Node = null
 var _workflow_visibility_toggle: CheckBox = null
@@ -104,7 +98,6 @@ var _intensity_slider: HSlider = null
 var _intensity_value: Label = null
 var _save_button: Button = null
 var _save_status: Label = null
-var _phase_buttons: Array = []
 var _visual_action_mode_picker: OptionButton = null
 var _visual_action_mode_save_button: Button = null
 var _visual_action_mode_save_status: Label = null
@@ -126,7 +119,6 @@ func _ready() -> void:
 	visible = true
 
 	_avatar = get_node_or_null(avatar_path)
-	_workflow_overlay = get_node_or_null(workflow_overlay_path)
 	_main_controller = get_node_or_null(main_controller_path)
 	_workflow_visibility = get_node_or_null(workflow_visibility_path)
 
@@ -197,9 +189,10 @@ func _build_ui() -> void:
 	var sep2 := HSeparator.new()
 	sep2.modulate = Color(1, 1, 1, 0.3)
 	root.add_child(sep2)
-
-	# Overlay preview section
-	root.add_child(_build_overlay_section())
+	# PR 33: Workflow-Overlay-Preview-Block entfernt. Der alte
+	# Drei-Knoten-Workflow-Overlay-Spike lebt nicht mehr; das
+	# Workflow Visibility Overlay v1 (PR 16) hat seinen eigenen
+	# Toggle im Dev-Panel weiter oben.
 
 
 func _build_avatar_section() -> Control:
@@ -348,37 +341,6 @@ func _build_visual_action_mode_section() -> Control:
 	return box
 
 
-func _build_overlay_section() -> Control:
-	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 4)
-
-	var title := Label.new()
-	title.text = "Workflow overlay preview"
-	title.add_theme_font_size_override("font_size", 10)
-	title.modulate = Color(1, 1, 1, 0.6)
-	box.add_child(title)
-
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 4)
-	box.add_child(row)
-
-	_phase_buttons.clear()
-	for phase_name in _PHASE_PREVIEWS:
-		var btn := Button.new()
-		btn.text = str(phase_name).capitalize()
-		btn.pressed.connect(_on_phase_preview_pressed.bind(phase_name))
-		row.add_child(btn)
-		_phase_buttons.append(btn)
-
-	var hint := Label.new()
-	hint.text = "Preview is local to this overlay; no Core events are sent."
-	hint.add_theme_font_size_override("font_size", 9)
-	hint.modulate = Color(1, 1, 1, 0.45)
-	box.add_child(hint)
-
-	return box
-
-
 # --- Live-Sync des Pickers mit dem Avatar -------------------------------
 
 
@@ -496,13 +458,6 @@ func _show_save_status(text: String, color: Color) -> void:
 		return
 	_save_status.text = text
 	_save_status.modulate = color
-
-
-func _on_phase_preview_pressed(phase_name: String) -> void:
-	if _workflow_overlay == null or not _workflow_overlay.has_method("preview_phase"):
-		return
-	_workflow_overlay.preview_phase(phase_name)
-	print("[dev-controls] overlay preview: %s" % phase_name)
 
 
 func _on_visual_action_mode_selected(_index: int) -> void:

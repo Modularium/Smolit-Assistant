@@ -32,8 +32,7 @@ extends RefCounted
 ##     Smolit Salamander ist der Referenz-Avatar. DEFAULT-Theme +
 ##     CALM-Profile + Unity-Overrides *muss* dasselbe Rendering
 ##     liefern wie vor dieser Phase (Identitätsgarantie, unten im
-##     `workflow_overlay_state_smoke`/`avatar_appearance_smoke`-Stil
-##     überprüft).
+##     `avatar_appearance_smoke`-Stil überprüft).
 ##
 ## Das Modul hat absichtlich **keinen Zustand**: es liefert
 ## Factory-Dicts und pure static Resolve-Funktionen. Der Avatar-

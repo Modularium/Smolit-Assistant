@@ -11,4 +11,3 @@ offset_bottom = 180.0
 mouse_filter = 1
 script = ExtResource("1_dev_ctrl")
 avatar_path = NodePath("../Avatar")
-workflow_overlay_path = NodePath("../WorkflowOverlay")

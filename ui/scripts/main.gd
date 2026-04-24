@@ -80,7 +80,6 @@ var _current_selected_target: Dictionary = {}
 @onready var _ping_button: Button = $VBox/DockPanel/DockVBox/InputRow/PingButton
 
 @onready var _avatar: Control = $Avatar
-@onready var _workflow_overlay: Node = $WorkflowOverlay
 
 ## Aktiver Visual Action Mode (MVP, rein UI-Staging — kein Produktversprechen
 ## einer echten Bewegungsbahn oder Zielkoordinaten). Wird in `_ready` aus
@@ -1071,14 +1070,11 @@ func _resolve_visual_action_mode() -> void:
 func _apply_visual_action_staging() -> void:
 	var banner_alpha: float = float(_visual_action_staging.get("banner_alpha", 1.0))
 	_action_banner.modulate.a = clampf(banner_alpha, 0.0, 1.0)
-
-	if _workflow_overlay != null:
-		var allowed: bool = bool(_visual_action_staging.get("workflow_overlay_allowed", true))
-		var overlay_alpha: float = float(_visual_action_staging.get("workflow_overlay_alpha", 1.0))
-		if _workflow_overlay.has_method("set_external_enabled"):
-			_workflow_overlay.call("set_external_enabled", allowed)
-		if _workflow_overlay.has_method("set_external_alpha"):
-			_workflow_overlay.call("set_external_alpha", clampf(overlay_alpha, 0.0, 1.0))
+	# PR 33: Workflow-Overlay-Staging entfallen — der alte
+	# Drei-Knoten-Spike ist nicht mehr in main.tscn. Das Workflow
+	# Visibility Overlay v1 (PR 16) hat eine eigene
+	# `SMOLIT_WORKFLOW_OVERLAY`-Env-Gate und reagiert nicht auf
+	# Visual-Action-Staging; keine äquivalente Wiring-Linie nötig.
 
 
 ## Öffentliche API für Dev-Controls / Tests. Setzt den Mode zur

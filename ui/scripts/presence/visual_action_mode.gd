@@ -128,55 +128,50 @@ static func label_of(mode: int) -> String:
 		_: return "Minimal feedback"
 
 
-## Staging-Tabelle. Pro Modus genau vier deterministische Werte:
+## Staging-Tabelle. Pro Modus deterministische Werte.
+##
+## Felder heute:
 ##
 ##   * `banner_visible` (bool) — soll das Action-Banner überhaupt
 ##     während aktiver Actions angezeigt werden?
 ##   * `banner_alpha` (float, 0.0..1.0) — zusätzlicher Alpha-
 ##     Multiplikator auf das Banner-`modulate`. Nur wenn
 ##     `banner_visible` gilt.
-##   * `workflow_overlay_allowed` (bool) — darf das Workflow-Overlay
-##     überhaupt sichtbar werden? Seine interne Flow-Sichtbarkeit
-##     wird davon **gate**d (nicht gekillt) — bei `false` bleibt das
-##     Overlay zwangsweise versteckt.
-##   * `workflow_overlay_alpha` (float, 0.0..1.0) — zusätzlicher
-##     Alpha-Multiplikator auf den Overlay-Root. Nur wenn
-##     `workflow_overlay_allowed` gilt.
 ##
 ## Werte sind bewusst klein: `none` versteckt alles, die drei anderen
 ## Stufen unterscheiden sich nur in Nuancen. Das ist ehrlich — das
 ## heutige UI-System kann weder echte Bewegungsbahnen noch Ziel-
 ## koordinaten inszenieren; `guided_movement` und `full_theatrical`
 ## bleiben hier **reine In-Place-Intensitätsstufen**.
+##
+## **PR 33** hat die früheren `workflow_overlay_allowed` /
+## `workflow_overlay_alpha`-Keys entfernt. Der alte Drei-Knoten-
+## Workflow-Overlay-Spike ist nicht mehr Teil der UI (siehe
+## [`docs/reviews/PR33_WORKFLOW_OVERLAY_CONSOLIDATION.md`](../../../docs/reviews/PR33_WORKFLOW_OVERLAY_CONSOLIDATION.md)).
+## Das Workflow Visibility Overlay v1 (PR 16) hat seine eigene
+## `SMOLIT_WORKFLOW_OVERLAY`-Env-Gate und reagiert nicht auf diese
+## Staging-Tabelle.
 static func staging_for(mode: int) -> Dictionary:
 	match coerce(mode):
 		Mode.NONE:
 			return {
 				"banner_visible": false,
 				"banner_alpha": 0.0,
-				"workflow_overlay_allowed": false,
-				"workflow_overlay_alpha": 0.0,
 			}
 		Mode.MINIMAL_FEEDBACK:
 			return {
 				"banner_visible": true,
 				"banner_alpha": 0.75,
-				"workflow_overlay_allowed": false,
-				"workflow_overlay_alpha": 0.0,
 			}
 		Mode.GUIDED_MOVEMENT:
 			return {
 				"banner_visible": true,
 				"banner_alpha": 0.92,
-				"workflow_overlay_allowed": true,
-				"workflow_overlay_alpha": 0.80,
 			}
 		Mode.FULL_THEATRICAL:
 			return {
 				"banner_visible": true,
 				"banner_alpha": 1.00,
-				"workflow_overlay_allowed": true,
-				"workflow_overlay_alpha": 1.00,
 			}
 		_:
 			# coerce sollte das nie produzieren; defensiver Fallback.
