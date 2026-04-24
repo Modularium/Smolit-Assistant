@@ -92,9 +92,9 @@ liegen vor.
 neue Kinds additiv.
 **Nächster kleinster PR:**
 
-- **PR 26 C-STT-Alternative:** `whisper.cpp` als zweites
-  `STT`-Kind. Weiterhin command-basiert, keine Binär-Abhängigkeit
-  im Core-Build.
+- **PR 27 C-STT-Alternative** *(neu nach ADR-Insertion; vorher als
+  PR 26 geführt):* `whisper.cpp` als zweites `STT`-Kind. Weiterhin
+  command-basiert, keine Binär-Abhängigkeit im Core-Build.
 
 **Nicht-Ziele:**
 
@@ -116,28 +116,41 @@ neue Kinds additiv.
 ## D — Provider / Settings Consolidation
 
 **Status:** 4 Text-Kinds wählbar (abrain / llamafile_local /
-local_http / cloud_http); Settings-Shell zeigt alle als read-only
-Readout; cloud_http funktioniert mit API-Key aus Secrets-Store.
-**Warum wichtig:** Die UX ist heute Dev-orientiert — ein First-Run-
-Pfad für cloud_http ist nicht kuratiert; Default-Ketten sind
-konservativ auf `["abrain"]`.
-**Blocker:** keine technischen; rein Produkt-Entscheidung.
-**Nächster kleinster PR:**
-
-- **PR 25 D-Provider-Onboarding-UX:** beim ersten Start eine
-  kuratierte Default-Ketten-Auswahl (ohne Core-Default zu ändern);
-  cloud_http-API-Key-Onboarding in der Settings-Shell ehrlicher
-  labeln.
+local_http / cloud_http); Settings-Shell zeigt alle als editierbare
+Per-Kind-Blöcke (PR 5/7/8/10/11) plus Chain-Editor (PR 9/13);
+cloud_http funktioniert mit API-Key aus Secrets-Store. PR 26
+(2026-04-24) liefert zusätzlich einen kuratierten **Provider-
+Onboarding-Block** oberhalb der Editoren: Primary + Chain mit
+Lokalitäts-Tags, cloud_http-First-Run-Checklist und eine einzige
+Quick-Action „Use local-first chain" (sendet den bestehenden
+`settings_set_text_provider_chain`-Command mit
+`["llamafile_local","local_http","abrain"]`, kein cloud_http).
+**Warum wichtig:** Die UX war dev-orientiert — neue Nutzer konnten
+kaum erkennen, was primary ist, was lokal bleibt und was cloud_http
+vor dem First-Run noch braucht. PR 26 beantwortet das im Readout,
+ohne Defaults zu ändern.
+**Blocker:** keine; rein Produkt-/UX-Arbeit.
+**Nächster kleinster PR:** kein zwingender D-PR in der nahen Reihe.
+Mögliche Folgearbeit (ohne Priorität): `Add cloud_http to chain` von
+per-Design-disabled auf kontrollierten Klick umstellen; dafür müsste
+eine bewusste „ich nehme Cloud in Kauf"-Confirmation-UX kommen, die
+in PR 26 ausdrücklich *nicht* gebaut ist.
 
 **Nicht-Ziele:**
 
 - Keine Änderung des Compile-Time-Defaults `["abrain"]`.
 - Keine Auto-Cloud-Aktivierung.
 - Keine neuen Provider-Kinds.
+- Keine neuen IPC-Commands durch PR 26 — der Block reutilisiert das
+  bestehende Settings-Protokoll.
+- Keine API-Key-Anzeige (`cloud_http_secret_present` bleibt Boolean-
+  only in allen Readouts).
 
 **Tests / Verifikation:**
 
-- `settings-shell-smoke` bleibt grün.
+- `settings-shell-smoke` bleibt grün; PR 26 ergänzt acht Checks im
+  selben Harness (`_check_onboarding_*`), inkl. einer expliziten
+  „kein Wert für den API-Key"-Invariante.
 - Der bestehende `probe`-Pfad (Llamafile / local_http / cloud_http)
   wird weiterhin genutzt; keine Änderung der Probe-Semantik.
 

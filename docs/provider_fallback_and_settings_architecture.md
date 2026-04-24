@@ -1262,3 +1262,87 @@ aber wie eine sensitive-lite-Ressource behandelt:
   und wird nirgendwo zurückgespiegelt; die Probe-Response
   trägt nur die kuratierten Klassen und numerische Status-
   Codes.
+
+## 12. Provider-Onboarding UX v1 (PR 26)
+
+PR 26 legt oberhalb der bestehenden Editoren einen kuratierten
+**Provider-Onboarding-Block** ab, der das *Lesen* der Provider-
+Konfiguration anleitet. Keine neue Provider-Fähigkeit, kein neues
+IPC-Command, keine Default-Änderung.
+
+### 12.1 Was der Block zeigt
+
+- **Primary provider** — bevorzugt `text_provider_active`, fällt auf
+  das erste Kind der `text_provider_chain` zurück, dann auf
+  `text_provider_configured`, zuletzt auf einen `—`-Platzhalter. Jeder
+  Name wird mit seiner Lokalitäts-Klassifikation gerendert
+  (`abrain [local]`, `cloud_http [cloud]`, …).
+- **Chain mit Lokalität** — `text_provider_chain` wird als `kind
+  [locality]`-Liste mit `→` getrennt dargestellt. Unbekannte Kinds
+  bekommen `[unknown]` — die UI erfindet keine Sicherheitsaussage.
+- **cloud_http First-Run Checklist** — vier Zeilen plus eine
+  Zusammenfassungszeile, die direkt aus den bestehenden Status-
+  Feldern gespeist wird:
+  - `cloud_http enabled` — `cloud_http_enabled`
+  - `cloud_http endpoint` — `cloud_http_configured` (set/missing)
+  - `cloud_http api key` — `cloud_http_secret_present` (present/not set;
+    **nie** ein Wert)
+  - `cloud_http in chain` — `cloud_http_in_chain`
+  - `cloud_http ready` — `ready` (alle vier true) vs.
+    `first-run steps pending`
+
+### 12.2 Quick Actions
+
+- **`Use local-first chain`** — sendet
+  `settings_set_text_provider_chain` mit der kuratierten Liste
+  `["llamafile_local", "local_http", "abrain"]`. Keine Persistenz
+  außerhalb des bestehenden Settings-Store-Pfads; der Core-Validator
+  filtert unbekannte Kinds wie in PR 9 beschrieben.
+- **`Add cloud_http to chain`** — **bleibt per Design disabled**,
+  selbst wenn alle vier Bereitschafts-Flags grün sind. Der Button
+  ist Sichtbarkeits-Artefakt, keine Quick-Action. Daneben steht der
+  Erklärtext aus `add_cloud_disabled_reason()` bzw. ein neutraler
+  „use the cloud_http editor below"-Hinweis. Grund: Cloud bleibt
+  bewusst Opt-in, das Hinzufügen zur Chain soll eine bewusste
+  Handlung im `cloud_http`-Editor sein.
+
+### 12.3 Cloud-HTTP First-Run — Klartexte
+
+Die UI-Konstanten in `ui/scripts/settings/provider_onboarding.gd`
+halten die Erklärtexte an einem Ort:
+
+- `LOCAL_FIRST_HINT_TEXT` — begründet den lokalen Default.
+- `NO_AUTO_CLOUD_TEXT` — hält fest: „Cloud wird nicht automatisch
+  aktiviert. cloud_http landet nur dann in der Chain, wenn du es
+  explizit setzt — diese Shell schaltet das nicht für dich."
+
+### 12.4 Security-Invarianten des Onboarding-Blocks
+
+- **Kein API-Key im Readout.** Die Checklist liest
+  `cloud_http_secret_present` als Boolean und rendert `present` /
+  `not set` — niemals den Wert. Smoke:
+  `_check_onboarding_cloud_secret_never_leaks_value`.
+- **Kein neuer Secrets-Pfad.** Der Block setzt / löscht keine
+  Schlüssel; der bestehende `settings_set_cloud_http_secret` /
+  `settings_clear_cloud_http_secret`-Pfad im `cloud_http`-Editor
+  darunter bleibt Single-Source für Key-Änderungen.
+- **Keine Auto-Cloud-Aktivierung.** Die Quick-Action setzt *keine*
+  Chain, die `cloud_http` enthält; der Add-Cloud-Button bleibt
+  disabled. Smoke:
+  `_check_onboarding_local_first_quick_action_sends_expected_chain`
+  und `_check_onboarding_add_cloud_button_stays_disabled_by_design`.
+- **Keine echten Netzwerk-Requests im Smoke.** Der UI-Smoke benutzt
+  keinen `IpcClient` und prüft nur die Datenflüsse im Panel-Controller
+  (`simulate_local_first_chain_for_test` mit `null`-Stub).
+
+### 12.5 Nicht-Ziele (PR 26)
+
+- Keine neuen Provider-Kinds, kein Änderung des Compile-Time-Defaults
+  `["abrain"]`.
+- Keine Auto-Cloud-Aktivierung, keine automatische Chain-Injektion.
+- Keine neuen `*_snapshot`-IPC-Envelopes — der Block liest nur aus
+  dem bestehenden `StatusPayload`.
+- Keine API-Key-Anzeige, kein zweiter Secret-Store.
+- Keine Änderung am Core-Policy-v0-Verhalten (PR 25).
+- Kein Smolitux-Design-Token-Mapping in diesem PR (siehe ADR-0001,
+  PR 24).

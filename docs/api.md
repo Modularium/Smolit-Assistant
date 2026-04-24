@@ -146,6 +146,20 @@ PR 7 erweitert):
 - `settings_set_tts_provider_chain` / `settings_reset_tts_provider_chain`
   (PR 13) — spiegel für die TTS-Achse.
 
+**PR 26 — Provider-Onboarding UX v1 (keine neuen IPC-Commands).**
+Der in der Settings-Shell ergänzte Onboarding-Block (siehe
+[`docs/ui_architecture.md §8d.5g`](./ui_architecture.md) und
+[`docs/provider_fallback_and_settings_architecture.md §12`](./provider_fallback_and_settings_architecture.md))
+**erweitert das IPC-Protokoll nicht**. Er liest nur bestehende
+`StatusPayload`-Felder (`text_provider_active`, `text_provider_chain`,
+`text_provider_configured`, `cloud_http_enabled`,
+`cloud_http_configured`, `cloud_http_secret_present`,
+`cloud_http_in_chain`). Die Quick-Action „Use local-first chain"
+sendet denselben `settings_set_text_provider_chain`-Command aus PR 9
+mit der Payload `{"chain":["llamafile_local","local_http","abrain"]}`
+— kein neuer Command-Typ. Die Quick-Action „Add cloud_http to chain"
+ist per Design **disabled** und emittiert keinen Command.
+
 Beispiele:
 
 ```json

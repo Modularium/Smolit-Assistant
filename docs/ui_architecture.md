@@ -2989,6 +2989,97 @@ einem älteren Core, bleibt eine ehrliche „—"-Zelle stehen.
 - `StatusPayload` bekommt additiv `stt_provider_chain` /
   `tts_provider_chain`.
 
+### 8d.5g Provider-Onboarding-Block (PR 26, Ist-Zustand)
+
+PR 26 setzt **über** den bestehenden Text-Provider-Editoren einen
+kuratierten, erklärenden Onboarding-Block in die Settings-Shell. Er
+erweitert die Shell um eine Onboarding-Perspektive, ohne eine neue
+Settings-Architektur einzuführen: keine neue Scene, keine neuen IPC-
+Commands, keine neuen `StatusPayload`-Felder.
+
+**Position im Layout.** Der Block lebt als erster Eintrag unter der
+`TEXT_PROVIDER`-Sektion in
+[`settings_panel_controller._render_sections`](../ui/scripts/settings/settings_panel_controller.gd) —
+direkt über dem Chain-Editor aus PR 9 und über den Per-Kind-Editoren
+(llamafile, local_http, cloud_http).
+
+**Aufbau.** Der Block ist in zwei Dateien geteilt:
+
+- **Pure Helper.**
+  [`ui/scripts/settings/provider_onboarding.gd`](../ui/scripts/settings/provider_onboarding.gd)
+  hält die Klassifikations-Logik (`primary_provider`,
+  `chain_with_locality`, `locality_for`,
+  `cloud_http_readiness`, `cloud_http_readiness_rows`,
+  `add_cloud_disabled_reason`,
+  `add_cloud_button_should_stay_disabled`) und die Konstanten
+  (`LOCAL_FIRST_CHAIN`, `LOCAL_FIRST_HINT_TEXT`,
+  `NO_AUTO_CLOUD_TEXT`, Button-Labels, Disabled-Reasons). Keine
+  Scene-Nodes, kein EventBus — die Logik ist direkt im Smoke
+  prüfbar.
+- **Panel-Integration.** `_build_provider_onboarding_block()` im
+  bestehenden `settings_panel_controller.gd` baut die Widgets
+  einmal pro Re-Render, `_sync_provider_onboarding_from_status()`
+  aktualisiert Werte in-place. Ein
+  `provider_onboarding_snapshot()`-Helfer und ein
+  `simulate_local_first_chain_for_test()`-Hook bedienen den
+  Smoke-Test ohne SceneTree-Introspektion.
+
+**Sichtbare Zeilen.**
+
+- **Primary** — `text_provider_active` > `text_provider_chain[0]` >
+  `text_provider_configured` > `—`; jeder Name mit `[local]` /
+  `[cloud]` / `[unknown]` nachgestellt.
+- **Chain** — `text_provider_chain` als `kind [locality]`-Pfeilliste.
+  Unbekannte Kinds bekommen ehrlich `[unknown]`.
+- **cloud_http first-run checklist** — vier Boolean-Rows plus eine
+  Zusammenfassungszeile. `cloud_http_secret_present` wird **nur** als
+  `present` / `not set` gerendert — niemals ein Wert.
+- **Quick Actions.**
+  - `Use local-first chain` sendet den bestehenden
+    `settings_set_text_provider_chain`-Command mit der kuratierten
+    Liste `["llamafile_local", "local_http", "abrain"]`. Kein
+    `cloud_http`.
+  - `Add cloud_http to chain` bleibt **per Design disabled** — die
+    Shell aktiviert Cloud nicht automatisch; der Erklärtext aus
+    `add_cloud_disabled_reason()` wandert mit dem Bereitschafts-
+    Zustand mit.
+- **No-auto-cloud Hinweis** — fester Erklärtext unter den Actions:
+  „Cloud wird nicht automatisch aktiviert. cloud_http landet nur
+  dann in der Chain, wenn du es explizit setzt — diese Shell
+  schaltet das nicht für dich."
+
+**Was der Block bewusst *nicht* tut.**
+
+- Kein neuer Secrets-Pfad. Key-Änderungen bleiben im
+  `cloud_http`-Editor darunter (`settings_set_cloud_http_secret`
+  und `settings_clear_cloud_http_secret`).
+- Keine API-Key-Anzeige — nur das Boolean `cloud_http_secret_present`.
+- Keine neuen IPC-Commands. Der Core-Kontrakt bleibt unverändert.
+- Keine Änderung der Text-Provider-Defaults oder der Compile-Time-
+  Chain.
+- Kein Auto-Add von `cloud_http` zur Chain — auch dann nicht, wenn
+  alle vier Bereitschafts-Flags grün sind.
+
+**Smoke-Abdeckung** (ergänzt in
+[`scripts/settings_shell_smoke.gd`](../scripts/settings_shell_smoke.gd)):
+
+- `_check_onboarding_pure_logic` — primary_provider /
+  locality_for / chain_with_locality / cloud_http_readiness /
+  add_cloud_disabled_reason auf Dictionary-Ebene.
+- `_check_onboarding_block_renders_primary_and_chain` — Widgets
+  bauen sich auf, primary + chain zeigen `[local]` / `[cloud]`.
+- `_check_onboarding_cloud_readiness_rows_render` — vier Rows mit
+  ehrlichen First-Run-Klassen.
+- `_check_onboarding_cloud_secret_never_leaks_value` — API-Key-Row
+  zeigt nur `present`, nie einen Wert.
+- `_check_onboarding_local_first_hint_and_no_auto_cloud_present`
+  / `_check_onboarding_add_cloud_button_stays_disabled_by_design`
+  — Explain-Konstanten + Button-Policy.
+- `_check_onboarding_local_first_quick_action_sends_expected_chain`
+  — LOCAL_FIRST_CHAIN-Invariante inklusive „kein cloud_http".
+- `_check_onboarding_empty_status_renders_dashes` — leerer Status
+  crasht nicht.
+
 ### 8d.6 Verifikation
 
 - `scripts/settings_shell_smoke.gd` (seit PR 13 zusätzlich um sechs
