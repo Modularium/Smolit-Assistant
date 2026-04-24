@@ -907,7 +907,10 @@ kein Confirmation-Kanal existiert. Das ist der ehrliche MVP-Zustand
   auf und liefert bei Erfolg bewusst `uncertain`, weil keine
   Fokus-Probe existiert. Ohne Template oder unter Wayland meldet
   der Core ehrlich `BackendUnsupported("focus_window")` statt einen
-  Pseudo-Erfolg zu fälschen. Siehe [api.md](./api.md), §2.6.
+  Pseudo-Erfolg zu fälschen. Siehe [api.md](./api.md), §2.6. Dieser
+  Zustand ist per PR 23 (2026-04-24) als finaler MVP-Stand
+  bestätigt — Details in
+  [`docs/reviews/PR23_FOCUS_WINDOW_DECISION.md`](./reviews/PR23_FOCUS_WINDOW_DECISION.md).
 - Kein Window-Probe, kein Screenshot, kein OCR, keine globale
   Eingabe. Verification bleibt „best-effort" und wird im
   `action_verification`-Event mit dem Präfix `Best-effort:` klar

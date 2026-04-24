@@ -181,32 +181,53 @@ Aktionen werden standardmäßig gated".
 
 ## F — Desktop Interaction Layer
 
-**Status:** `open_application` real; `focus_window` / `type_text` /
-`send_shortcut` sind `BackendUnsupported` im `CommandBackend`.
-Accessibility-Probe + Discovery antworten ehrlich mit
-`unavailable` / `uncertain`.
-**Warum wichtig:** Halbfertige Interaction-Kinds signalisieren
-Fähigkeit, die nicht existiert. Entweder als Spike umsetzen oder
-sauber entfernen.
-**Blocker:** reale Wayland/X11-WM-Abhängigkeit für `focus_window`
-(wmctrl / swaymsg / AT-SPI).
+**Status:** `open_application` real; `focus_window` real als
+template-basierter X11-Backend-Pfad (`CommandBackend`,
+`SMOLIT_INTERACTION_FOCUS_WINDOW_CMD`, z. B. `wmctrl -a {name}`) —
+ohne Template und/oder unter Wayland honest
+`BackendUnsupported("focus_window")`, Verification bewusst
+`uncertain`; `type_text` / `send_shortcut` bleiben
+`BackendUnsupported` im `CommandBackend`. Accessibility-Probe +
+Discovery antworten ehrlich mit `unavailable` / `uncertain`.
+PR 23 (2026-04-24) hat `focus_window` als Option 1 bestätigt —
+keine Entfernung, keine Erweiterung; Details in
+[`docs/reviews/PR23_FOCUS_WINDOW_DECISION.md`](./reviews/PR23_FOCUS_WINDOW_DECISION.md).
+**Warum wichtig:** Halbfertige Interaction-Kinds dürfen nicht
+Fähigkeit signalisieren, die nicht existiert — `focus_window` ist
+jetzt final als „template opt-in, sonst ehrlich unsupported"
+gesetzt; `type_text` / `send_shortcut` bleiben bewusst
+stub-unterstützt ohne Backend.
+**Blocker:** keine technischen Blocker; weitere Interaction-Kinds
+(`type_text` / `send_shortcut`) brauchen eine eigene Policy-
+Entscheidung vor Backend-Arbeit.
 **Nächster kleinster PR:**
 
-- **PR 23 F-focus_window-Spike:** entweder reale `wmctrl`-Verdrahtung
-  **hinter** Policy-Gating oder ehrliche Entfernung der
-  `BackendUnsupported`-Variante. Entscheidung dokumentieren.
+- **Kein eigener F-PR in der nahen Reihe.** `focus_window` ist mit
+  PR 23 abgeschlossen; die offene Next-Step-Arbeit ist Workstream E
+  (Policy-Verdrahtung, PR 24). `type_text` / `send_shortcut`
+  bekommen keinen Backend-Pfad vor Policy.
 
 **Nicht-Ziele:**
 
-- Kein `type_text` / `send_shortcut` in diesem Schritt.
+- Kein `type_text` / `send_shortcut` Backend, solange Policy-
+  Gating (Workstream E) nicht verdrahtet ist.
 - Keine AT-SPI-RPC-Integration (das ist eigener Spike).
-- Kein parallel-WM-Backend-Pfad.
+- Keine Wayland-Fokus-Lösung (kein generisches Protokoll-Primitiv;
+  Core verspricht unter Wayland weiterhin keinen Fokuswechsel).
+- Keine Fokus-Probe (Verification bleibt `uncertain`).
 
 **Tests / Verifikation:**
 
-- Neuer `tokio::test` für `focus_window`-Pfad, falls verdrahtet.
-- Harness-Case in `scripts/run_overlay_verification.sh`, falls UI
-  beteiligt ist.
+- Bestehende Core-Tests decken alle Zweige ab:
+  `focus_window_disallowed_emits_failed`,
+  `focus_window_without_backend_template_emits_unsupported`,
+  `focus_window_with_template_emits_verification_and_completed`,
+  plus vier Backend-Direkt-Tests (ohne Template, ohne Ziel, mit
+  `/bin/true`, mit `/bin/false`) und fünf IPC-Server-End-to-End-
+  Tests (disallowed, unsupported ohne Template, success, application-
+  target-Mapping, Approval-Flow).
+- Keine UI-Referenzen (rg auf `ui/` liefert null Treffer), daher
+  keine neue Smoke-Rolle nötig.
 
 ---
 

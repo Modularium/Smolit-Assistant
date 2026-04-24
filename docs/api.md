@@ -729,6 +729,12 @@ Der Core versucht **nicht**, auf exotische Sonderpfade auszuweichen —
 das Backend sagt ehrlich „das geht hier gerade nicht" und überlässt die
 Entscheidung der UI / dem Nutzer.
 
+Dieser Zustand ist per PR 23 (2026-04-24) als finaler MVP-Stand
+bestätigt: Option 1 („template-basierter X11-Backend via
+`wmctrl -a {name}`, sonst honest `BackendUnsupported`") bleibt;
+kein Wayland-Fokus-Pfad, keine Fokus-Probe. Details in
+[`docs/reviews/PR23_FOCUS_WINDOW_DECISION.md`](./reviews/PR23_FOCUS_WINDOW_DECISION.md).
+
 #### Eventfolge (Fehlerpfade)
 
 Wenn der Layer deaktiviert ist, ein Kind nicht erlaubt ist, das

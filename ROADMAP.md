@@ -194,7 +194,7 @@ ohne vorgeschaltete Policy-Verdrahtung.
 | -- | ---------- | ---------- |
 | 21 | A | Docs-Follow-ups aus PR 20: tote Links, `docs/reviews/`-Index, Glossar-Embryo |
 | 22 | B | Wayland-Compositor-Live-Messung auf separatem Host |
-| 23 | F | `focus_window` Spike: entweder reale `wmctrl`-Verdrahtung hinter Policy oder ehrliche Entfernung |
+| 23 | F | `focus_window` Reality Decision — Option 1 bestätigt (template-basierter X11-Backend via `wmctrl -a {name}` bleibt), Details in [`docs/reviews/PR23_FOCUS_WINDOW_DECISION.md`](./docs/reviews/PR23_FOCUS_WINDOW_DECISION.md) |
 | 24 | E | Policy v0: real `require_confirmation=true` → echter Approval-Pfad für `open_application` |
 | 25 | D | Provider-Onboarding-UX: Default-Ketten und cloud_http-First-Run |
 | 26 | C | STT-Alternative (z. B. `whisper.cpp`), bleibt command-basiert |
@@ -212,9 +212,13 @@ davon würde eine eigene Design-Entscheidung brauchen:
 
 - **Streaming-Audio / Audio-Timeline.** Kein Code-Pfad heute;
   Phonem- und Lip-Sync sind ausdrücklich Phase-C.
-- **Echte Desktop-Automation jenseits `open_application`.** Kein
-  `focus_window` / `type_text` / `send_shortcut` Backend-Pfad,
-  bis Policy-Verdrahtung steht.
+- **Echte Desktop-Automation jenseits `open_application` +
+  `focus_window`.** `focus_window` ist per PR 23 als
+  template-basierter X11-Backend-Pfad bestätigt (opt-in über
+  `SMOLIT_INTERACTION_FOCUS_WINDOW_CMD`, Default leer → honest
+  `BackendUnsupported`). `type_text` / `send_shortcut` bleiben
+  bewusst `BackendUnsupported` im `CommandBackend`, bis
+  Policy-Verdrahtung (Workstream E / PR 24) steht.
 - **AdminBot-Integration / Shell-Zugriff.** Kein Plan.
 - **Stage-C-Avatar-Assets / User-Uploads.**
   [`docs/avatar_stage_c_research.md`](./docs/avatar_stage_c_research.md)
