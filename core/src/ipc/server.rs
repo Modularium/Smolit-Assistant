@@ -176,6 +176,13 @@ async fn dispatch(app: &Arc<App>, raw: &str) -> Vec<OutgoingMessage> {
         IncomingMessage::RequestApprovalDemo { title, summary, risk } => {
             handle_request_approval_demo(app, title, summary, risk).await
         }
+        IncomingMessage::PlanDemoAction {
+            title,
+            summary,
+            risk,
+            kind,
+            requires_approval,
+        } => handle_plan_demo_action(app, title, summary, risk, kind, requires_approval).await,
         IncomingMessage::SettingsSetLlamafileConfig(update) => {
             handle_settings_set_llamafile_config(app, update)
         }
@@ -458,6 +465,29 @@ async fn handle_request_approval_demo(
         title.unwrap_or_default(),
         summary.unwrap_or_default(),
         risk.unwrap_or_default(),
+    )
+    .await
+}
+
+/// PR 18 — IPC-Handler für `plan_demo_action`. Gibt die Klammer-Events
+/// (`action_planned`, optional `approval_requested`) inline zurück;
+/// der Mock-Executor und die Resolution-Frames fließen anschließend
+/// via Broadcast-Kanal. Explizit harmlos — kein Shell, kein Desktop,
+/// kein Provider.
+async fn handle_plan_demo_action(
+    app: &Arc<App>,
+    title: Option<String>,
+    summary: Option<String>,
+    risk: Option<String>,
+    kind: Option<String>,
+    requires_approval: Option<bool>,
+) -> Vec<OutgoingMessage> {
+    app.plan_demo_action(
+        title.unwrap_or_default(),
+        summary.unwrap_or_default(),
+        kind.unwrap_or_default(),
+        risk.unwrap_or_default(),
+        requires_approval.unwrap_or(false),
     )
     .await
 }
@@ -3931,6 +3961,197 @@ mod tests {
         let err = recv_text(&mut ws).await;
         assert!(err.contains(r#""type":"error""#));
         assert!(err.contains("apr_ghost"));
+    }
+
+    // PR 18 — Approval-Gated Demo-Action-Planner.
+
+    #[tokio::test]
+    async fn plan_demo_action_without_approval_runs_inline_mock() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"plan_demo_action","title":"Hi","summary":"Demo","kind":"demo_echo","requires_approval":false}"#.into(),
+        ))
+        .await
+        .unwrap();
+
+        let planned = recv_text(&mut ws).await;
+        assert!(planned.contains(r#""type":"action_planned""#));
+        assert!(planned.contains(r#""title":"Hi""#));
+
+        let started = recv_text(&mut ws).await;
+        assert!(started.contains(r#""type":"action_started""#));
+        let step = recv_text(&mut ws).await;
+        assert!(step.contains(r#""type":"action_step""#));
+        assert!(step.contains("Echo: Hi"));
+        let completed = recv_text(&mut ws).await;
+        assert!(completed.contains(r#""type":"action_completed""#));
+
+        // No follow-up envelopes from the demo path.
+        let peek = tokio::time::timeout(std::time::Duration::from_millis(150), ws.next()).await;
+        assert!(peek.is_err(), "demo mock must not emit follow-up frames: {peek:?}");
+    }
+
+    #[tokio::test]
+    async fn plan_demo_action_with_approval_blocks_until_approve() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"plan_demo_action","title":"Gate me","summary":"Gated","kind":"noop","risk":"high","requires_approval":true}"#.into(),
+        ))
+        .await
+        .unwrap();
+
+        let planned = recv_text(&mut ws).await;
+        assert!(planned.contains(r#""type":"action_planned""#));
+        let requested = recv_text(&mut ws).await;
+        assert!(requested.contains(r#""type":"approval_requested""#));
+        assert!(requested.contains(r#""risk":"high""#));
+        let approval_id = extract_approval_id(&requested);
+
+        // Before approval there must be no action_started / completed.
+        let quiet = tokio::time::timeout(std::time::Duration::from_millis(100), ws.next()).await;
+        assert!(quiet.is_err(), "no action frames may leak before approval: {quiet:?}");
+
+        let approve =
+            format!(r#"{{"type":"approval_approve","approval_id":"{approval_id}"}}"#);
+        ws.send(Message::Text(approve)).await.unwrap();
+
+        let resolved = recv_text(&mut ws).await;
+        assert!(resolved.contains(r#""type":"approval_resolved""#));
+        assert!(resolved.contains(r#""decision":"approved""#));
+        assert!(resolved.contains(r#""source":"user""#));
+
+        let started = recv_text(&mut ws).await;
+        assert!(started.contains(r#""type":"action_started""#));
+        let step = recv_text(&mut ws).await;
+        assert!(step.contains(r#""type":"action_step""#));
+        let completed = recv_text(&mut ws).await;
+        assert!(completed.contains(r#""type":"action_completed""#));
+    }
+
+    #[tokio::test]
+    async fn plan_demo_action_with_approval_denied_emits_cancelled_without_running() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"plan_demo_action","title":"Blocked","kind":"demo_echo","requires_approval":true}"#.into(),
+        ))
+        .await
+        .unwrap();
+
+        let _planned = recv_text(&mut ws).await;
+        let requested = recv_text(&mut ws).await;
+        let approval_id = extract_approval_id(&requested);
+        let deny = format!(r#"{{"type":"approval_deny","approval_id":"{approval_id}"}}"#);
+        ws.send(Message::Text(deny)).await.unwrap();
+
+        let resolved = recv_text(&mut ws).await;
+        assert!(resolved.contains(r#""decision":"denied""#));
+        let cancelled = recv_text(&mut ws).await;
+        assert!(cancelled.contains(r#""type":"action_cancelled""#));
+        assert!(cancelled.contains("denied"));
+
+        // No action_started / completed frames after the cancel.
+        let peek = tokio::time::timeout(std::time::Duration::from_millis(150), ws.next()).await;
+        assert!(peek.is_err(), "denied plan must not execute: {peek:?}");
+    }
+
+    #[tokio::test]
+    async fn plan_demo_action_with_approval_timeout_emits_cancelled() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 1 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"plan_demo_action","title":"Time","requires_approval":true}"#.into(),
+        ))
+        .await
+        .unwrap();
+
+        let _planned = recv_text(&mut ws).await;
+        let _requested = recv_text(&mut ws).await;
+
+        let resolved = recv_text(&mut ws).await;
+        assert!(resolved.contains(r#""decision":"timed_out""#));
+        assert!(resolved.contains(r#""source":"timeout""#));
+
+        let cancelled = recv_text(&mut ws).await;
+        assert!(cancelled.contains(r#""type":"action_cancelled""#));
+        assert!(cancelled.contains("expired"));
+    }
+
+    #[tokio::test]
+    async fn plan_demo_action_double_approve_does_not_double_execute() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"plan_demo_action","requires_approval":true}"#.into(),
+        ))
+        .await
+        .unwrap();
+
+        let _planned = recv_text(&mut ws).await;
+        let requested = recv_text(&mut ws).await;
+        let approval_id = extract_approval_id(&requested);
+        let approve =
+            format!(r#"{{"type":"approval_approve","approval_id":"{approval_id}"}}"#);
+        ws.send(Message::Text(approve.clone())).await.unwrap();
+
+        let _resolved = recv_text(&mut ws).await;
+        let _started = recv_text(&mut ws).await;
+        let _step = recv_text(&mut ws).await;
+        let completed = recv_text(&mut ws).await;
+        assert!(completed.contains(r#""type":"action_completed""#));
+
+        ws.send(Message::Text(approve)).await.unwrap();
+        let second = recv_text(&mut ws).await;
+        assert!(second.contains(r#""type":"error""#));
+        assert!(second.contains(&approval_id));
+
+        // No second mock execution.
+        let peek = tokio::time::timeout(std::time::Duration::from_millis(150), ws.next()).await;
+        assert!(peek.is_err(), "second approve must not produce another completion: {peek:?}");
+    }
+
+    #[tokio::test]
+    async fn plan_demo_action_unknown_kind_falls_back_to_noop_label() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"plan_demo_action","kind":"rm_rf_slash","requires_approval":false}"#.into(),
+        ))
+        .await
+        .unwrap();
+
+        let _planned = recv_text(&mut ws).await;
+        let _started = recv_text(&mut ws).await;
+        let step = recv_text(&mut ws).await;
+        // Unknown kind clamps to noop, whose step label is "No operation".
+        assert!(step.contains("No operation"));
+        let _completed = recv_text(&mut ws).await;
     }
 
     #[tokio::test]

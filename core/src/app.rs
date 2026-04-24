@@ -1007,6 +1007,206 @@ impl App {
         });
     }
 
+    /// PR 18 — Approval-Gated Action Planner v1.
+    ///
+    /// Erzeugt einen kleinen, harmlosen [`DemoPlan`], emittiert
+    /// `action_planned` und — falls `requires_approval=true` — ein
+    /// `approval_requested`. Die eigentliche „Ausführung" ist ein
+    /// Mock (`action_started` → `action_step` → `action_completed`)
+    /// und bewirkt **keinerlei** System-/Shell-/Desktop-/Provider-
+    /// Seiteneffekte. Das Gating ist die eigentliche Produktaussage:
+    /// ohne `approved` startet der Executor nicht.
+    ///
+    /// Sicherheit:
+    ///   * Idempotenz garantiert die
+    ///     [`PendingApprovalRegistry`][crate::approvals::PendingApprovalRegistry]:
+    ///     ein zweiter Approve landet als `error`-Frame, nie als
+    ///     zweite Ausführung.
+    ///   * Timeout / Deny / Cancel beenden den Plan mit
+    ///     `action_cancelled` plus sprechender `message` und führen
+    ///     keinen Mock-Step aus.
+    ///   * Ohne `requires_approval` läuft der Mock unmittelbar, ist
+    ///     aber genauso effektfrei.
+    pub async fn plan_demo_action(
+        self: &Arc<Self>,
+        title: String,
+        summary: String,
+        kind: String,
+        risk: String,
+        requires_approval: bool,
+    ) -> Vec<OutgoingMessage> {
+        let action_id = self.next_action_id();
+        let plan = crate::actions::DemoPlan::new(
+            action_id.clone(),
+            &title,
+            &summary,
+            &kind,
+            &risk,
+            requires_approval,
+        );
+        let mut out: Vec<OutgoingMessage> = Vec::new();
+
+        // `action_planned` trägt den demo-kuratierten Titel. `target`
+        // ist `unknown`, weil die Aktion kein Ziel in der Welt hat.
+        out.push(OutgoingMessage::ActionPlanned {
+            payload: crate::actions::ActionPlannedPayload {
+                action_id: plan.action_id.clone(),
+                action_kind: crate::actions::ActionKind::System,
+                title: plan.title.clone(),
+                description: Some(plan.summary.clone()),
+                target: crate::actions::ActionTarget::unknown(),
+                mapping: None,
+            },
+        });
+
+        if requires_approval {
+            let approval_id = self.next_approval_id();
+            let timeout_seconds = self.config.approval.timeout_seconds;
+            let request = ApprovalRequest {
+                approval_id: approval_id.clone(),
+                action_id: plan.action_id.clone(),
+                action_kind: crate::interaction::InteractionKind::OpenApplication,
+                title: plan.title.clone(),
+                message: plan.summary.clone(),
+                target: crate::actions::ActionTarget::unknown(),
+                reason: Some(format!("demo_plan:{}", plan.kind)),
+                timeout_seconds,
+                selected_target: None,
+                risk: plan.risk.clone(),
+            };
+            let rx = self.pending_approvals.register(&approval_id);
+            out.push(OutgoingMessage::ApprovalRequested { payload: request });
+
+            let app = Arc::clone(self);
+            let plan_task = plan.clone();
+            tokio::spawn(async move {
+                app.await_and_execute_demo_plan(plan_task, approval_id, rx, timeout_seconds)
+                    .await;
+            });
+            return out;
+        }
+
+        // Kein Approval nötig — der Mock läuft direkt. Wir geben dem
+        // Scheduler einen eigenen Task, damit `plan_demo_action` die
+        // Dispatch-Rückgabe nicht künstlich verzögert; die Events
+        // folgen über den Broadcast-Kanal.
+        let app = Arc::clone(self);
+        let plan_task = plan;
+        tokio::spawn(async move {
+            app.execute_demo_plan(plan_task).await;
+        });
+        out
+    }
+
+    async fn await_and_execute_demo_plan(
+        self: Arc<Self>,
+        mut plan: crate::actions::DemoPlan,
+        approval_id: String,
+        rx: tokio::sync::oneshot::Receiver<ApprovalDecision>,
+        timeout_seconds: u64,
+    ) {
+        plan.set_status(crate::actions::DemoPlanStatus::WaitingApproval);
+        let (decision, source) = match timeout(Duration::from_secs(timeout_seconds), rx).await {
+            Ok(Ok(decision)) => (decision, SOURCE_USER.to_string()),
+            Ok(Err(_)) => (ApprovalDecision::Cancelled, SOURCE_SYSTEM.to_string()),
+            Err(_) => {
+                let _ = self.pending_approvals.take(&approval_id);
+                (ApprovalDecision::TimedOut, SOURCE_TIMEOUT.to_string())
+            }
+        };
+        info!(
+            approval_id = %approval_id,
+            action_id = %plan.action_id,
+            decision = decision.as_str(),
+            source = %source,
+            "demo plan approval resolved",
+        );
+
+        self.broadcast(OutgoingMessage::ApprovalResolved {
+            payload: ApprovalResolvedPayload {
+                approval_id,
+                action_id: plan.action_id.clone(),
+                decision: decision.as_str().to_string(),
+                source,
+            },
+        });
+
+        match decision {
+            ApprovalDecision::Approved => {
+                plan.set_status(crate::actions::DemoPlanStatus::Approved);
+                self.execute_demo_plan(plan).await;
+            }
+            ApprovalDecision::Denied => {
+                plan.set_status(crate::actions::DemoPlanStatus::Denied);
+                self.broadcast(OutgoingMessage::ActionCancelled {
+                    payload: crate::actions::ActionCancelledPayload {
+                        action_id: plan.action_id,
+                        status: crate::actions::ActionStatus::Cancelled,
+                        message: Some("Action denied by user".to_string()),
+                    },
+                });
+            }
+            ApprovalDecision::Cancelled => {
+                plan.set_status(crate::actions::DemoPlanStatus::Denied);
+                self.broadcast(OutgoingMessage::ActionCancelled {
+                    payload: crate::actions::ActionCancelledPayload {
+                        action_id: plan.action_id,
+                        status: crate::actions::ActionStatus::Cancelled,
+                        message: Some("Action cancelled".to_string()),
+                    },
+                });
+            }
+            ApprovalDecision::TimedOut => {
+                plan.set_status(crate::actions::DemoPlanStatus::Expired);
+                self.broadcast(OutgoingMessage::ActionCancelled {
+                    payload: crate::actions::ActionCancelledPayload {
+                        action_id: plan.action_id,
+                        status: crate::actions::ActionStatus::Cancelled,
+                        message: Some("Approval expired".to_string()),
+                    },
+                });
+            }
+        }
+    }
+
+    async fn execute_demo_plan(self: Arc<Self>, mut plan: crate::actions::DemoPlan) {
+        if plan.status.is_terminal() {
+            // Idempotenz: ein bereits abgeschlossener Plan darf nicht
+            // ein zweites Mal laufen. Die Executor-Tasks sind zwar
+            // schon einmalig gespawnt, aber diese Guard fängt
+            // zukünftige Re-Entry-Pfade ab.
+            return;
+        }
+        plan.set_status(crate::actions::DemoPlanStatus::Running);
+        self.broadcast(OutgoingMessage::ActionStarted {
+            payload: crate::actions::ActionStartedPayload {
+                action_id: plan.action_id.clone(),
+                phase: crate::actions::ActionPhase::Started,
+            },
+        });
+        self.broadcast(OutgoingMessage::ActionStep {
+            payload: crate::actions::ActionStepPayload {
+                action_id: plan.action_id.clone(),
+                title: plan.step_label(),
+                description: None,
+            },
+        });
+        // Einziger „echter" Seiteneffekt: `demo_wait` hält die Task
+        // kurz an, damit der Step-Event als eigenständiger Moment auf
+        // der Leitung landet. Keine Aufgabe an die Welt.
+        if plan.kind == crate::actions::DEMO_KIND_WAIT {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        plan.set_status(crate::actions::DemoPlanStatus::Completed);
+        self.broadcast(OutgoingMessage::ActionCompleted {
+            payload: crate::actions::ActionCompletedPayload {
+                action_id: plan.action_id,
+                status: crate::actions::ActionStatus::Completed,
+                message: Some("Demo plan completed (no side effects)".to_string()),
+            },
+        });
+    }
+
     /// Entry point for IPC handlers. Plans the interaction, checks
     /// policy, and either:
     ///   * refuses the action (layer disabled / kind disallowed),

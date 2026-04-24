@@ -80,6 +80,26 @@ pub enum IncomingMessage {
         #[serde(default)]
         risk: Option<String>,
     },
+    /// PR 18 — Approval-Gated Demo-Action-Planner. Erzeugt einen
+    /// harmlosen `DemoPlan`, emittiert `action_planned` und — wenn
+    /// `requires_approval=true` — ein `approval_requested`. Der Core
+    /// führt danach einen reinen Mock aus
+    /// (`action_started` → `action_step` → `action_completed`); es
+    /// gibt keinen Shell-, Dateisystem-, Desktop- oder Provider-
+    /// Aufruf. Ohne Approval läuft der Mock direkt, bleibt aber
+    /// genauso effektfrei.
+    PlanDemoAction {
+        #[serde(default)]
+        title: Option<String>,
+        #[serde(default)]
+        summary: Option<String>,
+        #[serde(default)]
+        risk: Option<String>,
+        #[serde(default)]
+        kind: Option<String>,
+        #[serde(default)]
+        requires_approval: Option<bool>,
+    },
     /// PR 5 — erster echter Schreibpfad für Settings. Aktualisiert die
     /// editierbaren Felder der `llamafile_local`-Provider-Config und
     /// rebuildet den Resolver. Core antwortet mit einem `status`-
@@ -383,6 +403,50 @@ mod tests {
                 assert!(title.is_none());
                 assert!(summary.is_none());
                 assert!(risk.is_none());
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    // PR 18 — plan_demo_action parser tests.
+
+    #[test]
+    fn parses_plan_demo_action_full_payload() {
+        let raw = r#"{"type":"plan_demo_action","title":"Echo","summary":"Demo echo","risk":"low","kind":"demo_echo","requires_approval":true}"#;
+        match parse_incoming(raw).unwrap() {
+            IncomingMessage::PlanDemoAction {
+                title,
+                summary,
+                risk,
+                kind,
+                requires_approval,
+            } => {
+                assert_eq!(title.as_deref(), Some("Echo"));
+                assert_eq!(summary.as_deref(), Some("Demo echo"));
+                assert_eq!(risk.as_deref(), Some("low"));
+                assert_eq!(kind.as_deref(), Some("demo_echo"));
+                assert_eq!(requires_approval, Some(true));
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_plan_demo_action_empty_payload() {
+        let raw = r#"{"type":"plan_demo_action"}"#;
+        match parse_incoming(raw).unwrap() {
+            IncomingMessage::PlanDemoAction {
+                title,
+                summary,
+                risk,
+                kind,
+                requires_approval,
+            } => {
+                assert!(title.is_none());
+                assert!(summary.is_none());
+                assert!(risk.is_none());
+                assert!(kind.is_none());
+                assert!(requires_approval.is_none());
             }
             other => panic!("unexpected: {other:?}"),
         }

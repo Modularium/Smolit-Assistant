@@ -9,6 +9,7 @@
 
 pub mod event;
 pub mod mapping;
+pub mod plan;
 pub mod target;
 
 pub use event::{
@@ -18,4 +19,10 @@ pub use event::{
 };
 #[allow(unused_imports)]
 pub use mapping::{ActionMapping, ActionSpace};
+pub use plan::{DemoPlan, DemoPlanStatus};
+#[allow(unused_imports)]
+pub use plan::{
+    DEFAULT_DEMO_KIND, DEMO_KIND_ECHO, DEMO_KIND_NOOP, DEMO_KIND_WAIT, KNOWN_DEMO_KINDS,
+    sanitize_kind,
+};
 pub use target::ActionTarget;
