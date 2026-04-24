@@ -1,608 +1,286 @@
 # Smolit Assistant
 
-Smolit Assistant ist als leichtgewichtiger, always-on Hintergrunddienst aufgebaut. Der Fokus dieses Bootstraps liegt auf einem sauberen Rust-Core, einer klar getrennten Adapter-Schicht und einer minimalen CLI, die Eingaben an ABrain weiterreicht.
+Lokal-first, Godot-nativer Desktop-Assistant mit Rust-Core und
+WebSocket-IPC. **Sichtbar, kontrolliert, ehrlich** — kein
+Autonomie-Maximierer.
 
-## Struktur
+## 1. Kurzbeschreibung
+
+Smolit ist ein Linux-Desktop-Assistant aus drei getrennten Schichten:
+
+- **Rust Core** (`core/`) — Orchestrierung, Provider-Fallback,
+  Approval-Engine, Audit-Ring-Buffer, Interaction-Layer, IPC-Server.
+- **Godot-UI** (`ui/`) — Presentation Layer (Avatar, Presence,
+  Approval-Card, Workflow-Overlay). Kein direkter System-Access;
+  hängt ausschließlich am Core via lokalem WebSocket.
+- **ABrain CLI Adapter** — externer Reasoning-Prozess, vom Core über
+  Command-Interface eingebunden.
+
+## 2. Current Status
+
+Honest MVP. Was **heute** in der Hauptlinie lebt:
+
+- **Text-Chat** via ABrain-CLI-Adapter; optional `llamafile_local`,
+  `local_http`, `cloud_http` als Fallback-Provider in der Text-Chain.
+- **STT/TTS** command-basiert (externe Binaries). STT-Whitelist seit
+  PR 27: `command` + `whisper_cpp`. TTS-Whitelist: `command`.
+- **Approval UX v1** — jede `open_application`-Aktion läuft per
+  Default durch die Approval-Kette (Policy v0, PR 25).
+- **Desktop Interaction**: real verdrahtet sind `open_application` und
+  — bei doppeltem Opt-in — `focus_window` (X11-Template-basiert).
+- **Workflow Visibility Overlay v1** + **Approval Card** + **Audit
+  Panel** (dev-only) in der UI.
+- **Accessibility-Probe** (read-only, environment-basiert; kein
+  AT-SPI-RPC).
+- **Local Audit Trail v1** (in-memory Ring-Buffer, Demo-Pfad
+  auditiert).
+
+Was **nicht** funktioniert (absichtlich — siehe §12):
+
+- `type_text`, `send_shortcut` → `BackendUnsupported`.
+- Wayland-`focus_window` → kein Backend.
+- OCR / Vision / Pixel-Matching / Klick auf fremde UI-Elemente → kein
+  Pfad im Code.
+- Cloud-STT/TTS, Streaming-Audio, Lip-Sync → nicht vorhanden.
+
+Ehrlicher Ist-Zustand pro Produktachse:
+[`docs/presence_desktop_interaction.md`](docs/presence_desktop_interaction.md).
+
+## 3. Architecture at a Glance
 
 ```text
-smolit-assistant/
-├── core/                  # Rust daemon
-├── ui/                    # Platzhalter für spätere Godot-UI
-├── adapters/
-│   ├── abrain/
-│   └── adminbot/
-├── config/
-├── docs/
-├── scripts/
-├── .env.example
-├── README.md
-└── ROADMAP.md
+┌────────────────────────┐    ws://127.0.0.1:8787   ┌──────────────────────┐
+│ Godot UI (ui/)         │  ◀───── JSON frames ────▶│ Rust Core (core/)    │
+│ - Avatar, Presence     │                           │ - IPC Server         │
+│ - Approval Card        │                           │ - Approval Engine    │
+│ - Workflow Overlay     │                           │ - Audit Ring-Buffer  │
+│ - Settings Shell       │                           │ - Interaction Layer  │
+└────────────────────────┘                           │ - Provider Resolvers │
+                                                     └───────────┬──────────┘
+                                                                 │
+                                ┌────────────────────────────────┼──────────┐
+                                │                                │          │
+                   ┌────────────▼─────────┐         ┌─────────────▼──────┐  ┌▼───────────┐
+                   │ ABrain CLI adapter   │         │ STT/TTS commands   │  │ Interaction│
+                   │ (text provider chain)│         │ (whisper_cpp, etc.)│  │ Command    │
+                   └──────────────────────┘         └────────────────────┘  │ Backend    │
+                                                                             └────────────┘
 ```
 
-## Setup
+- **Keine eigene Audio-Pipeline** im Core. Externe Commands nehmen
+  auf / sprechen.
+- **Keine eigene Intelligenz** in der UI. Intent + Plan leben in
+  Core + ABrain.
+- **Godot importiert kein React.** Smolit-Assistant bleibt
+  Godot-nativ; der Smolitux Design Contract (ADR-0001) koppelt das
+  Assistant-UI über Design-Tokens (später) statt über Komponenten-
+  Import. Details:
+  [`docs/adr/ADR-0001-smolitux-design-contract.md`](docs/adr/ADR-0001-smolitux-design-contract.md).
 
-ABrain muss lokal verfügbar sein. Standardmäßig wird der Befehl `abrain` verwendet.
+## 4. Requirements
 
-Optionale Konfiguration über `.env` im Repo-Root:
+- **Rust 1.85+** (Cargo-Edition 2024 in
+  [`core/Cargo.toml`](core/Cargo.toml)).
+- **Godot 4.6** (siehe
+  [`ui/project.godot`](ui/project.godot) `config/features`). 4.2+
+  kann reichen, 4.6 ist getestet.
+- **Linux-Desktop**. Ziel-Session GNOME/Wayland (Ubuntu 24.04); X11
+  wird zusätzlich für `focus_window` und Always-on-top-Sonderpfad
+  unterstützt.
+- **Optional** (nur wenn du den jeweiligen Pfad aktivierst):
+  - **ABrain-CLI** (externer Reasoning-Prozess).
+  - **TTS-Command** (z. B. `espeak`, `piper`, `kokoro`).
+  - **STT-Command** (z. B. `whisper`, eigener Wrapper).
+  - **whisper.cpp-Binary** (für STT-Chain-Opt-in über
+    `SMOLIT_STT_WHISPER_CPP_CMD`).
+  - **`wmctrl`** (für X11-`focus_window` über `wmctrl -a {name}`).
 
-```env
-ABRAIN_CMD=abrain
-LOG_LEVEL=info
+## 5. Quick Start
 
-SMOLIT_TTS_ENABLED=true
-SMOLIT_TTS_CMD=
-SMOLIT_STT_ENABLED=true
-SMOLIT_STT_CMD=
-SMOLIT_AUDIO_AUTO_SPEAK=true
-SMOLIT_STT_TIMEOUT_SECONDS=20
-SMOLIT_TTS_TIMEOUT_SECONDS=20
-
-SMOLIT_IPC_ENABLED=true
-SMOLIT_IPC_BIND=127.0.0.1:8787
-
-SMOLIT_INTERACTION_ENABLED=true
-SMOLIT_INTERACTION_BACKEND=command
-SMOLIT_INTERACTION_ALLOW_OPEN_APP=true
-SMOLIT_INTERACTION_ALLOW_TYPE_TEXT=false
-SMOLIT_INTERACTION_ALLOW_SHORTCUTS=false
-SMOLIT_INTERACTION_REQUIRE_CONFIRMATION=true
-SMOLIT_INTERACTION_OPEN_APP_CMD=
-```
-
-## Run
+Für einen neuen Entwickler: in 5–10 Minuten build + run.
 
 ```bash
-cd core
-cargo run
+# Clone
+git clone https://github.com/Modularium/Smolit-Assistant.git
+cd Smolit-Assistant
+
+# Env vorbereiten (kleines Minimal-Set)
+cp .env.example .env
+# optional: Werte anpassen (siehe §6)
+
+# Core testen + bauen
+cargo test --manifest-path core/Cargo.toml
+cargo build --manifest-path core/Cargo.toml
+
+# Core starten (IPC auf 127.0.0.1:8787)
+cargo run --manifest-path core/Cargo.toml
+
+# In einem zweiten Terminal: UI starten
+godot --path ui        # Godot 4.6 öffnet scenes/main.tscn
 ```
 
-Nach dem Start:
-
-```text
-Smolit ready.
-> hello
-[ABrain Antwort]
-> exit
-```
-
-## Voice System
-
-Das Voice-System ist additiv: Der bestehende Text-Loop bleibt kanonisch,
-Spracheingabe und -ausgabe werden über externe Commands eingebunden. Der Rust-Core
-nimmt keine Audiodaten selbst auf — die konfigurierten Commands kümmern sich
-um Aufnahme, Erkennung und Sprachausgabe.
-
-### Konfigurationsvariablen
-
-- `SMOLIT_TTS_ENABLED` / `SMOLIT_STT_ENABLED` — Feature an/aus.
-- `SMOLIT_TTS_CMD` — externes TTS-Kommando; bekommt den zu sprechenden Text auf stdin.
-- `SMOLIT_STT_CMD` — externes STT-Kommando; liefert erkannten Text auf stdout.
-- `SMOLIT_AUDIO_AUTO_SPEAK` — wenn `true`, wird jede ABrain-Antwort zusätzlich gesprochen.
-- `SMOLIT_TTS_TIMEOUT_SECONDS` / `SMOLIT_STT_TIMEOUT_SECONDS` — Timeouts in Sekunden.
-
-Ist ein Feature aktiviert, aber kein Command gesetzt, läuft der Core ohne Crash
-weiter und meldet das Feature als nicht verfügbar.
-
-### CLI-Befehle
-
-```text
-help              Hilfe anzeigen
-exit | quit       Beenden
-voice             einmal STT aufnehmen und Ergebnis an ABrain schicken
-speak <text>      Text direkt über TTS sprechen
-audio-status      TTS-/STT-Status anzeigen
-```
-
-### Beispiel-Workflow
-
-```text
-Smolit ready.
-> audio-status
-TTS: enabled=true, available=false
-STT: enabled=true, available=false
-auto-speak: true
-> voice
-STT is not available. Check SMOLIT_STT_ENABLED and SMOLIT_STT_CMD.
-```
-
-Die STT/TTS-Kommandos werden bewusst nicht vorgegeben — Kokoro, Piper,
-Whisper.cpp, Vosk oder ein eigenes Python-Skript können gleichermaßen
-angebunden werden.
-
-## IPC / WebSocket Bridge
-
-Der Core öffnet optional einen lokalen WebSocket-Server, über den eine
-spätere Godot-UI den Assistenten ansprechen kann. Der Server ist additiv:
-Der CLI-Loop bleibt kanonisch, IPC nutzt dieselben Kern-Handler wie das CLI.
-
-- `SMOLIT_IPC_ENABLED` — an/aus (Default `true`).
-- `SMOLIT_IPC_BIND` — lokale Bind-Adresse (Default `127.0.0.1:8787`).
-
-Nur Localhost-Binds sind als Ziel vorgesehen — keine externe Erreichbarkeit.
-
-### Nachrichtenformat
-
-Text-Frames mit JSON. Eingehend (UI → Core):
-
-```json
-{"type":"ping"}
-{"type":"get_status"}
-{"type":"submit_text","text":"Hallo Smolit"}
-{"type":"speak_text","text":"Dies ist ein Test"}
-{"type":"voice_once"}
-```
-
-Ausgehend (Core → UI):
-
-```json
-{"type":"pong"}
-{"type":"status","payload":{"tts_enabled":true,"tts_available":false,"stt_enabled":true,"stt_available":false,"auto_speak":true,"ipc_enabled":true}}
-{"type":"thinking"}
-{"type":"response","payload":{"text":"..."}}
-{"type":"heard","payload":{"text":"..."}}
-{"type":"error","message":"..."}
-```
-
-Ungültige JSON-Payloads führen zu einer `error`-Antwort, nicht zu einem Crash.
-
-Zusätzlich emittiert der Core **standardisierte Action Events**
-(`action_planned`, `action_started`, `action_step`,
-`action_completed`, `action_failed`) additiv zu den klassischen
-Events — als Grundlage für spätere Avatar-/Präsenz-Reaktionen, Logs
-und die Desktop-Interaction-Schicht. Details in
-[docs/api.md](docs/api.md) §2.5.
-
-## Desktop Interaction Layer (MVP)
-
-Der Core enthält unter [core/src/interaction/](core/src/interaction/)
-einen dünnen, explizit konservativen Desktop-Interaction-Layer. Er
-modelliert Interaction-Aktionen (`InteractionAction`,
-`InteractionKind`, `InteractionPayload`), exekutiert über ein
-`InteractionBackend`-Trait und integriert sich ausschließlich über das
-Action Event Model v1 (`action_planned` → `action_started` →
-`action_step` → `action_verification` → `action_completed` /
-`action_failed`). Fehler werden über `RecoveryHint`
-(`retry` / `abort` / `ask_user` / `fallback_unavailable`) klassifiziert
-und im `action_failed.error`-Feld als `recovery_hint=<x>` übertragen.
-
-Im MVP sind `open_application` und — seit dem aktuellen Spike —
-`focus_window` wirklich implementiert (`CommandBackend`,
-konfigurierbare Kommando-Templates wie `gtk-launch {name}` /
-`xdg-open {name}` für Open-App und z. B. `wmctrl -a {name}` für
-Focus-Window). `type_text` und `send_shortcut` sind weiterhin nur als
-Hooks vorhanden, liefern `BackendUnsupported`. Defaults sind bewusst
-restriktiv: `allow_focus_window=false`, `allow_type_text=false`,
-`allow_shortcuts=false`, `require_confirmation=true`, leeres
-`SMOLIT_INTERACTION_OPEN_APP_CMD` / `…_FOCUS_WINDOW_CMD` meldet
-ehrlich „Preconditions not met" bzw. `BackendUnsupported`. Kein OCR,
-keine A11y-Traversierung, keine Pixel-Erkennung, keine globalen
-Input-Grabs, keine Wayland-Fokus-Sonderpfade — siehe
-[docs/api.md](docs/api.md) §2.6 und
-[docs/presence_desktop_interaction.md](docs/presence_desktop_interaction.md)
-§14b.
-
-Eingehende IPC-Nachrichten:
-
-```json
-{"type":"interaction_open_application","application":"firefox"}
-{"type":"interaction_focus_window","target":{"type":"window","name":"calendar"}}
-{"type":"interaction_probe_accessibility"}
-{"type":"interaction_discover_accessibility","hint":"Files"}
-```
-
-Zusätzlich ist ein **Linux Accessibility Backend Spike** gelandet
-(Phase 8b, read-only). `interaction_probe_accessibility` liefert ein
-getaggtes Ergebnis `uncertain` / `unavailable` / `failed` (mit Grund)
-aus Session-Umgebung (`DBUS_SESSION_BUS_ADDRESS`, `WAYLAND_DISPLAY` /
-`DISPLAY`, `AT_SPI_BUS_ADDRESS`) und einer Unix-Socket-Vorprüfung —
-ohne echten AT-SPI-RPC. `interaction_discover_accessibility`
-(optional mit `hint`) reicht dieses Verdikt an eine
-Discovery-/Inspection-Oberfläche durch und gibt ein strukturiertes
-`accessibility_discovery_result`-Envelope zurück. Der Discovery-Status
-kennt zusätzlich `ok` (strukturierte Items vorhanden); pro Item trägt
-das Payload `confidence` (`verified` bleibt für den späteren echten
-RPC-Pfad reserviert, `discovered` liefert der heutige Hint-Echo-Pfad)
-sowie `source`, optional `matched_hint`, `detail`, `app_name`. Das
-Ergebnis läuft regulär durch das Action Event Model
-(`action_planned` → … → `action_completed` / `action_failed` mit
-`recovery_hint=fallback_unavailable`). Kein Klicken, kein
-`type_text`-Pfad, keine Passwort-/Secret-Interaktion. Details in
-[docs/api.md §2.8](docs/api.md) und
-[docs/linux_interaction_backends_research.md](docs/linux_interaction_backends_research.md).
-
-Aktionen mit `requires_confirmation=true` (heute: jede
-`interaction_open_application` und jede `interaction_focus_window`)
-gehen durch den **Approval / Confirmation Flow**: der Core sendet `approval_requested`, die UI
-zeigt einen Banner mit Approve/Deny, und ein
-`approval_response`-Frame settelt die Aktion. Ohne Antwort innerhalb
-von `SMOLIT_APPROVAL_TIMEOUT_SECONDS` (Default 20) emittiert der Core
-`approval_resolved` mit `decision="timed_out"` und anschließend
-`action_cancelled`. Details: [docs/api.md §2.7](docs/api.md).
-
-## UI (Godot, Phase 3.3 Presence MVP)
-
-Unter [ui/](ui/) liegt ein Godot-4-Projekt, das die Core-Bridge als lokaler
-Client konsumiert. Phase 3.3 erweitert den Avatar-MVP um ein **Presence- und
-Overlay-MVP**: die UI unterscheidet zwischen einem ruhigen Docked-Modus,
-einem Expanded-Modus (Log + Text-Eingabe sichtbar) und einem Action-Modus,
-der auf standardisierte Action Events des Cores reagiert und symbolische
-Target-Informationen in einem Banner anzeigt.
-
-Presence (wie viel UI) und Avatar-State (wie der Avatar wirkt) laufen bewusst
-als zwei unabhängige Achsen — siehe
-[docs/presence_desktop_interaction.md](docs/presence_desktop_interaction.md).
-Native Always-on-top, Click-through, transparenter Desktop-Overlay und echte
-Pixel-/OCR-Interaktion sind **noch nicht** Teil dieses MVPs; die Architektur
-ist aber so vorbereitet, dass ein späteres GDExtension-Overlay ohne
-Umschreiben der Presence-Logik andocken kann.
-
-### Starten
-
-1. Godot 4.2+ öffnen, Projektordner `ui/` wählen, Projekt importieren.
-2. Den Rust-Core mit aktivem IPC laufen lassen
-   (`SMOLIT_IPC_ENABLED=true`, Default-Bind `127.0.0.1:8787`).
-3. Godot-Szene ausführen. Es erscheint ein Fenster mit:
-
-   - Header: Status (`connected` / `disconnected`), aktueller Presence-Mode,
-     Toggle-Button `Expand` / `Dock`
-   - Action Banner (nur sichtbar, wenn eine Action läuft) mit Titel, Step,
-     einem Target-Chip samt Primärname (`[window] calendar`), optionaler
-     Mapping-Zeile (`mapping: logical_space · towards calendar app`),
-     kompaktem Target-Text und Status (completed / failed / cancelled)
-   - Avatar-Bereich mit State-Label und Debug-State-Anzeige
-   - Event-Log (RichTextLabel, farbcodiert) — nur im Expanded-Modus sichtbar
-   - Eingabezeile + „Send" / „Ping"-Buttons — nur im Expanded-Modus sichtbar
-
-### Aufbau
-
-```text
-ui/
-├── project.godot
-├── config.cfg                 # UI-Config (websocket_url, reconnect backoff)
-├── autoload/
-│   ├── event_bus.gd           # Signal-Hub (keine Logik)
-│   └── ipc_client.gd          # WebSocketPeer-Wrapper mit Reconnect
-├── scenes/
-│   ├── main.tscn              # Composition Root: Header, Banner, Avatar, Log, Input
-│   └── avatar/
-│       └── avatar_root.tscn   # eigenständige Avatar-Szene
-├── scripts/
-│   ├── main.gd                # Scene-Controller (Presence-Wiring, Log, Input)
-│   ├── presence/
-│   │   ├── presence_state.gd        # Mode-Enum + Helpers
-│   │   └── presence_controller.gd   # Presence-State-Maschine (Action-Events)
-│   └── avatar/
-│       ├── avatar_state.gd    # State-Enum + Name-Mapping
-│       └── avatar_controller.gd  # State-Mapping + Rendering
-└── assets/
-    └── avatar/                # Platzhalter für spätere Sprites
-```
-
-### Avatar-States (MVP)
-
-- `idle` → Grundzustand, auch nach Connect.
-- `thinking` → Core sendet `thinking` (blinkender Indikator).
-- `talking` → Core sendet `response` (kurzer Mouth-Tween, deterministischer
-  Rückfall auf `idle` nach ~1,8 s).
-- `disconnected` → Transport ist offen; ohne weitere Aktion zeigt der
-  Avatar eine neutrale Farbe.
-- `error` → kurzer Fehlerzustand nach `error`-Event, fällt auf `idle`
-  bzw. `disconnected` zurück.
-- `acting` → während `action_started` / `action_step` (nur wenn der Avatar
-  nicht gerade `thinking` / `talking` ist), mit eigenem Farbton und
-  Aktivitätsindikator. Fällt nach `action_completed` / `action_failed` /
-  `action_cancelled` sauber zurück.
-
-### Micro-Animation / Personality Layer v1
-
-Zusätzlich zum State-Mapping trägt der Avatar eine kleine, rein visuelle
-Ausdrucksschicht — keine neuen States, keine neuen Core-Events, nur
-leichte Körpersprache:
-
-- **Idle** atmet sehr ruhig (Scale-Puls ~3 s, ±1,5 %) und zeigt alle
-  14–28 s einen kurzen „curious wiggle" als Rotationsnudge.
-- **Thinking** atmet enger und langsamer (fokussiert), zusätzlich zum
-  bestehenden Alpha-Puls.
-- **Talking** puls rhythmisch leicht aktiver als Idle.
-- **Acting** hat einen minimal zielgerichteteren Puls, die bestehende
-  Target-Tönung bleibt erhalten.
-- **Error** spielt einen kurzen, einmaligen Startle (Flinch + Rebound +
-  Settle) und bleibt danach ruhig.
-- **Disconnected** bleibt bewusst still.
-
-Hover, Idle-Atem, State-Pulse und Wiggle sitzen auf getrennten
-Transform-Properties und kollidieren daher nicht. Siehe
-[docs/ui_architecture.md §7](docs/ui_architecture.md) „Phase B++".
-
-### Discovery Panel (Accessibility)
-
-Neben dem Action-Banner rendert die UI seit der „verified target
-discovery"-Stufe ein kleines **DiscoveryPanel**. Es wird sichtbar,
-sobald der Core ein `accessibility_discovery_result` schickt, und
-zeigt:
-
-- ein Status-Badge (`ok` / `uncertain` / `unavailable` / `failed`),
-- den ehrlichen Grund aus dem Core,
-- pro Item Name, Rolle/Kind, ein Confidence-Badge
-  (`[verified]` / `[discovered]`), optional `hint=…` oder `source`.
-
-Die UI **interpretiert** nichts — sie rendert nur, was der Core
-geliefert hat. Fehlende optionale Felder führen zu neutralen
-Defaults, nicht zu Crashes.
-
-### Compact Input UX (Docked)
-
-Im Docked-Modus öffnet ein Klick auf den Avatar ein kleines
-**Compact Input Panel** direkt am Icon — eine leichte Schnellinteraktion,
-kein zweites Expanded. Inhalte:
-
-- **Text + Send** — geht über denselben `submit_text`-Pfad wie die
-  Expanded-Eingabe; Enter sendet ebenfalls.
-- **Voice** — löst den bestehenden `voice_once`-Pfad aus.
-- **+ Files** — in dieser Phase nur ein ehrlicher Platzhalter
-  (`Datei-Anhänge noch nicht implementiert`). Kein echtes
-  Attachment-Backend.
-- **Commands** — togglet eine kompakte Mini-Hilfe mit den heute
-  tatsächlich unterstützten Flows (`help`, `voice`, `audio-status`,
-  `interaction_probe_accessibility`, `interaction_discover_accessibility`).
-- **✕ / Escape** — schließt das Panel.
-
-Das Panel ist bewusst ein UI-Substate im Docked-Modus, kein neuer
-globaler Presence-Mode: ein Wechsel nach Expanded oder Disconnected
-schließt es kontrolliert, Approval- und Action-Banner bleiben darüber
-sichtbar. Siehe
-[docs/ui_architecture.md §8.3](docs/ui_architecture.md).
-
-### Linux Window Behavior (opt-in Schicht)
-
-Für die spätere Overlay-Linie (Phase 3b) sitzt unter
-[`ui/scripts/window_behavior/`](ui/scripts/window_behavior/) eine kleine,
-bewusst zurückhaltende Capability-/Probe-/Activation-Schicht. Intern
-getrennt nach **Detection** (`window_capabilities.gd`), **Probe /
-Verification** (`window_probe.gd`), **Activation** (Overlay /
-Click-through / X11-AOT, je eigenes Opt-in-Env-Flag), **Reporting**
-(`overlay_runtime_report.gd`) und einer internen
-**Backend-Familie** (`backend_noop`, `backend_x11`,
-`backend_wayland_mutter`, `backend_wayland_wlroots`,
-`backend_xwayland` und `backend_wayland_generic` als Fallback —
-ausgewählt über `backend_resolver.gd`; gewählte `backend.id` wird
-im opt-in Runtime-Report sichtbar gemacht, Zuordnung via
-`scripts/resolver_classification_smoke.gd` empirisch geprüft,
-Evidenzmatrix in
-[docs/window_behavior_backend_verification.md](docs/window_behavior_backend_verification.md);
-`backend_wayland_wlroots` trägt als *einziges* Backend einen
-`experimental_stance`-Marker für einen späteren
-`wlr-layer-shell`-Pfad — heute keine Aktivierung, siehe
-[docs/wlroots_overlay_path.md](docs/wlroots_overlay_path.md)).
-Alle Aktivierungspfade teilen ein gemeinsames Ergebnis-Vokabular
-(`requested / capable / applied / observed / active / reason`,
-siehe `window_behavior_result.gd`). Einziger Einstiegspunkt aus
-`main.gd` bleibt die Fassade
-`window_behavior.gd::apply_all(anchor)`; sie löst pro Lauf ein
-Backend auf und delegiert die drei Aktivierungen darüber. Die
-Backend-Schicht ist aktuell reine Routing-Struktur — die
-Plattformrealität lebt weiterhin in den Controller-Gates; keine
-neuen Nutzerfeatures, keine neuen Plattformversprechen.
-
-Kurzfassung der bestehenden Diagnose-Achsen:
-
-- Capability-Detection liest Session-Typ, DisplayServer-Namen,
-  `XDG_CURRENT_DESKTOP` und das Projekt-Setting
-  `display/window/per_pixel_transparency/allowed`. Pro Fähigkeit
-  (`transparency`, `click_through`, `always_on_top`) kommt ein
-  getaggter Status (`available` / `experimental` / `unsupported` /
-  `unknown`) mit Begründung heraus.
-- Optionaler Runtime-Probe setzt testweise
-  `WINDOW_FLAG_TRANSPARENT` und `WINDOW_FLAG_MOUSE_PASSTHROUGH` und
-  liest sie zurück. Aktivierung per Umgebungsvariable:
-  `SMOLIT_WINDOW_PROBE=1 <godot-run>`. Standardmäßig wird das
-  Fenster danach wieder auf den vorherigen Zustand gesetzt; wer das
-  Ergebnis stehen lassen will, ergänzt `SMOLIT_WINDOW_PROBE_REVERT=0`.
-- Always-on-top wird hier ausdrücklich **nicht** gesetzt — unter
-  Ubuntu 24.04 / GNOME/Mutter ist es über reguläre Toplevel-Hints
-  nicht zuverlässig, und der Spike verspricht das deshalb nicht.
-
-Der Spike ist rein hostseitig: keine IPC-Änderung, keine
-Scene-Kopplung, keine neue UI. Ergebnisse landen per `print()` im
-Log. Einordnung und Grenzen siehe
-[docs/linux_window_overlay_architecture.md §F.1](docs/linux_window_overlay_architecture.md)
-und
-[docs/ui_architecture.md §9.1](docs/ui_architecture.md).
-
-### Overlay MVP Phase B (opt-in transparentes Presence-Fenster)
-
-Aufbauend auf dem Capability-Spike ist jetzt ein **opt-in Overlay-MVP**
-gelandet. Ohne Opt-in bleibt das Verhalten unverändert. Mit
-`SMOLIT_UI_OVERLAY=1 <godot-run>` — und nur dann, wenn die
-Transparenz-Capability im aktuellen Setup tragfähig ist — läuft Smolit
-mit:
-
-- transparentem Hintergrund (`Viewport.transparent_bg = true` +
-  `WINDOW_FLAG_TRANSPARENT = true`; das Projekt-Setting
-  `display/window/per_pixel_transparency/allowed` ist gesetzt),
-- borderlosem Fenster (`WINDOW_FLAG_BORDERLESS = true`),
-- unveränderten Presence-/Avatar-Modi — nur die äußere Fensterhülle
-  ändert sich.
-
-Bewusst **nicht** aktiviert:
-
-- **Kein Always-on-top.** Unter Ubuntu 24.04 / GNOME/Mutter ist es
-  über reguläre Toplevel-Hints nicht zuverlässig; X11 wäre machbar,
-  aber in Phase B nicht versprochen.
-- **Kein produktives Click-through.** Ein naives
-  `WINDOW_FLAG_MOUSE_PASSTHROUGH=true` würde das ganze Fenster
-  (inklusive Avatar, Banner, Eingabefelder) für Eingaben durchlässig
-  machen. Ein ehrlicher Schritt braucht interaktive Zonen /
-  Passthrough-Polygone und bleibt Folgearbeit.
-
-Fallback-Semantik: meldet die Capability-Detection Transparenz als
-`unsupported` / `unknown`, bleibt das Fenster im normalen Modus und der
-Grund landet im Log. Keine stillen Umschaltungen. Details siehe
-[docs/linux_window_overlay_architecture.md §F.2](docs/linux_window_overlay_architecture.md)
-und
-[docs/ui_architecture.md §9.2](docs/ui_architecture.md).
-
-### Overlay Click-through (opt-in, setzt auf Phase B auf)
-
-Für produktives Click-through — Avatar und sichtbare Panels bleiben
-klickbar, der leere Rest des Fensters wird passthrough — gibt es einen
-zweiten, eigenen Opt-in:
+Für ausführlichere Setup-Anleitung inkl. Troubleshooting:
+[`docs/SETUP.md`](docs/SETUP.md).
+
+## 6. Minimal Environment
+
+Kuratiertes Minimum (Vollversion in
+[`.env.example`](./.env.example) und
+[`docs/SETUP.md`](docs/SETUP.md)):
+
+| Variable | Default | Zweck |
+| --- | --- | --- |
+| `SMOLIT_IPC_BIND` | `127.0.0.1:8787` | Loopback-WebSocket für die UI. Nie extern binden. |
+| `ABRAIN_CMD` | `abrain` | Externer CLI-Reasoning-Prozess. |
+| `SMOLIT_TTS_ENABLED` / `SMOLIT_TTS_CMD` | `true` / *leer* | TTS-Achse; leer = `unavailable`. |
+| `SMOLIT_STT_ENABLED` / `SMOLIT_STT_CMD` | `true` / *leer* | STT-`command`-Kind; leer = `unavailable`. |
+| `SMOLIT_STT_WHISPER_CPP_CMD` | *leer* | whisper.cpp-Kind (PR 27); nur wirksam, wenn `whisper_cpp` in `SMOLIT_STT_PROVIDER_CHAIN` steht. |
+| `SMOLIT_INTERACTION_REQUIRE_CONFIRMATION` | `true` | Policy v0 (PR 25); Approval-Default für echte Interaction-Aktionen. In Produktion **nicht auf `false` setzen**. |
+| `SMOLIT_INTERACTION_ALLOW_FOCUS_WINDOW` | `false` | `focus_window` ist doppeltes Opt-in (+ Template). |
+| `SMOLIT_INTERACTION_FOCUS_WINDOW_CMD` | *leer* | X11-Template z. B. `wmctrl -a {name}`. Wayland: lassen. |
+| `SMOLIT_UI_DEV_CONTROLS` | *leer* | Nur auf Dev-Maschinen `1` setzen; aktiviert Dev-Buttons + Audit-Panel. |
+| `SMOLIT_WORKFLOW_OVERLAY` | *leer* | `1` blendet das Workflow Visibility Overlay ein. |
+
+Vollständige Liste mit Gruppen (Provider, Audio, Interaction,
+Overlay, Probe): [`docs/SETUP.md`](docs/SETUP.md) §3.
+
+## 7. Provider Setup
+
+**Text-Provider-Chain** (IPC-editierbar, Default `["abrain"]`):
+Whitelist `abrain`, `llamafile_local`, `local_http`, `cloud_http`.
+Die Settings-Shell trägt seit PR 26 einen **Provider-Onboarding-Block**
+mit einer Quick-Action „Use local-first chain"
+(`["llamafile_local", "local_http", "abrain"]`). Details:
+[`docs/provider_fallback_and_settings_architecture.md`](docs/provider_fallback_and_settings_architecture.md).
+
+**STT-Provider-Chain** (Default `["command"]`): Whitelist `command`,
+`whisper_cpp`. whisper.cpp-Kind ist env-only
+(`SMOLIT_STT_WHISPER_CPP_CMD`); kein Runtime-Editor.
+
+**TTS-Provider-Chain**: Whitelist `command`. Kein zweites Kind heute.
+
+**cloud_http — Opt-in-Warnung.** cloud_http ist strikt opt-in: **nicht
+Teil des Default-Chain**, nicht automatisch aktiviert. Vor dem
+ersten Einsatz braucht es:
+
+1. `SMOLIT_CLOUD_HTTP_ENABLED=true`,
+2. Endpoint-Setting (`SMOLIT_CLOUD_HTTP_ENDPOINT`),
+3. API-Key via IPC (`settings_set_cloud_http_secret`) — **nie** als
+   Env-Var, nie im `.env.example`.
+4. Manuelles Einfügen von `cloud_http` in die Chain über die
+   Settings-Shell.
+
+Es gibt **keine Auto-Cloud-Aktivierung**; der
+„Add cloud_http to chain"-Button in der Settings-Shell bleibt per
+Design disabled.
+
+## 8. Interaction & Safety
+
+Policy v0 (PR 25, 2026-04-24) fixiert die Approval-Baseline:
+
+- `open_application` ist **real verdrahtet** und läuft per Default
+  durch die Approval-Kette. Ohne User-`approve` kein Backend-Aufruf.
+- `focus_window` ist **doppeltes Opt-in**: erst
+  `SMOLIT_INTERACTION_ALLOW_FOCUS_WINDOW=true` **und** ein X11-
+  Template in `SMOLIT_INTERACTION_FOCUS_WINDOW_CMD`, dann
+  Approval-gated.
+- `type_text` / `send_shortcut` → **`BackendUnsupported`**. Kein
+  Backend, keine Simulation.
+- **Audit-Ring-Buffer** ist in-memory (max. 100 / hard 1000); deckt
+  heute nur den `plan_demo_action`-Pfad. Ein Core-Restart leert den
+  Store. Kein Persistenz-Layer.
+
+Details:
+[`docs/security/APPROVAL_UX.md`](docs/security/APPROVAL_UX.md),
+[`docs/security/AUDIT_TRAIL.md`](docs/security/AUDIT_TRAIL.md),
+[`docs/reviews/PR25_POLICY_V0_APPROVAL_DEFAULT.md`](docs/reviews/PR25_POLICY_V0_APPROVAL_DEFAULT.md).
+
+## 9. Verification
 
 ```bash
-SMOLIT_UI_OVERLAY=1 SMOLIT_UI_CLICK_THROUGH=1 <godot-run>
+# Core-Tests (382 Tests, Policy-v0-Tripwire inklusive)
+cargo test --manifest-path core/Cargo.toml
+
+# UI-Smokes (Godot headless)
+scripts/run_overlay_verification.sh settings-shell-smoke
+scripts/run_overlay_verification.sh speech-sync-smoke
+scripts/run_overlay_verification.sh workflow-state-smoke
+scripts/run_overlay_verification.sh resolver-smoke
+
+# Overlay-Verifikationsmatrix (Godot-Scene-Lauf, manuell)
+scripts/run_overlay_verification.sh --help
 ```
 
-Der Folgeschritt aktiviert sich **ausschließlich**, wenn *alle* vier
-Bedingungen erfüllt sind:
+Weitere Cases (Overlay, Click-through, Probe, AOT-X11) sind im
+Help-Output des Verifikations-Wrappers gelistet.
 
-- `SMOLIT_UI_OVERLAY=1` ist gesetzt,
-- `SMOLIT_UI_CLICK_THROUGH=1` ist gesetzt,
-- der Overlay-MVP meldet sich als wirklich aktiv (Transparenz
-  tragfähig),
-- mindestens eine *gültige* interaktive Zone lässt sich aus dem
-  aktuellen Layout ableiten. Zonen stammen aus einer expliziten
-  Allowlist (Avatar, Header, Action-/Approval-/Discovery-Banner,
-  DockPanel, CompactInputPanel), müssen im Tree sichtbar sein, eine
-  Rohsize `> 0` haben, werden am Viewport geclamt und müssen nach dem
-  Clamp eine Mindestkantenlänge überschreiten (degenerierte Rects
-  fallen raus).
+## 10. Project Roadmap
 
-Sonst bleibt das Fenster vollständig interaktiv; der Controller
-protokolliert einen **einheitlichen Phasen-Report** mit den Achsen
-`requested / overlay_requested / overlay_active / capable /
-zones_derived / zones_valid / active`, gefolgt von Bounds, Zonenliste
-und einer `reason`-Zeile (z. B. `overlay not requested`,
-`click-through not requested`, `overlay inactive`, `capability
-unsupported/unknown` oder `no valid interactive zones yet`). Refresh-
-Zeilen loggen nur bei echter Bounds-Änderung (Dedup). Keine stillen
-Aktivierungen.
+- **Roadmap & Phasen:** [`ROADMAP.md`](ROADMAP.md).
+- **Offene Arbeit pro Workstream:**
+  [`docs/OPEN_WORK.md`](docs/OPEN_WORK.md).
+- **PR-Historie / Reality-Checks:**
+  [`docs/reviews/`](docs/reviews/) — u. a. PR 20 Docs Reality Check,
+  PR 23 `focus_window` Decision, PR 25 Policy v0, PR 28 Presence Trim.
 
-**MVP-Grenze.** Godots `DisplayServer.window_set_mouse_passthrough`
-kennt pro Fenster genau einen Polygonpfad. Der Controller fasst daher
-alle gültigen Zonen zu einer einzelnen Bounding-Rect-Union zusammen;
-leerer Raum innerhalb dieser Union bleibt klickbar. Das ist bewusst
-noch nicht das finale Interaktionsmodell — echte Multi-Polygon-Shapes
-(XShape-Multirect / `wl_surface.set_input_region` mit mehreren
-Rechtecken) bleiben Folgearbeit. Details siehe
-[docs/linux_window_overlay_architecture.md §F.3](docs/linux_window_overlay_architecture.md)
-und
-[docs/ui_architecture.md §9.3](docs/ui_architecture.md).
+## 11. Design System
 
-### Always-on-Top — was Smolit verspricht / nicht verspricht
+Smolit-Assistant folgt dem **Smolitux Design Contract** (ADR-0001,
+PR 24) gegenüber der Web-Komponenten-Bibliothek
+[`smolitux-ui`](https://github.com/Modularium/smolitux-ui):
 
-Unter Ubuntu 24.04 / GNOME/Wayland (Zielsession) verspricht Smolit
-**bewusst kein Always-on-top**. Die sichtbare Desktop-Präsenz läuft
-über den Overlay-MVP (transparent + borderless, opt-in) und den
-optionalen Click-through-Folgeschritt — das ist der vollständige
-produktive Pfad, mehr behaupten wir nicht. Nutzer, die unter GNOME
-ein sichtbares AOT-Verhalten wünschen, verwenden die GNOME-eigene
-„Always on Top"-Option im Titelleistenmenü des Compositors.
+- **Godot-nativ.** Keine `@smolitux/*`-Pakete zur Laufzeit, kein
+  WebView, keine React↔Godot-Brücke.
+- **Design Tokens** sind der zukünftige cross-runtime Vertrag
+  (noch nicht implementiert).
+- **OceanData ist nicht Teil dieses Projekts.** OceanData ist ein
+  Data-Layer im Smolitux-Ökosystem, **kein** UI-/Design-System und
+  **kein** Smolit-Assistant-Backend. Keine OceanData-Integration in
+  diesem Repo.
 
-- **X11-Sonderpfad (opt-in) — jetzt als kleiner MVP vorhanden.**
-  `SMOLIT_UI_ALWAYS_ON_TOP=1` setzt unter echter X11-Session
-  `WINDOW_FLAG_ALWAYS_ON_TOP` (entspricht `_NET_WM_STATE_ABOVE`).
-  Der Pfad ist strikt X11-only: unter Wayland/GNOME, unter headless
-  oder bei unbekannter Session bleibt er ein ehrlicher No-op mit
-  klarem Log-Grund. Das ist ausdrücklich **kein** universelles
-  Linux-AOT-Feature und **kein** Wayland/GNOME-Versprechen.
-- **GNOME-Shell-Extension** ist als Pfad ausdrücklich zurückgestellt
-  (Pflegeaufwand, Versionsbindung, Sicherheitsmodell).
-- **wlroots / layer-shell** ist dokumentierte Möglichkeit, kein
-  aktuelles Ziel.
-- **Diagnose-Probe.** Der bestehende opt-in `SMOLIT_WINDOW_PROBE=1`
-  enthält einen kurzen, reversiblen AOT-Flag-Versuch mit
-  ehrlichem Log — „flag accepted by API — not a user-visible
-  guarantee under Mutter". Kein produktives Feature.
+Vollständiger ADR:
+[`docs/adr/ADR-0001-smolitux-design-contract.md`](docs/adr/ADR-0001-smolitux-design-contract.md).
 
-Für reproduzierbare Verifikationsläufe bringt
-[scripts/run_overlay_verification.sh](scripts/run_overlay_verification.sh)
-einen `aot-x11`-Case (setzt `SMOLIT_UI_ALWAYS_ON_TOP=1` +
-`SMOLIT_WINDOW_REPORT=1`). Für **reale** X11-Messungen (echtes
-Fenster, kein headless) kann der Wrapper mit `--scene` die Main-
-Scene als Standalone-Runtime starten:
+## 12. Non-goals / Not Yet Implemented
 
-```bash
-scripts/run_overlay_verification.sh --scene --report aot-x11
-```
+Bewusst **nicht** heute:
 
-Begründung und Kriterien:
-[docs/linux_always_on_top_decision.md](docs/linux_always_on_top_decision.md).
-Messmatrix, Testfälle und reale Ergebnisse:
-[docs/x11_always_on_top_verification.md](docs/x11_always_on_top_verification.md).
-Stand der Messungen auf dem Entwicklungshost (GNOME/X11,
-2026-04-22):
+- **Streaming-Audio**, **Phonem-/Lip-Sync**, **Audio-Timeline**.
+- **Wayland-Fokus-Backend** für `focus_window`.
+- **`type_text` / `send_shortcut` Backends** (bleiben
+  `BackendUnsupported` bis zu einer eigenen Policy-Runde).
+- **AT-SPI-RPC, Tree-Walking, App-spezifische Adapter** — der
+  Accessibility-Spike bleibt Environment-basiert + Hint-Echo.
+- **OCR, Vision, Pixel-Matching** — keine Bibliothek gebunden.
+- **AdminBot-Integration / Shell-Zugriff** — nicht im Plan.
+- **Stage-C-Avatar-User-Uploads** —
+  [`docs/avatar_stage_c_research.md`](docs/avatar_stage_c_research.md)
+  bleibt Research-Gate.
+- **Packaging / CI-Pipeline** (deb/rpm/flatpak, GitHub Actions) —
+  aufgeschoben, kein Blocker für MVP-Tests.
+- **OceanData-Integration**, **smolitux-ui-Import**, **Smolitux-
+  Token-Implementation**.
 
-- **Protokollebene**: `_NET_WM_STATE_ABOVE` auf dem Smolit-Fenster
-  bestätigt.
-- **UX-Ebene mit xterm-Peer**: Smolit bleibt oberhalb bei
-  Fokuswechsel, über Minimize/Restore, und sogar bei einem
-  fullscreen-xterm. Nicht sticky über Workspaces.
-- **Offen**: andere X11-WMs (KDE/KWin, Xfwm4, Openbox, Fluxbox),
-  echte Browser-/Videoplayer-Fullscreen, Multi-Monitor,
-  Langzeitstabilität. Matrix-Zeilen dafür stehen im Dokument offen
-  — **nicht** „X11 gelöst".
-- **GNOME/Wayland-Gegentest**: Refusal-Pfad des Controllers per Env-
-  Override-Simulation auf demselben Host empirisch bestätigt
-  (Controller verweigert mit klarem `reason`, Flag wird nicht
-  gesetzt, Overlay/Click-through bleiben unabhängig). Rohdaten:
-  [docs/wayland_always_on_top_refusal_results.md](docs/wayland_always_on_top_refusal_results.md).
-  Ein echter Mutter-Wayland-Compositor-Lauf steht weiterhin aus.
+Siehe [`ROADMAP.md §7 „Explicitly Deferred"`](ROADMAP.md).
 
-### Overlay-Verifikation (nächster Schritt: reale Messung)
+## 13. Documentation Map
 
-Der nächste konkrete Arbeitsschritt auf der Overlay-Linie ist **kein
-neues Feature**, sondern **reale Verifikation** auf echten Sessions.
-Dafür gibt es jetzt zwei kleine Hilfen:
+| Thema | Quelle |
+| --- | --- |
+| **IPC-Protokoll** (Incoming/Outgoing, Action Events, Approval, Accessibility) | [`docs/api.md`](docs/api.md) |
+| **UI-Architektur** (Presence, Avatar, Overlay, Settings-Shell, Provider-Onboarding) | [`docs/ui_architecture.md`](docs/ui_architecture.md) |
+| **Provider-/Settings-Architektur** (Text/STT/TTS, Chain-Validator, Onboarding UX) | [`docs/provider_fallback_and_settings_architecture.md`](docs/provider_fallback_and_settings_architecture.md) |
+| **Presence & Desktop Interaction** (Ist-Zustand nach PR 28) | [`docs/presence_desktop_interaction.md`](docs/presence_desktop_interaction.md) |
+| **Approval UX / Policy v0** | [`docs/security/APPROVAL_UX.md`](docs/security/APPROVAL_UX.md) |
+| **Audit Trail** (in-memory, Scope) | [`docs/security/AUDIT_TRAIL.md`](docs/security/AUDIT_TRAIL.md) |
+| **Window / Overlay / Always-on-top** (Linux-Plattform-Realität) | [`docs/linux_window_overlay_architecture.md`](docs/linux_window_overlay_architecture.md), [`docs/linux_always_on_top_decision.md`](docs/linux_always_on_top_decision.md) |
+| **Architectural Decision Records** | [`docs/adr/`](docs/adr/) — ADR-0001 Smolitux Design Contract |
+| **Reviews / Reality-Checks** | [`docs/reviews/`](docs/reviews/) |
+| **Offene Arbeiten / Workstreams** | [`docs/OPEN_WORK.md`](docs/OPEN_WORK.md) |
+| **Einheitliches Vokabular** | [`docs/GLOSSARY.md`](docs/GLOSSARY.md) |
+| **Setup & Troubleshooting** | [`docs/SETUP.md`](docs/SETUP.md) |
 
-- **Opt-in Runtime-Report** via `SMOLIT_WINDOW_REPORT=1`. Druckt am
-  Ende von `_ready()` genau einen konsolidierten Konsolenblock mit
-  Session, Display-Driver, XDG-Desktop, Capabilities sowie dem
-  tatsächlich erreichten Zustand von Overlay und Click-through
-  (inkl. Bounds und Zonenliste). Kein Dauer-Log, keine Scene-Logik,
-  keine IPC.
-- **Verifikations-Wrapper** unter
-  [`scripts/run_overlay_verification.sh`](scripts/run_overlay_verification.sh),
-  der die typischen Env-Kombinationen (`baseline`, `overlay`,
-  `click-through`, `probe`, `full`, `report`) mit oder ohne `--headless`
-  startet. Hilft, reproduzierbare Läufe für die Matrix in
-  [docs/linux_overlay_verification_matrix.md](docs/linux_overlay_verification_matrix.md)
-  zu erzeugen.
+---
 
-Die Matrix deckt Baseline, Overlay-only, Overlay + Click-through,
-Probe-Pfad, Docked↔Expanded-Wechsel, Banner-Sichtbarkeit, CompactInput,
-sowie offene Hypothesen zu Fractional Scaling und XWayland ab —
-ausdrücklich als Messlinie, nicht als Produktzusage.
-
-### Presence-Modes (Phase 3.3 MVP)
-
-Presence-State ist orthogonal zum Avatar-State und wird vom
-`PresenceController` verwaltet:
-
-- `docked` → ruhige, kompakte Präsenz; Log und Eingabezeile ausgeblendet.
-- `expanded` → volle Interaktion; Log + Eingabezeile sichtbar. Umschalten
-  über den Toggle-Button.
-- `action` → automatisch aktiv, sobald der Core `action_started` /
-  `action_step` sendet. Der Action-Banner zeigt Titel, aktuellen Step und
-  symbolischen Target-Text. Nach `action_completed` / `action_failed` /
-  `action_cancelled` hält die Presence kurz als „Nachhall" den Status und
-  fällt dann zurück in den zuletzt gewählten Base-Modus.
-- `disconnected` → Core nicht erreichbar; Toggle deaktiviert.
-
-Die UI interpretiert Inhalte nicht — sie rendert ausschließlich, was der
-Core über das Action Event Model v1 als nächsten sichtbaren Zustand
-signalisiert.
-
-Der Avatar hört ausschließlich am `EventBus`. Keine zweite
-Core-Verbindung, keine UI-seitige Interpretation von Inhalten.
-
-Scenes hängen ausschließlich an `EventBus` — der Transport (`IpcClient`)
-kann später ersetzt werden, ohne Scene-Code anzufassen.
-
-### Verbindungsverhalten
-
-- Default-URL: `ws://127.0.0.1:8787` (überschreibbar in `ui/config.cfg`).
-- Reconnect-Backoff 500 ms → 5 s, verdoppelnd, gecapped.
-- Nach jedem erfolgreichen Connect sendet die UI automatisch
-  `get_status` als Handshake.
-- Während „disconnected" bleibt die UI benutzbar, `Send`/`Ping` sind
-  deaktiviert.
+**Feedback / Issues:**
+[github.com/Modularium/Smolit-Assistant/issues](https://github.com/Modularium/Smolit-Assistant/issues).
