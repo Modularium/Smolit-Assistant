@@ -76,3 +76,9 @@ signal settings_probe_result_received(payload: Dictionary)
 ## zurück auf `idle`.
 signal speaking_started_received(payload: Dictionary)
 signal speaking_ended_received(payload: Dictionary)
+
+## Local Audit Trail v1 (PR 19). Dev-/Debug-Hilfe. Die UI
+## konsumiert `audit_recent`-Envelopes und rendert sie im optionalen
+## Audit-Panel. Kein Produkt-Feature; kein Export, kein Copy. Der
+## Core liefert ausschließlich bereits sanitisierte Einträge.
+signal audit_recent_received(payload: Dictionary)

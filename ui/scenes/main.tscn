@@ -10,6 +10,7 @@
 [ext_resource type="PackedScene" path="res://scenes/settings/settings_panel.tscn" id="8_settings"]
 [ext_resource type="PackedScene" path="res://scenes/workflow/workflow_visibility_panel.tscn" id="9_workflow_visibility"]
 [ext_resource type="PackedScene" path="res://scenes/approval/approval_card.tscn" id="10_approval_card"]
+[ext_resource type="PackedScene" path="res://scenes/audit/audit_panel.tscn" id="11_audit_panel"]
 
 [node name="Main" type="Control" unique_id=748218674]
 layout_mode = 3
@@ -356,3 +357,18 @@ offset_left = 130.0
 offset_top = 344.0
 offset_right = 430.0
 offset_bottom = 470.0
+
+[node name="AuditPanel" parent="." instance=ExtResource("11_audit_panel")]
+z_index = 115
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -440.0
+offset_top = -540.0
+offset_right = -16.0
+offset_bottom = -220.0
+grow_horizontal = 0
+grow_vertical = 0

@@ -100,6 +100,18 @@
 #                   Autoloads nicht); die Laufzeit-Integration wird
 #                   beim regulären Start der Main-Scene geprüft.
 #                   Exit 0 = alle PASS.
+#   audit-panel-smoke
+#                 — Führt scripts/audit_panel_smoke.gd aus (PR 19).
+#                   Prüft das Local Audit Trail v1 UI: pure
+#                   `SmolitAuditModel`-Helfer (Kind-Labels,
+#                   Color-Tabelle, defensive Payload-Lesung,
+#                   Short-ID/Summary/Time) plus das Panel-Scene-
+#                   Verhalten (default hidden ohne
+#                   `SMOLIT_UI_DEV_CONTROLS=1`, Render einer
+#                   gesetzten Event-Liste, Toleranz bei fehlenden
+#                   Feldern, Toggle, reset_for_tests). Zusätzlich
+#                   Quelltext-Assertions, dass `ipc_client.gd` /
+#                   `event_bus.gd` die Audit-Wire-Form tragen.
 #   approval-card-smoke
 #                 — Führt scripts/approval_card_smoke.gd aus (PR 17).
 #                   Prüft die Approval UX v1: pure
@@ -381,6 +393,17 @@ case "${CASE}" in
     # PR 17 auch APPROVAL-Step-Mapping.
     exec godot --headless --path "${UI_DIR}" \
       --script "${REPO_ROOT}/scripts/workflow_visibility_smoke.gd"
+    ;;
+  audit-panel-smoke)
+    # Spezialfall: Smoke für das Local Audit Trail UI (PR 19). Prüft
+    # pure `SmolitAuditModel`-Logik (Kind-Labels, Result-/Risk-
+    # Farben, Short-ID/Summary/Time, defensive `events_from_payload`)
+    # und das Panel-Scene-Verhalten (default hidden, Render einer
+    # gesetzten Event-Liste, Toleranz bei fehlenden Feldern, Toggle,
+    # reset_for_tests) plus Quelltext-Assertions, dass `ipc_client.gd`
+    # und `event_bus.gd` die Audit-Wire-Form tragen.
+    exec godot --headless --path "${UI_DIR}" \
+      --script "${REPO_ROOT}/scripts/audit_panel_smoke.gd"
     ;;
   approval-card-smoke)
     # Spezialfall: Smoke für die Approval UX v1 (PR 17). Prüft den

@@ -102,6 +102,18 @@ func request_approval_demo(
 	_send(payload)
 
 
+## PR 19 — Local Audit Trail. Fragt die `limit` jüngsten Audit-
+## Einträge aus dem Core-Ring-Buffer ab. Default ohne Limit liefert
+## den vollen Buffer (bis zum env-konfigurierten Maximum). Das
+## Ergebnis landet als `audit_recent_received`-Signal auf dem
+## EventBus. Read-only; der Core sanitisiert bereits serverseitig.
+func audit_recent(limit: Variant = null) -> void:
+	var payload: Dictionary = {"type": "audit_recent"}
+	if typeof(limit) == TYPE_INT:
+		payload["limit"] = int(limit)
+	_send(payload)
+
+
 ## PR 18 — Approval-Gated Demo-Action-Planner. Erzeugt einen
 ## harmlosen `DemoPlan` am Core; der Core führt einen reinen Mock
 ## aus (action_started → action_step → action_completed) — **keine**
@@ -477,6 +489,8 @@ func _handle_frame(raw: String) -> void:
 			EventBus.speaking_started_received.emit(_extract_payload(parsed))
 		"speaking_ended":
 			EventBus.speaking_ended_received.emit(_extract_payload(parsed))
+		"audit_recent":
+			EventBus.audit_recent_received.emit(_extract_payload(parsed))
 		_:
 			if _debug:
 				push_warning("[ipc] unknown message type: %s" % type)
