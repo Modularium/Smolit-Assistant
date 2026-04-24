@@ -499,6 +499,82 @@ Rim-Node sowie einen Redraw-Sanity-Durchlauf aller vier kuratierten
 Identities (inkl. unbekannter ID clamp) ab. Harness-Case
 `scripts/run_overlay_verification.sh avatar-render-polish-smoke`.
 
+### Phase B Render Polish Follow-up (PR 30, Ist-Zustand)
+
+PR 30 setzt einen kleinen, eng umrissenen zweiten Polish-Schritt
+**ausschließlich in den bestehenden prozeduralen `_draw_*`-Pfaden
+aus `avatar_identity_visual.gd`** obendrauf. Keine neuen Identities,
+keine neuen States, keine neuen Capabilities, keine Stage-C-
+Vorarbeit, keine Core-/IPC-Änderung.
+
+Strukturell neu: eine kuratierte Polish-Palette
+[`ui/scripts/avatar/avatar_palette.gd`](../ui/scripts/avatar/avatar_palette.gd)
+(pure `RefCounted`) bündelt die neuen Konstanten zentral — statt sie
+als Magic-Numbers in die `_draw_*`-Funktionen zu streuen. Die
+Palette duplizert **keine** bestehenden Paletten (Rim-Accent-Tabelle
+bleibt in `avatar_rim_accent.gd`, Theme-Tints in
+`avatar_appearance.gd`, State-Modulates in `avatar_controller.gd`);
+sie ist der Andockpunkt für einen späteren, reversiblen Token-
+Import-Spike gemäß [ADR-0001](./adr/ADR-0001-smolitux-design-contract.md)
+(Smolitux Design Contract, PR 24). Heute werden **keine** Tokens
+konsumiert, keine JSON/YAML/TOML-Dateien geladen, keine Generatoren
+ausgeführt.
+
+Identity-spezifische Feinarbeit:
+
+- **Robot-Head** — dünner heller Innen-Rim auf der Face-Plate
+  (verankert die dunklere Plate visuell im Kopf), kleiner
+  Specular-Dot pro Pupille (lebendigerer Blick ohne Animation),
+  Mini-Highlight oben-links auf der Antennen-Kuppe.
+- **Orb** — zusätzliche weiche Core-Glow-Scheibe zwischen Kern-
+  Kreis und Primär-Highlight, nach oben-links in Richtung der
+  bestehenden Licht-Quelle versetzt. Nutzt die Base-Color mit
+  reduziertem Alpha und fügt dem Orb eine weitere Tiefenstufe
+  ohne Shader.
+- **Humanoid-Head** — Zweischicht-Blush (größerer, sehr zarter
+  Außenkreis plus kleinerer, etwas dichterer Innenkreis statt des
+  bisherigen Einzeltupfens) und dezente statische Augenbrauen-
+  Linien leicht nach außen geneigt (prägen den Ruhe-Ausdruck, keine
+  Animation, kein neuer State).
+- **Smolit-Salamander** — `TEXTURE`-Pfad weiterhin unverändert. Die
+  Identitätsgarantie (Default + CALM + Unity-Overrides =
+  vor-PR-Verhalten) bleibt bytegleich gültig. Smolit profitiert
+  indirekt über den gemeinsamen Rim-Accent; der Rim selbst wird
+  nicht angefasst.
+
+Bindende Grenzen (zusätzlich zu denen des Vor-Polish):
+
+- **Keine Änderung des Template-Capability-Contract.**
+  `orb.wiggle == NONE` bleibt, `orb.TALKING → ACTING`-Fallback
+  bleibt, Smolit bleibt `reference-all-FULL`. Smoke-Lock:
+  `_check_capabilities_unchanged_by_polish`.
+- **Kein `if identity == …`-Branch im Controller.** Alle neuen
+  Details leben in denselben `_draw_*`-Methoden wie vorher; der
+  Controller orchestriert nach wie vor nur State + Transform-
+  Mirror.
+- **Keine Änderung der Default-Identität.** `DEFAULT` bleibt
+  `SMOLIT_SALAMANDER`; unbekannte IDs klemmen weiterhin dorthin.
+  Smoke-Lock: `_check_default_identity_unchanged_by_polish`.
+- **Keine neuen Assets.** `git diff` bleibt rein textuell (keine
+  PNG / SVG / GLB / AUDIO-Binaries).
+- **Keine Token-Implementation.** Die Palette ist ein Andockpunkt —
+  kein Token-Loader, kein Generator, keine `@smolitux/*`-
+  Abhängigkeit.
+
+Verifikation:
+`scripts/avatar_render_polish_smoke.gd` wächst von 19 auf 52 PASS-
+Assertions — die sechs zusätzlichen Cases
+(`_check_palette_constant_names_are_declared`,
+`_check_palette_float_constants_in_range`,
+`_check_palette_color_alphas_are_sane`,
+`_check_palette_rim_table_unchanged_by_polish`,
+`_check_capabilities_unchanged_by_polish`,
+`_check_default_identity_unchanged_by_polish`) sichern die neue
+Palette und die drei Regressions-Locks (Rim-Tabelle,
+Capability-Contract, Default-Identity) ab. Die existierenden
+Smokes `avatar-expression-smoke`, `avatar-identity-smoke` und
+`avatar-template-capabilities-smoke` bleiben grün.
+
 ### Phase 4 – Behavioral Expression Layer v1 (PR 15, Ist-Zustand)
 
 Auf Phase B/B+/B++ und dem Speech-Sync-MVP aus PR 14 sitzt eine

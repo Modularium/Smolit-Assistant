@@ -277,31 +277,46 @@ Entscheidung vor Backend-Arbeit.
 ## G — Avatar Animation / Stage C Research
 
 **Status:** Phase A (Smolit), Phase B (kuratierte Alternativen),
-Phase B-Render-Polish und PR-15-Behavioral-Expression-Layer sind
-live. Stage C ist explizit Research-Gate
+Phase B Render Polish, **PR 30 Phase B Render Polish Follow-up
+(2026-04-24, gelandet)** und PR-15-Behavioral-Expression-Layer
+sind live. Stage C bleibt explizit Research-Gate
 ([`docs/avatar_stage_c_research.md`](./avatar_stage_c_research.md)).
+PR 30 hat keine neuen Assets, keine neuen Identities, keine neuen
+States und keine neuen Capabilities eingeführt — rein prozeduraler
+Polish in den bestehenden `_draw_*`-Pfaden plus eine kuratierte
+Palette-Datei als Andockpunkt für einen späteren Smolitux-Design-
+Token-Import (heute nicht implementiert).
 **Warum wichtig:** Stage-C wäre User-Upload-Territorium; ohne
-sauberes Sicherheits-/Trust-Modell nicht machbar.
-**Blocker:** Sicherheits-Hierarchie + Manifest-Format noch nicht
-entschieden.
-**Nächster kleinster PR:**
-
-- **PR 30 G-Avatar-Render-Polish-Follow-up** *(verschoben von PR 28
-  → PR 30 nach PR-28 Presence-Trim und PR-29-Swap mit README-Setup):*
-  rein visuelle Feinarbeit auf den existierenden kuratierten
-  Identities; *keine* Asset-Imports.
+sauberes Sicherheits-/Trust-Modell nicht machbar. PR 30 arbeitet
+bewusst *innerhalb* des bestehenden Capability-Contracts statt
+Stage-C-Territorium aufzumachen.
+**Blocker:** Sicherheits-Hierarchie + Manifest-Format für Stage C
+noch nicht entschieden.
+**Nächster kleinster PR:** kein zwingender G-PR in der nahen Reihe.
+Mögliche Folgearbeit (ohne Priorität): wenn ADR-0001-Token-Export
+in smolitux-ui landet, ein kleiner reversibler Spike, der die
+PR-30-Palette-Konstanten aus einer Token-Quelle speist. Vor so
+einem Spike braucht es den Token-Export auf der
+[smolitux-ui](https://github.com/Modularium/smolitux-ui)-Seite.
 
 **Nicht-Ziele:**
 
 - Kein User-Upload, keine User-supplied Identities.
 - Keine Asset-Pipeline, keine Manifest-Parser.
 - Keine neue State-Ebene über dem Expression-Layer.
+- Keine neue Capability-Achse im Template-Contract (PR 30 hat
+  keinen neuen `EXPR_*`-Key eingeführt).
 
 **Tests / Verifikation:**
 
-- `avatar-render-polish-smoke` und
+- `avatar-render-polish-smoke` wächst mit PR 30 auf 52 Assertions
+  (sechs neue Cases: Palette-Konstanten-Namen, Float-Ratio-Ranges,
+  Color-Alpha-Sanity, Rim-Tabellen-Lock, Capability-Contract-Lock,
+  Default-Identity-Lock).
+- `avatar-expression-smoke`, `avatar-identity-smoke`,
   `avatar-template-capabilities-smoke` bleiben grün.
 - Identitätsgarantie (Default-Smolit unverändert) bleibt bindend.
+- `git diff` bleibt binärfrei — keine neuen Assets.
 
 ---
 
