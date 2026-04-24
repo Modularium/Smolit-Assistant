@@ -448,30 +448,58 @@ einzuführen.
 Fedora / Arch / NixOS offen) und welches Tooling (GitHub Actions vs.
 Self-Host) gelten sollen. Für die minimale CI-Smoke-Linie reicht
 eine GitHub-Actions-Entscheidung; Packaging bleibt weiter aufgeschoben.
-**Nächster kleinster PR:**
+**Erledigt:**
 
-- **PR 38 I-Release-CI-Foundation.** Eine minimale GitHub-Action:
-  `cargo test` + `scripts/run_overlay_verification.sh
-  settings-shell-smoke`. **Keine** Packaging-Formate
-  (`.deb`/`.rpm`/Flatpak/Snap), **keine** Signing-Stufe, **kein**
-  Artifact-Upload. Erster CI-Schritt, nicht der letzte.
+- **PR 38 I-Release-CI-Foundation** *(2026-04-24, gelandet)*. Minimaler
+  GitHub-Actions-Workflow unter
+  [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) mit zwei
+  Jobs: `core-test` (`cargo test --manifest-path core/Cargo.toml
+  --locked` auf `ubuntu-latest` mit Rust stable) und `ui-smoke`
+  (Godot 4.6 headless, offizielles Linux-Binary pinned via
+  `GODOT_VERSION`, fünf kuratierte Smokes: `settings-shell-smoke`,
+  `avatar-render-polish-smoke`, `workflow-visibility-smoke`,
+  `approval-card-smoke`, `audit-panel-smoke`). Beide Jobs laufen mit
+  `HOME` / `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` unterhalb `runner.temp`,
+  damit das wiederkehrende lokale Dev-Artefakt-Problem unter
+  `~/.config/smolit-assistant/` strukturell unmöglich ist.
+  Parity-Helper für lokale Läufe:
+  [`scripts/ci_verify.sh`](../scripts/ci_verify.sh). **Keine**
+  Packaging-Formate (`.deb` / `.rpm` / Flatpak / Snap), **keine**
+  Signing-Stufe, **kein** Artifact-Upload, **kein** Release-Tagging,
+  **kein** Docker-Image — das bleibt eigener Folge-PR.
 
-**Nicht-Ziele:**
+**Nächster kleinster PR (Future Work, nicht priorisiert):**
+
+- **Packaging-Entscheidungs-ADR.** Welche Distributionen zuerst
+  (Ubuntu 24.04 gesetzt; Fedora / Arch / NixOS offen), welches
+  Format (`.deb` vs. AppImage vs. Flatpak), wie Signing-Chain
+  funktioniert. **Rein ADR, keine Implementation**, vor Code.
+- **CI-Folgearbeit (ohne Priorität):** Checksum-Verifikation des
+  Godot-Binaries (heute rein Version-Pin), optionale Cross-Linux-
+  Matrix (Ubuntu 24.04 + Arch-Container) sobald Packaging-ADR
+  landet, Rust-toolchain-Pinning via `rust-toolchain.toml` wenn
+  Edition-/MSRV-Stabilität zum Thema wird.
+
+**Nicht-Ziele (unverändert):**
 
 - Keine Package-Manager-Pakete (deb/rpm/flatpak) in diesem Schritt.
-- Keine GitHub-Actions-CI; Entscheidung Tooling separat.
 - Keine Cloud-Build-Pipeline.
-- Keine Install-Skripte — PR 29 dokumentiert ausschließlich.
+- Keine Install-Skripte — PR 29 / PR 38 dokumentieren ausschließlich.
+- Kein Release-Tagging, keine signierten Releases, kein Auto-Update.
+- Keine Secrets in CI, keine echten Provider-Endpunkte, keine
+  echten TTS/STT-Binaries.
 
 **Tests / Verifikation:**
 
-- `cargo test` grün (382 Tests inkl. Policy-v0-Tripwire und
-  whisper_cpp-Fallback).
-- `scripts/run_overlay_verification.sh settings-shell-smoke`
-  bestätigt UI-Einstiegspfad.
+- `cargo test` grün (398 Tests inkl. Policy-v0-Tripwire,
+  whisper_cpp-Fallback und piper-Fallback).
+- Fünf UI-Smokes laufen headless durch; lokal via
+  `scripts/ci_verify.sh` reproduzierbar.
 - README/SETUP wurden auf einem frischen Dev-Host manuell
   durchgelesen; die dort dokumentierte Quick-Start-Sequenz spiegelt
-  den tatsächlichen Build-Pfad.
+  den tatsächlichen Build-Pfad. Seit PR 38 ergänzt
+  `docs/SETUP.md §7 — CI / Local verification parity` den
+  Isolations-Kontext.
 
 ---
 

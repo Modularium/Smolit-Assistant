@@ -1,5 +1,7 @@
 # Smolit Assistant
 
+[![CI](https://github.com/Modularium/Smolit-Assistant/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Modularium/Smolit-Assistant/actions/workflows/ci.yml)
+
 Lokal-first, Godot-nativer Desktop-Assistant mit Rust-Core und
 WebSocket-IPC. **Sichtbar, kontrolliert, ehrlich** — kein
 Autonomie-Maximierer.
@@ -202,13 +204,13 @@ Details:
 ## 9. Verification
 
 ```bash
-# Core-Tests (382 Tests, Policy-v0-Tripwire inklusive)
+# Core-Tests (398 Tests, Policy-v0-Tripwire inklusive)
 cargo test --manifest-path core/Cargo.toml
 
 # UI-Smokes (Godot headless)
 scripts/run_overlay_verification.sh settings-shell-smoke
 scripts/run_overlay_verification.sh speech-sync-smoke
-scripts/run_overlay_verification.sh workflow-state-smoke
+scripts/run_overlay_verification.sh workflow-visibility-smoke
 scripts/run_overlay_verification.sh resolver-smoke
 
 # Overlay-Verifikationsmatrix (Godot-Scene-Lauf, manuell)
@@ -217,6 +219,17 @@ scripts/run_overlay_verification.sh --help
 
 Weitere Cases (Overlay, Click-through, Probe, AOT-X11) sind im
 Help-Output des Verifikations-Wrappers gelistet.
+
+**GitHub Actions CI** (seit PR 38, [`ci.yml`](.github/workflows/ci.yml))
+spiegelt den Kern dieser Verifikation: `cargo test` plus die fünf
+kuratierten UI-Smokes (`settings-shell-smoke`,
+`avatar-render-polish-smoke`, `workflow-visibility-smoke`,
+`approval-card-smoke`, `audit-panel-smoke`) auf `ubuntu-latest` mit
+Godot 4.6 headless. Beide Jobs laufen in isolierten `HOME` /
+`XDG_CONFIG_HOME` / `XDG_CACHE_HOME`-Ordnern, damit lokale
+`~/.config/smolit-assistant/`-Dev-Artefakte die Tests nicht
+verfälschen. Für einen lokalen Parity-Lauf:
+[`scripts/ci_verify.sh`](scripts/ci_verify.sh).
 
 ## 10. Project Roadmap
 
