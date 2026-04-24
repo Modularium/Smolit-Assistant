@@ -27,6 +27,7 @@ extends Control
 class_name SmolitAvatarIdentityVisual
 
 const _IdentityRef := preload("res://scripts/avatar/avatar_identity.gd")
+const _PaletteRef := preload("res://scripts/avatar/avatar_palette.gd")
 
 
 var _identity: int = _IdentityRef.DEFAULT
@@ -114,6 +115,18 @@ func _draw_robot_face(rect: Rect2) -> void:
 	)
 	var plate_color := Color(0.10, 0.16, 0.26, 0.42)
 	_draw_inner_rounded_rect(plate_rect, plate_color, rect.size.x * 0.06)
+	# PR 30 — Polish: dünner Innen-Rim oben auf der Plate. Ein sehr
+	# schwach heller Strich an der Oberkante der Augenband-Plate lässt
+	# die Plate „absetzen" und gibt dem Robot eine leichte Fassung,
+	# ohne einen echten Rahmen zu setzen. Keine Animation, reine
+	# Lesbarkeits-Hilfe.
+	draw_line(
+		plate_rect.position + Vector2(rect.size.x * 0.01, 0.0),
+		plate_rect.position + Vector2(plate_rect.size.x - rect.size.x * 0.01, 0.0),
+		_PaletteRef.ROBOT_FACEPLATE_INNER_RIM_COLOR,
+		maxf(1.0, rect.size.x * 0.012),
+		true,
+	)
 
 	# Augen — leicht kleiner und tiefer als zuvor, damit sie in der
 	# Face-Plate sitzen. Pupillen sind kleine dunkle Kreise; der Kontrast
@@ -128,6 +141,15 @@ func _draw_robot_face(rect: Rect2) -> void:
 	draw_circle(right_eye, eye_r, eye_color)
 	draw_circle(left_eye, eye_r * 0.48, pupil_color)
 	draw_circle(right_eye, eye_r * 0.48, pupil_color)
+	# PR 30 — Polish: kleiner Specular-Dot auf jeder Pupille. Klassischer
+	# Cartoon-Trick für lebendigeren Blick; bewusst klein und links-oben
+	# vom Pupillen-Zentrum, damit der Blick nicht ins Leere fällt.
+	var specular_offset: Vector2 = Vector2(-eye_r * 0.22, -eye_r * 0.26)
+	var specular_r: float = eye_r * 0.16
+	draw_circle(left_eye + specular_offset, specular_r,
+		_PaletteRef.ROBOT_PUPIL_SPECULAR_COLOR)
+	draw_circle(right_eye + specular_offset, specular_r,
+		_PaletteRef.ROBOT_PUPIL_SPECULAR_COLOR)
 
 	# Antenne: kurzer vertikaler Stalk plus die bekannte orangene Kuppe.
 	# Der Stalk hebt den Dot von der Kopfsilhouette ab, statt ihn wie
@@ -140,10 +162,19 @@ func _draw_robot_face(rect: Rect2) -> void:
 		Rect2(Vector2(cx - stalk_w * 0.5, stalk_top_y), Vector2(stalk_w, stalk_h)),
 		stalk_color,
 	)
+	var antenna_cap_radius: float = rect.size.x * 0.048
+	var antenna_cap_center: Vector2 = Vector2(cx, stalk_top_y)
 	draw_circle(
-		Vector2(cx, stalk_top_y),
-		rect.size.x * 0.048,
+		antenna_cap_center,
+		antenna_cap_radius,
 		Color(1.0, 0.72, 0.32, 1.0),
+	)
+	# PR 30 — Polish: Mini-Highlight oben-links auf der Kuppe; verstärkt
+	# den Kunststoff-/Metall-Eindruck ohne zweite Shader-Linie.
+	draw_circle(
+		antenna_cap_center + Vector2(-antenna_cap_radius * 0.35, -antenna_cap_radius * 0.35),
+		antenna_cap_radius * 0.32,
+		_PaletteRef.ROBOT_ANTENNA_HIGHLIGHT_COLOR,
 	)
 
 	# Mund-Slit: eine kurze horizontale Linie unter der Face-Plate. Kein
@@ -182,6 +213,17 @@ func _draw_orb(rect: Rect2, color: Color) -> void:
 		draw_circle(center, rr, Color(color.r, color.g, color.b, a))
 	# Hauptkörper (Kern des Orbs).
 	draw_circle(center, outer_r * 0.70, color)
+	# PR 30 — Polish: weiche Core-Glow-Scheibe zwischen Kernkreis und
+	# Primär-Highlight. Trägt die Base-Color mit verringertem Alpha und
+	# fügt dem Orb eine zusätzliche Tiefenstufe — ohne Shader, ohne
+	# neuen Pfad. Die Scheibe ist bewusst nach oben-links versetzt,
+	# damit sie mit der Licht-Richtung der bestehenden Highlights
+	# stimmt.
+	draw_circle(
+		center - Vector2(outer_r * 0.10, outer_r * 0.12),
+		outer_r * _PaletteRef.ORB_CORE_GLOW_RADIUS_RATIO,
+		Color(color.r, color.g, color.b, _PaletteRef.ORB_CORE_GLOW_ALPHA),
+	)
 	# Primär-Highlight oben-links.
 	draw_circle(
 		center - Vector2(outer_r * 0.20, outer_r * 0.24),
@@ -209,14 +251,24 @@ func _draw_humanoid(rect: Rect2, color: Color) -> void:
 	# Clip-Rand stößt.
 	draw_circle(center, outer_r * 0.94, color)
 
-	# Wangen — zwei sehr leicht rosé eingefärbte Kreise. Alpha sehr
-	# niedrig, damit der Effekt auch unter Theme-Tints dezent bleibt.
-	var cheek_color := Color(1.00, 0.72, 0.68, 0.18)
-	var cheek_r: float = outer_r * 0.16
+	# Wangen — PR 30 Polish: Zweischicht-Blush für einen weicheren
+	# Verlauf. Ein größerer, sehr transparenter Außenkreis plus ein
+	# kleinerer, etwas dichterer Innenkreis ersetzen den bisherigen
+	# Einzeltupfen. Der Effekt bleibt unter Theme-Tints dezent, weil
+	# beide Alphas niedrig bleiben.
+	var cheek_rose := Color(1.00, 0.72, 0.68, 1.0)
+	var cheek_outer_color := Color(cheek_rose.r, cheek_rose.g, cheek_rose.b,
+		_PaletteRef.HUMANOID_CHEEK_OUTER_ALPHA)
+	var cheek_inner_color := Color(cheek_rose.r, cheek_rose.g, cheek_rose.b,
+		_PaletteRef.HUMANOID_CHEEK_INNER_ALPHA)
+	var cheek_outer_r: float = outer_r * 0.18
+	var cheek_inner_r: float = outer_r * 0.11
 	var cheek_y: float = center.y + outer_r * 0.10
 	var cheek_dx: float = outer_r * 0.44
-	draw_circle(Vector2(center.x - cheek_dx, cheek_y), cheek_r, cheek_color)
-	draw_circle(Vector2(center.x + cheek_dx, cheek_y), cheek_r, cheek_color)
+	draw_circle(Vector2(center.x - cheek_dx, cheek_y), cheek_outer_r, cheek_outer_color)
+	draw_circle(Vector2(center.x + cheek_dx, cheek_y), cheek_outer_r, cheek_outer_color)
+	draw_circle(Vector2(center.x - cheek_dx, cheek_y), cheek_inner_r, cheek_inner_color)
+	draw_circle(Vector2(center.x + cheek_dx, cheek_y), cheek_inner_r, cheek_inner_color)
 
 	# Augen + Pupillen-Highlights. Die Augen selbst bleiben klein und
 	# dunkel; der Highlight-Dot ist ein kleiner weißer Akzent, der dem
@@ -235,6 +287,32 @@ func _draw_humanoid(rect: Rect2, color: Color) -> void:
 		eye_r * 0.30, highlight_color)
 	draw_circle(right_eye + Vector2(-eye_r * 0.30, -eye_r * 0.35),
 		eye_r * 0.30, highlight_color)
+
+	# PR 30 — Polish: sehr dezente, statische Augenbrauen. Keine
+	# Animation, kein neuer State — nur ein Ruhe-Ausdrucks-Detail, das
+	# dem Humanoid-Head einen klaren „Blick" gibt, statt eines Punkt-
+	# Augen-Eindrucks. Leicht nach außen geneigt (innere Bogen-Enden
+	# tiefer), damit das Gesicht freundlich wirkt.
+	var brow_thickness: float = maxf(1.2, outer_r * _PaletteRef.HUMANOID_EYEBROW_THICKNESS_RATIO)
+	var brow_y: float = eye_y - eye_r * 1.90
+	var brow_half: float = eye_r * 1.10
+	var brow_tilt: float = eye_r * 0.35
+	# Linke Braue: innere (rechte) Spitze tiefer als äußere (linke).
+	draw_line(
+		Vector2(left_eye.x - brow_half, brow_y),
+		Vector2(left_eye.x + brow_half * 0.60, brow_y + brow_tilt),
+		_PaletteRef.HUMANOID_EYEBROW_COLOR,
+		brow_thickness,
+		true,
+	)
+	# Rechte Braue: spiegelt die linke.
+	draw_line(
+		Vector2(right_eye.x + brow_half, brow_y),
+		Vector2(right_eye.x - brow_half * 0.60, brow_y + brow_tilt),
+		_PaletteRef.HUMANOID_EYEBROW_COLOR,
+		brow_thickness,
+		true,
+	)
 
 	# Mund — wie bisher ein sanftes Lächeln via `draw_arc`. Werte sind
 	# unverändert, damit der Grundausdruck identisch bleibt.
