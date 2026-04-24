@@ -32,6 +32,7 @@ extends PanelContainer
 ## ist Side-Effect-frei und landet im `settings_probe_result`-Signal.
 
 const _SectionsRef := preload("res://scripts/settings/settings_sections.gd")
+const _OnboardingRef := preload("res://scripts/settings/provider_onboarding.gd")
 
 ## Der Main-Controller hört diesen Signal-Pfad, um zur Haupt-Ansicht
 ## zurückzukehren. Wir synthetisieren keinen eigenen Presence-Mode-
@@ -137,6 +138,19 @@ var _text_chain_apply_status_label: Label = null
 ## `{"kind": String, "in_chain": bool, "row_index": int}`; der Array-
 ## Index ist die aktuelle Position (wenn `in_chain=true`).
 var _text_chain_state: Array = []
+
+## PR 26 — Provider-Onboarding-Block. Kuratierter Readout oberhalb des
+## Chain-Editors plus eine einzige Quick-Action („Use local-first
+## chain"), die die bestehende `settings_set_text_provider_chain`-
+## Route ohne neuen IPC-Command nutzt. Die Widgets sind dünn gehalten —
+## keine eigene Wahrheit, nur Anzeige.
+var _onboarding_primary_value_label: Label = null
+var _onboarding_chain_value_label: Label = null
+var _onboarding_cloud_rows_vbox: VBoxContainer = null
+var _onboarding_local_first_button: Button = null
+var _onboarding_add_cloud_button: Button = null
+var _onboarding_add_cloud_reason_label: Label = null
+var _onboarding_local_first_status_label: Label = null
 
 ## Verhindert, dass Sync-Writes der Editor-Widgets beim Rendering eine
 ## Cascade aus Change-Handlern auslösen.
@@ -461,6 +475,13 @@ func _render_sections() -> void:
 	_cloud_http_secret_status_label = null
 	_cloud_http_external_warning_label = null
 	_cloud_http_insecure_hint_label = null
+	_onboarding_primary_value_label = null
+	_onboarding_chain_value_label = null
+	_onboarding_cloud_rows_vbox = null
+	_onboarding_local_first_button = null
+	_onboarding_add_cloud_button = null
+	_onboarding_add_cloud_reason_label = null
+	_onboarding_local_first_status_label = null
 
 	for section in _SectionsRef.all_sections():
 		_content_vbox.add_child(_build_section(section))
@@ -472,6 +493,12 @@ func _render_sections() -> void:
 		# **nach** dem Llamafile-Editor, weil beide unter Text Provider
 		# leben.
 		if section == _SectionsRef.SectionId.TEXT_PROVIDER:
+			# PR 26 — Onboarding-Readout ganz oben: erklärt primary /
+			# chain / cloud-Bereitschaft und bietet die Quick-Action
+			# „Use local-first chain", bevor die Pro-Kind-Editoren
+			# folgen. Bleibt additiv — der Chain-Editor darunter
+			# behält seine Rolle.
+			_content_vbox.add_child(_build_provider_onboarding_block())
 			# PR 9: Chain-Editor zuerst, weil er die sichtbare
 			# Reihenfolge kontrolliert; anschließend die Per-Kind-
 			# Editoren (llamafile/local_http/cloud_http) in gewohnter
@@ -1385,6 +1412,257 @@ func local_http_editor_snapshot() -> Dictionary:
 		"apply_status": _local_http_apply_status_label.text if _local_http_apply_status_label != null else "",
 		"probe_status": _local_http_probe_status_label.text if _local_http_probe_status_label != null else "",
 	}
+
+
+# --- Provider-Onboarding-Block (PR 26) ----------------------------------
+
+
+## Baut den Onboarding-Block oberhalb des Chain-Editors. Bewusst kein
+## neuer Scene-Node: die Zeilen werden im selben Re-Render-Tick
+## gebaut wie die Editor-Blöcke.
+func _build_provider_onboarding_block() -> Control:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 4)
+
+	var title := Label.new()
+	title.text = _OnboardingRef.TITLE_TEXT
+	title.add_theme_font_size_override("font_size", 11)
+	title.modulate = Color(1, 1, 1, 0.85)
+	box.add_child(title)
+
+	var note := Label.new()
+	note.text = _OnboardingRef.LOCAL_FIRST_HINT_TEXT
+	note.modulate = Color(1, 1, 1, 0.55)
+	note.add_theme_font_size_override("font_size", 10)
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(note)
+
+	# Primary + Chain summary rows — identisches Row-Format wie die
+	# Read-only Section, aber der Wert-Label wird beim Re-Sync
+	# überschrieben (kein queue_free im apply_status-Tick nötig).
+	var primary_row := HBoxContainer.new()
+	primary_row.add_theme_constant_override("separation", 6)
+	box.add_child(primary_row)
+	var primary_label := Label.new()
+	primary_label.text = "Primary"
+	primary_label.custom_minimum_size = Vector2(160, 0)
+	primary_label.modulate = Color(1, 1, 1, 0.6)
+	primary_label.add_theme_font_size_override("font_size", 10)
+	primary_row.add_child(primary_label)
+	_onboarding_primary_value_label = Label.new()
+	_onboarding_primary_value_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_onboarding_primary_value_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_onboarding_primary_value_label.modulate = Color(1, 1, 1, 0.85)
+	_onboarding_primary_value_label.add_theme_font_size_override("font_size", 10)
+	primary_row.add_child(_onboarding_primary_value_label)
+
+	var chain_row := HBoxContainer.new()
+	chain_row.add_theme_constant_override("separation", 6)
+	box.add_child(chain_row)
+	var chain_label := Label.new()
+	chain_label.text = "Chain"
+	chain_label.custom_minimum_size = Vector2(160, 0)
+	chain_label.modulate = Color(1, 1, 1, 0.6)
+	chain_label.add_theme_font_size_override("font_size", 10)
+	chain_row.add_child(chain_label)
+	_onboarding_chain_value_label = Label.new()
+	_onboarding_chain_value_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_onboarding_chain_value_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_onboarding_chain_value_label.modulate = Color(1, 1, 1, 0.85)
+	_onboarding_chain_value_label.add_theme_font_size_override("font_size", 10)
+	chain_row.add_child(_onboarding_chain_value_label)
+
+	# cloud_http-Bereitschaft: einzelne Rows, die sichtbar markieren,
+	# was für den First-Run fehlt. Die Labels bleiben leer bis
+	# `_sync_provider_onboarding_from_status` sie beim ersten Tick
+	# befüllt.
+	var cloud_header := Label.new()
+	cloud_header.text = "cloud_http first-run checklist"
+	cloud_header.add_theme_font_size_override("font_size", 10)
+	cloud_header.modulate = Color(1, 0.85, 0.55, 0.9)
+	box.add_child(cloud_header)
+
+	_onboarding_cloud_rows_vbox = VBoxContainer.new()
+	_onboarding_cloud_rows_vbox.add_theme_constant_override("separation", 2)
+	box.add_child(_onboarding_cloud_rows_vbox)
+
+	# Quick-Action-Zeile.
+	var actions_row := HBoxContainer.new()
+	actions_row.add_theme_constant_override("separation", 6)
+	box.add_child(actions_row)
+
+	_onboarding_local_first_button = Button.new()
+	_onboarding_local_first_button.text = _OnboardingRef.LOCAL_FIRST_BUTTON_TEXT
+	_onboarding_local_first_button.tooltip_text = (
+		"Sendet settings_set_text_provider_chain mit llamafile_local → local_http → abrain. Kein cloud_http."
+	)
+	_onboarding_local_first_button.pressed.connect(_on_onboarding_local_first_pressed)
+	actions_row.add_child(_onboarding_local_first_button)
+
+	_onboarding_add_cloud_button = Button.new()
+	_onboarding_add_cloud_button.text = _OnboardingRef.ADD_CLOUD_BUTTON_TEXT
+	_onboarding_add_cloud_button.disabled = true
+	_onboarding_add_cloud_button.tooltip_text = (
+		"Bewusst disabled: cloud_http wird nicht automatisch der Chain hinzugefügt. Nutze den cloud_http-Editor unten."
+	)
+	actions_row.add_child(_onboarding_add_cloud_button)
+
+	_onboarding_local_first_status_label = Label.new()
+	_onboarding_local_first_status_label.text = ""
+	_onboarding_local_first_status_label.modulate = Color(1, 1, 1, 0.55)
+	_onboarding_local_first_status_label.add_theme_font_size_override("font_size", 10)
+	actions_row.add_child(_onboarding_local_first_status_label)
+
+	_onboarding_add_cloud_reason_label = Label.new()
+	_onboarding_add_cloud_reason_label.text = ""
+	_onboarding_add_cloud_reason_label.modulate = Color(1, 1, 1, 0.55)
+	_onboarding_add_cloud_reason_label.add_theme_font_size_override("font_size", 10)
+	_onboarding_add_cloud_reason_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(_onboarding_add_cloud_reason_label)
+
+	var no_auto := Label.new()
+	no_auto.text = _OnboardingRef.NO_AUTO_CLOUD_TEXT
+	no_auto.modulate = Color(1, 1, 1, 0.5)
+	no_auto.add_theme_font_size_override("font_size", 10)
+	no_auto.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(no_auto)
+
+	var sep := HSeparator.new()
+	sep.modulate = Color(1, 1, 1, 0.2)
+	box.add_child(sep)
+
+	_sync_provider_onboarding_from_status()
+	return box
+
+
+func _sync_provider_onboarding_from_status() -> void:
+	if _onboarding_primary_value_label == null:
+		return
+	var primary := _OnboardingRef.primary_provider(_last_status)
+	if primary == "":
+		_onboarding_primary_value_label.text = "—"
+		_onboarding_primary_value_label.modulate = Color(1, 1, 1, 0.45)
+	else:
+		_onboarding_primary_value_label.text = "%s [%s]" % [
+			primary,
+			_OnboardingRef.locality_for(primary),
+		]
+		_onboarding_primary_value_label.modulate = Color(1, 1, 1, 0.85)
+	var chain := _OnboardingRef.chain_with_locality(_last_status)
+	if chain.is_empty():
+		_onboarding_chain_value_label.text = "—"
+		_onboarding_chain_value_label.modulate = Color(1, 1, 1, 0.45)
+	else:
+		var parts: PackedStringArray = PackedStringArray()
+		for entry in chain:
+			parts.append("%s [%s]" % [
+				String(entry.get("kind", "?")),
+				String(entry.get("locality", _OnboardingRef.LOCALITY_UNKNOWN)),
+			])
+		_onboarding_chain_value_label.text = " → ".join(parts)
+		_onboarding_chain_value_label.modulate = Color(1, 1, 1, 0.85)
+
+	if _onboarding_cloud_rows_vbox != null:
+		for child in _onboarding_cloud_rows_vbox.get_children():
+			child.queue_free()
+		for row in _OnboardingRef.cloud_http_readiness_rows(_last_status):
+			_onboarding_cloud_rows_vbox.add_child(_build_row(row))
+
+	# Add-cloud-Button bleibt per Design disabled; Erklärtext zeigen,
+	# wenn die Bereitschaft unvollständig ist. Sonst neutraler Hinweis,
+	# dass der bestehende cloud_http-Editor darunter zuständig ist.
+	if _onboarding_add_cloud_button != null:
+		_onboarding_add_cloud_button.disabled = \
+			_OnboardingRef.add_cloud_button_should_stay_disabled(_last_status)
+	if _onboarding_add_cloud_reason_label != null:
+		var reason := _OnboardingRef.add_cloud_disabled_reason(_last_status)
+		if reason == "":
+			_onboarding_add_cloud_reason_label.text = (
+				"cloud_http ist bereit — aktiviere es bewusst im cloud_http-Editor."
+			)
+		else:
+			_onboarding_add_cloud_reason_label.text = reason
+
+
+func _on_onboarding_local_first_pressed() -> void:
+	var client: Node = get_node_or_null("/root/IpcClient")
+	if client == null or not client.has_method("is_connected_to_core") \
+			or not client.is_connected_to_core():
+		if _onboarding_local_first_status_label != null:
+			_onboarding_local_first_status_label.text = "offline"
+			_onboarding_local_first_status_label.modulate = Color(0.9, 0.5, 0.5, 0.9)
+		return
+	if client.has_method("settings_set_text_provider_chain"):
+		client.call("settings_set_text_provider_chain",
+			_OnboardingRef.LOCAL_FIRST_CHAIN.duplicate())
+	if _onboarding_local_first_status_label != null:
+		_onboarding_local_first_status_label.text = "sent"
+		_onboarding_local_first_status_label.modulate = Color(1, 1, 1, 0.55)
+
+
+## Snapshot-Helfer für Smoke-Tests. Gibt den sichtbaren Zustand des
+## Onboarding-Blocks deterministisch zurück, ohne Scene-Tree-Lookup.
+func provider_onboarding_snapshot() -> Dictionary:
+	var built := _onboarding_primary_value_label != null
+	if not built:
+		return {
+			"built": false,
+			"primary": "",
+			"chain": [],
+			"cloud_rows": [],
+			"add_cloud_disabled": true,
+			"add_cloud_reason": "",
+			"local_first_button_text": "",
+			"local_first_button_disabled": false,
+			"local_first_status": "",
+		}
+	var cloud_rows: Array = []
+	if _onboarding_cloud_rows_vbox != null:
+		for child in _onboarding_cloud_rows_vbox.get_children():
+			if child is Control:
+				var c_node: Control = child
+				if c_node.get_child_count() >= 2:
+					var lbl := c_node.get_child(0)
+					var val := c_node.get_child(1)
+					var label_text := ""
+					var value_text := ""
+					if lbl is Label:
+						label_text = (lbl as Label).text
+					if val is Label:
+						value_text = (val as Label).text
+					cloud_rows.append({"label": label_text, "value": value_text})
+	return {
+		"built": true,
+		"primary": _onboarding_primary_value_label.text,
+		"chain": _onboarding_chain_value_label.text if _onboarding_chain_value_label != null else "",
+		"cloud_rows": cloud_rows,
+		"add_cloud_disabled": _onboarding_add_cloud_button.disabled if _onboarding_add_cloud_button != null else true,
+		"add_cloud_reason": _onboarding_add_cloud_reason_label.text if _onboarding_add_cloud_reason_label != null else "",
+		"local_first_button_text": _onboarding_local_first_button.text if _onboarding_local_first_button != null else "",
+		"local_first_button_disabled": _onboarding_local_first_button.disabled if _onboarding_local_first_button != null else false,
+		"local_first_status": _onboarding_local_first_status_label.text if _onboarding_local_first_status_label != null else "",
+	}
+
+
+## Test-Hook: spiegelt einen Button-Klick auf „Use local-first chain".
+## Anders als der echte Pfad prüfen wir hier **keinen** IpcClient —
+## der Smoke-Test validiert nur, dass die vom Helfer exportierte
+## LOCAL_FIRST_CHAIN konsistent bleibt und der Status-Label-Flow
+## funktioniert. Ein Aufrufer kann optional einen Stub-Client
+## übergeben, um die `settings_set_text_provider_chain`-Call-Kette
+## zu inspizieren.
+func simulate_local_first_chain_for_test(stub_client: Object = null) -> Array:
+	var sent_chain: Array = []
+	if stub_client != null and stub_client.has_method("settings_set_text_provider_chain"):
+		stub_client.call("settings_set_text_provider_chain",
+			_OnboardingRef.LOCAL_FIRST_CHAIN.duplicate())
+		if stub_client.has_method("last_text_provider_chain"):
+			sent_chain = stub_client.call("last_text_provider_chain")
+	else:
+		sent_chain = _OnboardingRef.LOCAL_FIRST_CHAIN.duplicate()
+	if _onboarding_local_first_status_label != null:
+		_onboarding_local_first_status_label.text = "sent"
+	return sent_chain
 
 
 # --- Text-Provider-Chain-Editor (PR 9) ----------------------------------
