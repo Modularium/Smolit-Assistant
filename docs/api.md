@@ -510,11 +510,14 @@ Ist-Zustand der tatsächlich emittierenden Pfade (Stand PR 14–19):
   `approval_requested` → `approval_resolved` → (bei Approve)
   `action_started` → `action_step` → `action_completed`; sonst
   `action_cancelled` mit sprechender `message`.
-- Interaction (`open_application`): `action_planned` →
-  (`approval_requested`/`_resolved` bei aktivem
-  `require_confirmation`) → `action_started` → `action_step` →
-  `action_verification` → `action_completed` bzw.
-  `action_cancelled`.
+- Interaction (`open_application`): seit PR 25 gilt Policy v0 —
+  `require_confirmation` ist per Default `true`, also läuft die
+  Sequenz `action_planned` → `approval_requested` → (nach
+  `approval_approve`) `approval_resolved(approved)` →
+  `action_started` → `action_step` → `action_verification` →
+  `action_completed`. Bei `denied` / `cancelled` / `timed_out`
+  emittiert der Core `approval_resolved` und `action_cancelled`,
+  **ohne** vorher `action_started` zu senden.
 
 `action_progress` ist im Enum reserviert, wird heute aber von
 **keinem** Emitter genutzt. UIs müssen die Variante tolerieren.
@@ -752,9 +755,9 @@ Das Feld `error` enkodiert einen klassifikatorischen Recovery-Hinweis:
   Retry ohne Änderung bringt nichts.
 - `recovery_hint=ask_user` — Bestätigung/Eingabe notwendig (z. B. wenn
   die Aktion `requires_confirmation=true` trägt und der globale
-  `SMOLIT_INTERACTION_REQUIRE_CONFIRMATION` aktiv ist — der
-  Confirmation-Kanal selbst ist noch nicht implementiert, siehe
-  Phase 8b).
+  `SMOLIT_INTERACTION_REQUIRE_CONFIRMATION` aktiv ist). Der
+  Confirmation-Kanal ist seit PR 17 / PR 25 verdrahtet; siehe §2.7
+  und [`docs/security/APPROVAL_UX.md`](./security/APPROVAL_UX.md).
 - `recovery_hint=fallback_unavailable` — Kind ist vom Backend
   strukturell nicht unterstützt (z. B. `type_text` / `send_shortcut`
   in diesem MVP) oder per Config deaktiviert.
@@ -799,6 +802,29 @@ darauf festzulegen.
 Ohne ein Command-Template meldet der Backend für die jeweilige
 Operation ehrlich „preconditions not met" bzw. `BackendUnsupported` —
 das Verhalten ist damit deterministisch und ungefährlich.
+
+#### Policy v0 Defaults (PR 25)
+
+Die obigen Default-Werte sind in
+[`core/src/config.rs`](../core/src/config.rs) als
+`DEFAULT_INTERACTION_*`-Konstanten fixiert; der Tripwire-Test
+`policy_v0_defaults_are_locked` schlägt an, wenn jemand die Baseline
+flippt.
+
+Zusammengefasst: ein Start ohne `SMOLIT_INTERACTION_*`-Env-Vars
+liefert
+
+- `open_application` **erlaubt**, aber **approval-gated**,
+- `focus_window` **gesperrt** (doppeltes Opt-in nötig: Flag **und**
+  X11-Template `SMOLIT_INTERACTION_FOCUS_WINDOW_CMD`),
+- `type_text` / `send_shortcut` **gesperrt** *und* ohne Backend —
+  ein Flip der Env-Variablen schaltet sie **nicht** aktiv.
+
+`SMOLIT_INTERACTION_REQUIRE_CONFIRMATION=0` ist ein reiner Test-
+Hebel; produktive Läufe belassen den Default `true`. Details und
+Reality-Check:
+[`docs/security/APPROVAL_UX.md`](./security/APPROVAL_UX.md) (Abschnitt
+„Policy v0") und [`docs/reviews/PR25_POLICY_V0_APPROVAL_DEFAULT.md`](./reviews/PR25_POLICY_V0_APPROVAL_DEFAULT.md).
 
 #### Scope-Grenzen (explizit)
 

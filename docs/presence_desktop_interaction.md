@@ -887,13 +887,31 @@ bewusst zu wenig, um missbraucht zu werden.
 
 ### 14b.3 Automation-Modus-Einordnung
 
-In der Sprache von §8 entspricht das MVP am ehesten **assist only**
-(§8.2), erweitert um eine deklarierte, aber noch nicht betretbare
-Schwelle zu **confirm before action** (§8.3): Aktionen mit
-`requires_confirmation=true` werden bei aktivem
-`SMOLIT_INTERACTION_REQUIRE_CONFIRMATION` **abgewiesen**, solange
-kein Confirmation-Kanal existiert. Das ist der ehrliche MVP-Zustand
-— keine Pseudo-Automation, keine stille Eskalation.
+In der Sprache von §8 entspricht das MVP seit PR 25 **confirm before
+action** (§8.3) für alle echten Interaction-Kinds: Aktionen mit
+`requires_confirmation=true` laufen bei Default-Config
+(`SMOLIT_INTERACTION_REQUIRE_CONFIRMATION=true`) durch den
+Approval-Pfad aus §2.7 der [api.md](./api.md). `open_application`
+ist der erste und heute einzige echte Pfad, der diese Policy v0 real
+nutzt; `focus_window` erbt sie beim doppelten Opt-in (Flag +
+X11-Template). `type_text` / `send_shortcut` bleiben außerhalb:
+ihr Backend meldet weiterhin `BackendUnsupported` — die Policy
+schützt hier *die Defaults des Vokabulars*, nicht eine existierende
+Fähigkeit.
+
+Ist-Zustand Policy v0 (PR 25):
+
+- `open_application` — real, approval-gated by default.
+- `focus_window` — X11-template-basierter opt-in; `allow=false`
+  Default sperrt die Aktion; mit Opt-in bleibt sie
+  approval-gated.
+- `type_text` / `send_shortcut` — `BackendUnsupported`, nicht
+  ausführbar.
+- Audit-Ring-Buffer (PR 19) deckt heute **nur** den
+  `plan_demo_action`-Pfad; die Lifecycle-Events der realen
+  `open_application`-Approval-Kette werden dort **nicht** erfasst.
+  Eine Erweiterung wäre eine eigene Design-Entscheidung und nicht
+  Teil von PR 25.
 
 ### 14b.4 Ehrliche Scope-Grenzen
 

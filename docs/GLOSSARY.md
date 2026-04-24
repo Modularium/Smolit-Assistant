@@ -21,8 +21,9 @@ sondern einen `error`-Frame.
 
 **Scope heute:**
 
-- Interaction-Flow: `open_application` läuft durch Approval, wenn
-  `SMOLIT_INTERACTION_REQUIRE_CONFIRMATION=1`.
+- Interaction-Flow: `open_application` läuft seit PR 25 (Policy v0)
+  **per Default** durch Approval; `SMOLIT_INTERACTION_REQUIRE_CONFIRMATION=0`
+  ist ein reiner Test-Hebel.
 - Demo-Flow: `request_approval_demo` (PR 17) und
   `plan_demo_action` (PR 18) sind Mock-Pfade — **keine echten
   Systemaktionen**.

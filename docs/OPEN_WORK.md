@@ -146,23 +146,23 @@ konservativ auf `["abrain"]`.
 ## E — Approval / Policy / Tool-Gating
 
 **Status:** Approval-UX v1 (PR 17) + Approval-Gated Demo Action
-Planner (PR 18) vollständig; **real verdrahtet** ist die Kette
-nur auf dem Demo-Pfad — keine echte Core-Aktion ist durch
-Approval *gesperrt*, bis der User entschieden hat. Der Interaction-
-Executor ruft den Approval-Pfad für `open_application` bereits auf,
-wenn `SMOLIT_INTERACTION_REQUIRE_CONFIRMATION=1`.
+Planner (PR 18) + Policy v0 (PR 25, 2026-04-24) vollständig. Die
+Default-Config zwingt jede echte Interaction-Action mit
+`requires_confirmation=true` durch den Approval-Pfad; das ist
+heute real nur `open_application`, beim doppelten Opt-in auch
+`focus_window`. `type_text` / `send_shortcut` bleiben ohne Backend
+und damit außerhalb der Policy-Oberfläche.
 **Warum wichtig:** Die Sicherheitsaussage „Smolit handelt nur nach
-expliziter Zustimmung" braucht eine reale Verdrahtung, nicht nur
-eine Demo.
-**Blocker:** keine technischen; Design-Entscheidung „welche
-Aktionen werden standardmäßig gated".
-**Nächster kleinster PR:**
-
-- **PR 25 E-Policy-v0** *(neu nach ADR-Insertion; vorher als PR 24
-  geführt):* `SMOLIT_INTERACTION_REQUIRE_CONFIRMATION=1` dokumentieren
-  und als empfohlenen Default für produktive Builds kennzeichnen;
-  keine neue Policy-Engine, nur ein Schritt in Richtung realer
-  Gating-Verdrahtung.
+expliziter Zustimmung" ist nun real verdrahtet — kein Demo-only-
+Pfad mehr. Der Tripwire-Test `policy_v0_defaults_are_locked` in
+[`core/src/config.rs`](../core/src/config.rs) schlägt an, wenn
+jemand die Baseline flippt.
+**Blocker:** keine.
+**Nächster kleinster PR:** Kein eigener E-PR in der nahen Reihe.
+Folge-Arbeiten (neue Real-Interaction-Kinds, Audit-Abdeckung des
+`open_application`-Lifecycles, feinere Risk-Klassifikation) sind
+bewusst noch nicht priorisiert — jede davon würde eine eigene
+Design-Entscheidung brauchen.
 
 **Nicht-Ziele:**
 
@@ -170,13 +170,24 @@ Aktionen werden standardmäßig gated".
 - Keine Multi-Seat- oder Audit-Persistenz-Features.
 - Keine Erweiterung des Demo-Executor-Set um Kinds mit echten
   Seiteneffekten.
+- **Kein `type_text` / `send_shortcut`-Backend** als Folgeschritt —
+  solche Fähigkeiten bräuchten eigene ADR-/Policy-Runde.
+- **Keine automatische Ausweitung des Audit-Ring-Buffers** auf den
+  realen `open_application`-Pfad; heute deckt Audit ausschließlich
+  den `plan_demo_action`-Lifecycle ab. Siehe
+  [`docs/reviews/PR25_POLICY_V0_APPROVAL_DEFAULT.md`](./reviews/PR25_POLICY_V0_APPROVAL_DEFAULT.md).
 
 **Tests / Verifikation:**
 
-- Bestehende Core-Tests `approval_approved_produces_completed_via_broadcast`
-  etc. bleiben grün.
-- Neuer Test für den Default-Confirmation-Pfad, falls der Default
-  tatsächlich geändert wird.
+- `policy_v0_defaults_are_locked` und
+  `policy_v0_parse_bool_with_no_env_uses_locked_defaults` in
+  [`core/src/config.rs`](../core/src/config.rs).
+- Bestehende Core-/IPC-Tests `approval_approved_produces_completed_via_broadcast`,
+  `approval_denied_produces_cancelled`,
+  `approval_timeout_produces_cancelled`,
+  `focus_window_disallowed_emits_failed`,
+  `focus_window_without_backend_template_emits_unsupported`,
+  `focus_window_with_template_emits_verification_and_completed`.
 
 ---
 
@@ -205,8 +216,10 @@ Entscheidung vor Backend-Arbeit.
 
 - **Kein eigener F-PR in der nahen Reihe.** `focus_window` ist mit
   PR 23 abgeschlossen; die offene Next-Step-Arbeit ist Workstream E
-  (Policy-Verdrahtung, neu PR 25 nach ADR-Insertion). `type_text` /
-  `send_shortcut` bekommen keinen Backend-Pfad vor Policy.
+  (Policy v0, PR 25, gelandet). `type_text` / `send_shortcut`
+  bekommen auch nach Policy v0 **keinen** Backend-Pfad — die
+  Default-Flags bleiben `false` und das Backend meldet
+  `BackendUnsupported`.
 
 **Nicht-Ziele:**
 

@@ -154,7 +154,8 @@ Detaillierte Begriffswelt: siehe
   PR 14 (TTS-Lifecycle), PR 15 (Behavioral Expression Layer),
   PR 16 (Workflow Visibility Overlay v1), PR 17 (Approval UX v1),
   PR 18 (Approval-Gated Demo Action Planner), PR 19 (Local Audit
-  Trail v1), PR 20 (Docs Reality Check — dieser PR).
+  Trail v1), PR 20 (Docs Reality Check), PR 25 (Policy v0 —
+  Approval-Default für echte Interaction Actions).
 
 Detaillierte PR-Historie: [`docs/reviews/`](./docs/reviews/).
 
@@ -209,7 +210,7 @@ ohne vorgeschaltete Policy-Verdrahtung.
 | 22 | B | Wayland-Compositor-Live-Messung auf separatem Host |
 | 23 | F | `focus_window` Reality Decision — Option 1 bestätigt (template-basierter X11-Backend via `wmctrl -a {name}` bleibt), Details in [`docs/reviews/PR23_FOCUS_WINDOW_DECISION.md`](./docs/reviews/PR23_FOCUS_WINDOW_DECISION.md) |
 | 24 | J | Cross-Repo ADR: Smolitux Design Contract (Docs-only, dieser PR; Spiegel-ADR in smolitux-ui). Siehe [`docs/adr/ADR-0001-smolitux-design-contract.md`](./docs/adr/ADR-0001-smolitux-design-contract.md) |
-| 25 | E | Policy v0: real `require_confirmation=true` → echter Approval-Pfad für `open_application` |
+| 25 | E | Policy v0 (2026-04-24, gelandet): `require_confirmation=true` als Default, `open_application` läuft per Default durch die Approval-Kette, `focus_window` bleibt doppeltes Opt-in; Defaults in `core/src/config.rs` als `DEFAULT_INTERACTION_*`-Konstanten mit Tripwire-Test fixiert. Details in [`docs/reviews/PR25_POLICY_V0_APPROVAL_DEFAULT.md`](./docs/reviews/PR25_POLICY_V0_APPROVAL_DEFAULT.md). |
 | 26 | D | Provider-Onboarding-UX: Default-Ketten und cloud_http-First-Run |
 | 27 | C | STT-Alternative (z. B. `whisper.cpp`), bleibt command-basiert |
 | 28 | A | `presence_desktop_interaction.md` auf Ist-Zustand trimmen |
@@ -231,17 +232,21 @@ davon würde eine eigene Design-Entscheidung brauchen:
   template-basierter X11-Backend-Pfad bestätigt (opt-in über
   `SMOLIT_INTERACTION_FOCUS_WINDOW_CMD`, Default leer → honest
   `BackendUnsupported`). `type_text` / `send_shortcut` bleiben
-  bewusst `BackendUnsupported` im `CommandBackend`, bis
-  Policy-Verdrahtung (Workstream E, neu PR 25 nach ADR-Insertion) steht.
+  bewusst `BackendUnsupported` im `CommandBackend`; die
+  Policy-Baseline (Workstream E / PR 25) schützt die Default-
+  Semantik der `allow_*`-Flags, eröffnet aber ausdrücklich kein
+  Backend für diese beiden Kinds.
 - **AdminBot-Integration / Shell-Zugriff.** Kein Plan.
 - **Stage-C-Avatar-Assets / User-Uploads.**
   [`docs/avatar_stage_c_research.md`](./docs/avatar_stage_c_research.md)
   bleibt Research-Gate.
 - **Cloud-Provider als Default.** cloud_http existiert als
   opt-in; wird nicht standard-aktiviert.
-- **Policy-Engine im „grand design"-Sinn.** Stattdessen konkrete
-  Gating-Verdrahtung für genau eine Aktion (Workstream E, neu PR 25
-  nach ADR-Insertion).
+- **Policy-Engine im „grand design"-Sinn.** Stattdessen Policy v0
+  (PR 25, 2026-04-24): Default-Approval-Pfad für
+  `open_application`, Tripwire-Test in
+  [`core/src/config.rs`](./core/src/config.rs). Keine Regel-Matrix,
+  keine rollenbasierte Freigabe.
 - **Audit-Persistenz / Audit-Export.** Ring-Buffer bleibt
   in-memory. Ein Persistenz-Pfad braucht eine eigene Security-
   Review (siehe

@@ -27,6 +27,7 @@
 | [`phase-3-avatar-ui_review.md`](./phase-3-avatar-ui_review.md) | Phase 3 Avatar UI | Review der Phase-3-Arbeit |
 | [`PR20_DOCS_REALITY_CHECK.md`](./PR20_DOCS_REALITY_CHECK.md) | PR 20 Docs Reality Check | Ehrlicher Abgleich Ist-Code vs. gesamte Dokumentation; Grundlage für den ROADMAP-Rebase und `OPEN_WORK.md`. |
 | [`PR23_FOCUS_WINDOW_DECISION.md`](./PR23_FOCUS_WINDOW_DECISION.md) | PR 23 focus_window Reality Decision | Entscheidung für Option 1 („bleibt, weil bereits realisiert"); Code-Inventur, Machbarkeitsprüfung X11, Doku-Pointer. |
+| [`PR25_POLICY_V0_APPROVAL_DEFAULT.md`](./PR25_POLICY_V0_APPROVAL_DEFAULT.md) | PR 25 Policy v0 | Safety-/Docs-/Tests-PR: fixiert die Default-Approval-Baseline für echte Interaction Actions (`open_application` approval-gated, `focus_window` doppeltes Opt-in, `type_text`/`send_shortcut` weiterhin unsupported). Ehrliche Audit-Grenze dokumentiert. |
 
 ## Konventionen für neue Einträge
 

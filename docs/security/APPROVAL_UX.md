@@ -1,4 +1,4 @@
-# Approval UX — Prinzipien und Grenzen (PR 17 + PR 18)
+# Approval UX — Prinzipien und Grenzen (PR 17 + PR 18 + PR 25)
 
 > Scope: die Approval-UX (PR 17) und ihre Gating-Verdrahtung durch
 > den Demo-Action-Planner (PR 18). Der Core bleibt bei allen hier
@@ -233,3 +233,88 @@ produktiven Umgebung empfiehlt sich:
   beides identisch an (Card + bestehender ApprovalBanner laufen
   parallel, bis ein künftiger Refactor die beiden UI-Surface
   vereinheitlicht).
+
+## Policy v0 — Approval-Default für Interaction Actions (PR 25)
+
+PR 25 zieht die Sicherheits-Baseline fest, ohne eine neue Policy-
+Engine zu bauen: **echte Interaction Actions benötigen standardmäßig
+Approval**. Das ist eine Default-/Docs-/Test-Verhärtung, keine neue
+Fähigkeit.
+
+### Gelockte Defaults
+
+Quelle: [`core/src/config.rs`](../../core/src/config.rs) —
+`DEFAULT_INTERACTION_*`-Konstanten. Der Tripwire-Test
+`policy_v0_defaults_are_locked` schlägt an, wenn jemand einen dieser
+Werte flippt.
+
+| Env-Variable | Default | Bedeutung |
+| ------------ | ------- | --------- |
+| `SMOLIT_INTERACTION_REQUIRE_CONFIRMATION` | `true` | Real-Interaction-Action mit `requires_confirmation=true` muss durch die Approval-Kette, bevor der Backend-Aufruf läuft. |
+| `SMOLIT_INTERACTION_ALLOW_OPEN_APP` | `true` | `open_application` ist die einzige echte Interaction-Kind, die out-of-the-box freigeschaltet ist — und sie ist **Approval-gated**. |
+| `SMOLIT_INTERACTION_ALLOW_FOCUS_WINDOW` | `false` | Doppeltes Opt-in: Flag **und** `SMOLIT_INTERACTION_FOCUS_WINDOW_CMD` (X11-Template) müssen gesetzt sein; siehe [PR 23 Reality Check](../reviews/PR23_FOCUS_WINDOW_DECISION.md). Mit `require_confirmation=true` bleibt `focus_window` auch nach dem doppelten Opt-in Approval-gated. |
+| `SMOLIT_INTERACTION_ALLOW_TYPE_TEXT` | `false` | Kein Backend; der Executor meldet weiterhin `BackendUnsupported("type_text")`. Das Flag hätte aktuell keine Wirkung auf die echte Ausführung — es ist Teil der Policy-Oberfläche, damit das Vokabular stabil bleibt. |
+| `SMOLIT_INTERACTION_ALLOW_SHORTCUTS` | `false` | Analog `type_text` — kein Backend, `BackendUnsupported("send_shortcut")`. |
+
+### Was Policy v0 konkret schützt
+
+- `interaction_open_application` emittiert bei Default-Config die
+  Sequenz `action_planned` → `approval_requested` → … → nach
+  `approval_approve`: `approval_resolved(approved)` →
+  `action_started` → `action_step` → `action_verification` →
+  `action_completed`. **Ohne** `approval_approve` läuft kein
+  Backend-Aufruf. Test:
+  [`approval_approved_produces_completed_via_broadcast`](../../core/src/ipc/server.rs).
+- Deny-Pfad: `approval_deny` →
+  `approval_resolved(denied)` → `action_cancelled` (Grund: denied),
+  **kein** `action_started`, **kein** `action_completed`. Test:
+  [`approval_denied_produces_cancelled`](../../core/src/ipc/server.rs).
+- Timeout-Pfad: `approval_resolved(timed_out, source=timeout)` →
+  `action_cancelled("Approval timed out")`. Test:
+  `approval_timeout_produces_cancelled`.
+- `focus_window` bei Default-Config → `action_failed` mit
+  `recovery_hint=fallback_unavailable`. Tests:
+  `focus_window_disallowed_emits_failed` und
+  `focus_window_without_backend_template_emits_unsupported`.
+- Nach doppeltem Opt-in für `focus_window` (`allow=true` + Template +
+  `require_confirmation=true`) läuft die Aktion ebenfalls durch die
+  Approval-Kette wie `open_application`.
+
+### Was Policy v0 **nicht** ist
+
+- **Keine Policy-Engine.** Es gibt keine Regel-Matrix, keine
+  rollenbasierte Freigabe, keine Multi-Seat-Semantik. Die Gating-
+  Entscheidung ist `bool`: „diese Aktion braucht Approval oder
+  nicht".
+- **Keine neuen Fähigkeiten.** `type_text` und `send_shortcut` sind
+  weiterhin **nicht ausführbar**; der Backend-Pfad meldet
+  `BackendUnsupported`. Policy v0 schützt nichts, was es ohnehin
+  nicht gibt — aber es hält die Defaults klar.
+- **Kein Wayland-Fokus-Backend.** Unter Wayland bleibt
+  `focus_window` ohne generisches Protokoll-Primitiv; der Core
+  verspricht keinen Fokuswechsel.
+- **Kein AdminBot, keine Shell.** Nicht im Scope.
+- **Keine Audit-Erweiterung auf den Real-Interaction-Pfad.** Die
+  Audit-Ring-Buffer-Senke (PR 19) deckt heute nur die
+  `plan_demo_action`-Lifecycle-Events ab. Der reale
+  `open_application`-Approval-Flow ist **nicht** auditiert. Eine
+  Ausweitung ist bewusst nicht Teil von PR 25 — sie würde eine
+  eigene Design-Entscheidung brauchen (welche Felder, welche
+  Redaction, welche Interaktion mit der `source`-Axt aus PR 17).
+
+### Konfigurations-Leitfaden
+
+- **Default-Produktiv-Lauf:** alle `SMOLIT_INTERACTION_ALLOW_*`-
+  Variablen unbelegt lassen. Es ergibt sich automatisch die
+  Policy-v0-Basis (Open-App erlaubt, Approval nötig, Rest gesperrt).
+- **`focus_window` aktivieren (X11):** setze **zuerst**
+  `SMOLIT_INTERACTION_FOCUS_WINDOW_CMD="wmctrl -a {name}"` (oder
+  ein gleichwertiges Template). Erst **danach**
+  `SMOLIT_INTERACTION_ALLOW_FOCUS_WINDOW=1`. `require_confirmation`
+  bleibt standardmäßig aktiv; der User muss jede Fokussierung
+  bestätigen.
+- **Kein Auto-Approve.** Setze `SMOLIT_INTERACTION_REQUIRE_CONFIRMATION=0`
+  **nicht** in produktiven Läufen. Das ist ein reiner Test-Hebel.
+
+Siehe auch [`docs/reviews/PR25_POLICY_V0_APPROVAL_DEFAULT.md`](../reviews/PR25_POLICY_V0_APPROVAL_DEFAULT.md)
+für den Reality-Check (was wirklich geschützt ist, was nicht).
