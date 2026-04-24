@@ -13,6 +13,29 @@ const DEFAULT_STT_TIMEOUT_SECONDS: u64 = 20;
 const DEFAULT_TTS_TIMEOUT_SECONDS: u64 = 20;
 const DEFAULT_IPC_BIND: &str = "127.0.0.1:8787";
 const DEFAULT_INTERACTION_BACKEND: &str = "command";
+/// Policy v0 — Interaction default gates (PR 25).
+///
+/// These constants lock the safety baseline for real interaction
+/// actions. Any change here is a policy change and must flip the
+/// accompanying `policy_v0_defaults_are_locked` test.
+///
+/// Rationale:
+/// * `allow_open_application = true` — the only real interaction
+///   kind we ship; still gated by approval.
+/// * `allow_focus_window = false` — double opt-in: env flag **and**
+///   X11 template must be set (see
+///   `docs/reviews/PR23_FOCUS_WINDOW_DECISION.md`).
+/// * `allow_type_text` / `allow_shortcuts = false` — no backend
+///   exists; flipping these to `true` would not *enable* the
+///   actions, but the signal of the default is what's locked.
+/// * `require_confirmation = true` — real interaction actions that
+///   carry `requires_confirmation=true` must go through the
+///   approval pipeline before any backend is invoked.
+const DEFAULT_INTERACTION_ALLOW_OPEN_APP: bool = true;
+const DEFAULT_INTERACTION_ALLOW_FOCUS_WINDOW: bool = false;
+const DEFAULT_INTERACTION_ALLOW_TYPE_TEXT: bool = false;
+const DEFAULT_INTERACTION_ALLOW_SHORTCUTS: bool = false;
+const DEFAULT_INTERACTION_REQUIRE_CONFIRMATION: bool = true;
 const DEFAULT_APPROVAL_TIMEOUT_SECONDS: u64 = 20;
 /// Konservativer Default der Text-Provider-Kette. ABrain bleibt
 /// Primary — explizit in der Architektur-Doku §3 / §5 festgelegt.
@@ -433,23 +456,23 @@ impl Config {
             .unwrap_or_else(|| DEFAULT_INTERACTION_BACKEND.to_string());
         let allow_open_application = parse_bool(
             lookup("SMOLIT_INTERACTION_ALLOW_OPEN_APP").as_deref(),
-            true,
+            DEFAULT_INTERACTION_ALLOW_OPEN_APP,
         );
         let allow_focus_window = parse_bool(
             lookup("SMOLIT_INTERACTION_ALLOW_FOCUS_WINDOW").as_deref(),
-            false,
+            DEFAULT_INTERACTION_ALLOW_FOCUS_WINDOW,
         );
         let allow_type_text = parse_bool(
             lookup("SMOLIT_INTERACTION_ALLOW_TYPE_TEXT").as_deref(),
-            false,
+            DEFAULT_INTERACTION_ALLOW_TYPE_TEXT,
         );
         let allow_shortcuts = parse_bool(
             lookup("SMOLIT_INTERACTION_ALLOW_SHORTCUTS").as_deref(),
-            false,
+            DEFAULT_INTERACTION_ALLOW_SHORTCUTS,
         );
         let require_confirmation = parse_bool(
             lookup("SMOLIT_INTERACTION_REQUIRE_CONFIRMATION").as_deref(),
-            true,
+            DEFAULT_INTERACTION_REQUIRE_CONFIRMATION,
         );
         let open_app_cmd_template = non_empty(lookup("SMOLIT_INTERACTION_OPEN_APP_CMD"));
         let focus_window_cmd_template =
@@ -900,5 +923,47 @@ mod tests {
         assert_eq!(parse_llamafile_port(Some("foo")), 8788);
         assert_eq!(parse_llamafile_port(Some("70000")), 8788);
         assert_eq!(parse_llamafile_port(Some("")), 8788);
+    }
+
+    // --- Policy v0 defaults lock (PR 25) --------------------------------
+
+    #[test]
+    fn policy_v0_defaults_are_locked() {
+        // Safety baseline: real interaction actions require approval by
+        // default, and only `open_application` is allow-listed out of
+        // the box. Flipping any of these is a policy change and must
+        // come with an updated ADR / OPEN_WORK entry.
+        assert_eq!(DEFAULT_INTERACTION_REQUIRE_CONFIRMATION, true);
+        assert_eq!(DEFAULT_INTERACTION_ALLOW_OPEN_APP, true);
+        assert_eq!(DEFAULT_INTERACTION_ALLOW_FOCUS_WINDOW, false);
+        assert_eq!(DEFAULT_INTERACTION_ALLOW_TYPE_TEXT, false);
+        assert_eq!(DEFAULT_INTERACTION_ALLOW_SHORTCUTS, false);
+    }
+
+    #[test]
+    fn policy_v0_parse_bool_with_no_env_uses_locked_defaults() {
+        // `Config::load` delegates to `parse_bool` with the locked
+        // constants; mirror that call with `None` to prove an empty
+        // environment reproduces the Policy v0 baseline end-to-end.
+        assert_eq!(
+            parse_bool(None, DEFAULT_INTERACTION_REQUIRE_CONFIRMATION),
+            true,
+        );
+        assert_eq!(
+            parse_bool(None, DEFAULT_INTERACTION_ALLOW_OPEN_APP),
+            true,
+        );
+        assert_eq!(
+            parse_bool(None, DEFAULT_INTERACTION_ALLOW_FOCUS_WINDOW),
+            false,
+        );
+        assert_eq!(
+            parse_bool(None, DEFAULT_INTERACTION_ALLOW_TYPE_TEXT),
+            false,
+        );
+        assert_eq!(
+            parse_bool(None, DEFAULT_INTERACTION_ALLOW_SHORTCUTS),
+            false,
+        );
     }
 }
