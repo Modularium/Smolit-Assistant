@@ -30,9 +30,25 @@ use crate::audio::types::{AudioFeatureState, split_command};
 use crate::config::AudioConfig;
 
 pub const PROVIDER_NAME_TTS_COMMAND: &str = "command";
-pub const KNOWN_TTS_KINDS: &[&str] = &[PROVIDER_NAME_TTS_COMMAND];
+
+/// Kanonischer Namensstring für den Piper-basierten TTS-Provider (PR 34).
+/// Externer Command-Adapter — Piper ist keine Build-Abhängigkeit, kein
+/// Modell-Manager, kein Streaming-Pfad. Semantisch eine zweite
+/// command-basierte Adapter-Variante, damit der Resolver-Fallback
+/// (z. B. Chain `["piper", "command"]`) real wird.
+pub const PROVIDER_NAME_TTS_PIPER: &str = "piper";
+
+/// Kuratierte Whitelist bekannter TTS-Kinds. Seit PR 34: `command` +
+/// `piper`. Neue Kinds werden hier eingetragen, wenn ihre Runtime
+/// wirklich gelandet ist — kein freier Registrierungs-Pfad. Die Liste
+/// wird vom Chain-Editor-Validator (`validate_tts_chain`), vom
+/// `from_chain`-Resolver und von der Settings-Shell konsumiert.
+pub const KNOWN_TTS_KINDS: &[&str] =
+    &[PROVIDER_NAME_TTS_COMMAND, PROVIDER_NAME_TTS_PIPER];
 
 /// Default-TTS-Kette (PR 13). Reset-Pfad und Startup-Fallback.
+/// **Bleibt** `["command"]` — PR 34 fügt `piper` nur zur Whitelist
+/// hinzu, ändert aber den Compile-Time-Default nicht.
 pub const DEFAULT_TTS_PROVIDER_CHAIN: &[&str] = &[PROVIDER_NAME_TTS_COMMAND];
 
 /// Fehlerklassen für die TTS-Chain-Validierung (PR 13).
@@ -111,15 +127,22 @@ pub struct TtsProviderChainItem {
     pub kind: String,
 }
 
+/// Enum-Dispatch über die heutigen TTS-Provider. Seit PR 34 zwei
+/// Varianten: `Command` (bestehend, `SMOLIT_TTS_CMD`) und `Piper`
+/// (env-only, `SMOLIT_TTS_PIPER_CMD`). Beide sind command-basiert;
+/// Piper ist kein neues Audio-Subsystem, sondern ein zweiter
+/// Adapter unter demselben Spawn-/stdin-Pfad.
 #[derive(Debug)]
 pub enum TtsProviderImpl {
     Command(TtsCommandProvider),
+    Piper(TtsPiperProvider),
 }
 
 impl TtsProviderImpl {
     pub fn kind_name(&self) -> &'static str {
         match self {
             Self::Command(_) => PROVIDER_NAME_TTS_COMMAND,
+            Self::Piper(_) => PROVIDER_NAME_TTS_PIPER,
         }
     }
 
@@ -154,18 +177,33 @@ impl TtsProviderImpl {
     pub fn is_ready(&self) -> bool {
         match self {
             Self::Command(p) => p.is_ready(),
+            Self::Piper(p) => p.is_ready(),
         }
     }
 
     pub fn is_cloud(&self) -> bool {
         match self {
             Self::Command(_) => false,
+            Self::Piper(_) => false,
+        }
+    }
+
+    /// Feature-State (`enabled` + `available`) des konkreten Kinds.
+    /// Wird vom Resolver für den legacy `tts_enabled`/`tts_available`-
+    /// Feldpaar-Pfad am Primär-Provider abgefragt. Seit PR 34
+    /// generisch über alle `TtsProviderImpl`-Varianten statt nur
+    /// `Command`.
+    pub fn feature_state(&self) -> AudioFeatureState {
+        match self {
+            Self::Command(p) => p.feature_state(),
+            Self::Piper(p) => p.feature_state(),
         }
     }
 
     pub async fn run(&self, text: &str) -> Result<()> {
         match self {
             Self::Command(p) => p.run(text).await,
+            Self::Piper(p) => p.run(text).await,
         }
     }
 }
@@ -201,60 +239,121 @@ impl TtsCommandProvider {
     }
 
     pub async fn run(&self, text: &str) -> Result<()> {
-        if !self.enabled {
-            bail!("TTS is disabled");
-        }
-        let cmd = self
-            .command
-            .as_deref()
-            .context("TTS command is not configured")?;
-        let (program, args) =
-            split_command(cmd).context("TTS command is empty after parsing")?;
+        run_external_tts_command(self.enabled, self.command.as_deref(), self.timeout_seconds, text)
+            .await
+    }
+}
 
-        debug!(program = %program, "invoking TTS command");
-        let mut child = Command::new(&program)
-            .args(&args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .with_context(|| format!("failed to spawn TTS command `{program}`"))?;
+/// PR 34 — `piper`-TTS-Provider. Zweiter command-basierter Adapter
+/// unter einer eigenen Env-Variable (`SMOLIT_TTS_PIPER_CMD`). Die
+/// Laufzeit ist identisch zum `command`-Provider — Binary spawnen,
+/// Text auf stdin schreiben. Piper selbst ist **keine** Build-
+/// Abhängigkeit; der Adapter erwartet, dass der externe Command
+/// selbst die Stimme/das Modell und die Audio-Ausgabe orchestriert.
+///
+/// Identisches `enabled`-Feld zum Command-Provider: die globale Audio-
+/// Achse (`SMOLIT_TTS_ENABLED`) gilt auch für Piper. Eine dedizierte
+/// Per-Kind-Enabled-Flag gibt es bewusst **nicht** — das
+/// `command`-Feld selbst entscheidet über „konfiguriert" vs.
+/// „nicht konfiguriert".
+#[derive(Debug, Clone)]
+pub struct TtsPiperProvider {
+    enabled: bool,
+    command: Option<String>,
+    timeout_seconds: u64,
+}
 
-        if let Some(mut stdin) = child.stdin.take() {
-            let text_owned = text.to_string();
-            stdin
-                .write_all(text_owned.as_bytes())
-                .await
-                .context("failed to write text to TTS stdin")?;
-            stdin
-                .shutdown()
-                .await
-                .context("failed to close TTS stdin")?;
-        }
-
-        let output = timeout(
-            Duration::from_secs(self.timeout_seconds),
-            child.wait_with_output(),
-        )
-        .await
-        .context("TTS command timed out")?
-        .context("failed to await TTS command")?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            let detail = if stderr.is_empty() {
-                "process exited without error output".to_string()
-            } else {
-                stderr
-            };
-            bail!(
-                "TTS command `{program}` failed with status {}: {}",
-                output.status,
-                detail
+impl TtsPiperProvider {
+    pub fn from_config(config: &AudioConfig) -> Self {
+        if config.tts_enabled && config.tts_piper_cmd.is_none() {
+            warn!(
+                "TTS is enabled and piper is in the chain but SMOLIT_TTS_PIPER_CMD is empty; piper will be unavailable",
             );
         }
-        Ok(())
+        Self {
+            enabled: config.tts_enabled,
+            command: config.tts_piper_cmd.clone(),
+            timeout_seconds: config.tts_timeout_seconds,
+        }
     }
+
+    pub fn is_ready(&self) -> bool {
+        self.enabled && self.command.is_some()
+    }
+
+    pub fn feature_state(&self) -> AudioFeatureState {
+        AudioFeatureState::new(self.enabled, self.command.is_some())
+    }
+
+    pub async fn run(&self, text: &str) -> Result<()> {
+        run_external_tts_command(self.enabled, self.command.as_deref(), self.timeout_seconds, text)
+            .await
+    }
+}
+
+/// Geteilter Spawn-/stdin-Pfad für command-basierte TTS-Provider
+/// (PR 34). Beide Kinds (`command`, `piper`) teilen die exakt gleiche
+/// Bail-Formulierung, damit `TtsProviderImpl::classify_error` für
+/// beide die gleichen Klassen liefert (`disabled`, `not_configured`,
+/// `timeout`, `process_missing`, `stdin_write_failed`, `exit_nonzero`).
+/// Kein Audio-Byte wandert in den Rückgabewert, den Status, oder
+/// die Audit-Senke — der Provider meldet nur Erfolg / Fehlerklasse.
+async fn run_external_tts_command(
+    enabled: bool,
+    command: Option<&str>,
+    timeout_seconds: u64,
+    text: &str,
+) -> Result<()> {
+    if !enabled {
+        bail!("TTS is disabled");
+    }
+    let cmd = command.context("TTS command is not configured")?;
+    let (program, args) =
+        split_command(cmd).context("TTS command is empty after parsing")?;
+
+    debug!(program = %program, "invoking TTS command");
+    let mut child = Command::new(&program)
+        .args(&args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .with_context(|| format!("failed to spawn TTS command `{program}`"))?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        let text_owned = text.to_string();
+        stdin
+            .write_all(text_owned.as_bytes())
+            .await
+            .context("failed to write text to TTS stdin")?;
+        stdin
+            .shutdown()
+            .await
+            .context("failed to close TTS stdin")?;
+    }
+
+    let output = timeout(
+        Duration::from_secs(timeout_seconds),
+        child.wait_with_output(),
+    )
+    .await
+    .context("TTS command timed out")?
+    .context("failed to await TTS command")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let detail = if stderr.is_empty() {
+            "process exited without error output".to_string()
+        } else {
+            stderr
+        };
+        bail!(
+            "TTS command `{program}` failed with status {}: {}",
+            output.status,
+            detail
+        );
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -319,6 +418,11 @@ impl TtsProviderResolver {
                         audio,
                     )));
                 }
+                PROVIDER_NAME_TTS_PIPER => {
+                    providers.push(TtsProviderImpl::Piper(TtsPiperProvider::from_config(
+                        audio,
+                    )));
+                }
                 other => skipped.push(other.to_string()),
             }
         }
@@ -361,8 +465,10 @@ impl TtsProviderResolver {
     }
 
     pub fn feature_state(&self) -> AudioFeatureState {
+        // PR 34: delegate to the per-impl feature_state so piper is
+        // covered as well — no Command-only hardcoding.
         match self.providers.first() {
-            Some(TtsProviderImpl::Command(p)) => p.feature_state(),
+            Some(p) => p.feature_state(),
             None => AudioFeatureState::new(false, false),
         }
     }
@@ -433,9 +539,18 @@ mod tests {
     use super::*;
 
     fn audio_with(tts_enabled: bool, tts_cmd: Option<&str>) -> AudioConfig {
+        audio_with_both(tts_enabled, tts_cmd, None)
+    }
+
+    fn audio_with_both(
+        tts_enabled: bool,
+        tts_cmd: Option<&str>,
+        tts_piper_cmd: Option<&str>,
+    ) -> AudioConfig {
         AudioConfig {
             tts_enabled,
             tts_cmd: tts_cmd.map(|s| s.to_string()),
+            tts_piper_cmd: tts_piper_cmd.map(|s| s.to_string()),
             tts_timeout_seconds: 5,
             stt_enabled: true,
             stt_cmd: None,
@@ -447,9 +562,16 @@ mod tests {
         }
     }
 
+
     fn command_item() -> TtsProviderChainItem {
         TtsProviderChainItem {
             kind: PROVIDER_NAME_TTS_COMMAND.to_string(),
+        }
+    }
+
+    fn piper_item() -> TtsProviderChainItem {
+        TtsProviderChainItem {
+            kind: PROVIDER_NAME_TTS_PIPER.to_string(),
         }
     }
 
@@ -595,7 +717,153 @@ mod tests {
 
     #[test]
     fn known_tts_kinds_stable_set() {
-        assert_eq!(KNOWN_TTS_KINDS, &["command"]);
+        // PR 34 lockt die Whitelist auf `[command, piper]`.
+        // Default bleibt bewusst `[command]`.
+        assert_eq!(KNOWN_TTS_KINDS, &["command", "piper"]);
         assert_eq!(DEFAULT_TTS_PROVIDER_CHAIN, &["command"]);
+    }
+
+    // --- PR 34: piper-Kind -------------------------------------------------
+
+    #[test]
+    fn validate_tts_chain_accepts_piper_kind() {
+        let normalized = validate_tts_chain(&["piper".to_string()]).expect("valid chain");
+        assert_eq!(normalized, vec!["piper"]);
+    }
+
+    #[test]
+    fn validate_tts_chain_accepts_piper_then_command_fallback() {
+        let normalized = validate_tts_chain(&[
+            "piper".to_string(),
+            "command".to_string(),
+        ])
+        .expect("valid chain");
+        assert_eq!(normalized, vec!["piper", "command"]);
+    }
+
+    #[test]
+    fn validate_tts_chain_rejects_duplicate_piper() {
+        let err = validate_tts_chain(&["piper".into(), "piper".into()]).unwrap_err();
+        match err {
+            TtsChainValidationError::Duplicate(k) => assert_eq!(k, "piper"),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn from_chain_with_piper_instantiates_piper_provider() {
+        let r = TtsProviderResolver::from_chain(
+            &[piper_item()],
+            &audio_with_both(true, None, Some("/bin/cat")),
+        );
+        assert_eq!(r.chain_kinds(), vec!["piper"]);
+        assert_eq!(r.status().configured, "piper");
+        assert!(r.is_available());
+        assert!(!r.status().cloud);
+    }
+
+    #[test]
+    fn piper_primary_without_command_reports_unavailable() {
+        let r = TtsProviderResolver::from_chain(
+            &[piper_item()],
+            &audio_with_both(true, None, None),
+        );
+        let st = r.status();
+        assert_eq!(st.configured, "piper");
+        assert_eq!(st.availability, "unavailable");
+        assert!(!r.is_available());
+    }
+
+    #[tokio::test]
+    async fn piper_run_without_command_reports_not_configured() {
+        let r = TtsProviderResolver::from_chain(
+            &[piper_item()],
+            &audio_with_both(true, None, None),
+        );
+        let err = r.run("hi").await.unwrap_err();
+        match err {
+            TtsProviderError::AllFailed(class) => assert_eq!(class, "not_configured"),
+            other => panic!("unexpected: {other:?}"),
+        }
+        let st = r.status();
+        assert_eq!(st.last_error.as_deref(), Some("not_configured"));
+    }
+
+    #[tokio::test]
+    async fn piper_run_success_sets_active_to_piper() {
+        let r = TtsProviderResolver::from_chain(
+            &[piper_item()],
+            &audio_with_both(true, None, Some("/bin/cat")),
+        );
+        r.run("hello piper").await.unwrap();
+        let st = r.status();
+        assert_eq!(st.configured, "piper");
+        assert_eq!(st.active, "piper");
+        assert_eq!(st.availability, "available");
+        assert!(st.last_error.is_none());
+        assert!(!st.cloud);
+    }
+
+    #[tokio::test]
+    async fn piper_run_missing_binary_reports_process_missing() {
+        let r = TtsProviderResolver::from_chain(
+            &[piper_item()],
+            &audio_with_both(true, None, Some("/no/such/piper-binary")),
+        );
+        let err = r.run("hi").await.unwrap_err();
+        match err {
+            TtsProviderError::AllFailed(class) => assert_eq!(class, "process_missing"),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn piper_run_exit_nonzero_reports_exit_nonzero_or_stdin_write_failed() {
+        // Dieselbe Kernel-Race-Toleranz wie für den Command-Pfad:
+        // `/bin/false` kann stdin schließen, bevor write_all durch
+        // ist — dann entsteht `stdin_write_failed` statt
+        // `exit_nonzero`. Beide Klassen sind ehrlich und kuratiert.
+        let r = TtsProviderResolver::from_chain(
+            &[piper_item()],
+            &audio_with_both(true, None, Some("/bin/false")),
+        );
+        let err = r.run("hi").await.unwrap_err();
+        match err {
+            TtsProviderError::AllFailed(class) => assert!(
+                class == "exit_nonzero" || class == "stdin_write_failed",
+                "unexpected class: {class}",
+            ),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn fallback_chain_piper_then_command_uses_command_when_piper_missing() {
+        // Primary `piper` is unset → error; secondary `command`
+        // has a valid /bin/cat and must speak. `active` mirrors
+        // the producing kind; `availability` becomes
+        // `fallback_active`.
+        let r = TtsProviderResolver::from_chain(
+            &[piper_item(), command_item()],
+            &audio_with_both(true, Some("/bin/cat"), None),
+        );
+        r.run("fallback-ok").await.unwrap();
+        let st = r.status();
+        assert_eq!(st.configured, "piper");
+        assert_eq!(st.active, "command");
+        assert_eq!(st.availability, "fallback_active");
+        assert!(st.last_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn fallback_chain_piper_wins_when_configured() {
+        let r = TtsProviderResolver::from_chain(
+            &[piper_item(), command_item()],
+            &audio_with_both(true, Some("/bin/cat"), Some("/bin/cat")),
+        );
+        r.run("hello").await.unwrap();
+        let st = r.status();
+        assert_eq!(st.active, "piper");
+        assert_eq!(st.availability, "available");
     }
 }

@@ -586,6 +586,7 @@ mod tests {
         AudioConfig {
             tts_enabled: true,
             tts_cmd: None,
+            tts_piper_cmd: None,
             tts_timeout_seconds: 5,
             stt_enabled,
             stt_cmd: stt_cmd.map(|s| s.to_string()),

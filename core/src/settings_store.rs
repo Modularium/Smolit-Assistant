@@ -849,6 +849,7 @@ mod tests {
         AudioConfig {
             tts_enabled: true,
             tts_cmd: Some("/bin/old-tts".into()),
+            tts_piper_cmd: None,
             tts_timeout_seconds: 5,
             stt_enabled: false,
             stt_cmd: None,

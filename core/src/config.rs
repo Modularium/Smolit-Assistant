@@ -120,6 +120,15 @@ pub struct AudioConfig {
     /// an external-process adapter just like the `command` kind.
     #[serde(default)]
     pub stt_whisper_cpp_cmd: Option<String>,
+    /// Command template for the `piper` TTS provider kind (PR 34).
+    /// Env-only (`SMOLIT_TTS_PIPER_CMD`); not editable via
+    /// Settings-Shell runtime. `None` means the kind is not configured
+    /// and the resolver reports `not_configured` / `unavailable` when
+    /// it is primary. Piper is not a build dependency — this is an
+    /// external-process adapter just like the TTS `command` kind and
+    /// uses the same stdin-text contract.
+    #[serde(default)]
+    pub tts_piper_cmd: Option<String>,
     pub stt_timeout_seconds: u64,
     pub auto_speak: bool,
     /// Geordnete STT-Provider-Kette (PR 6). Env-Override
@@ -430,6 +439,7 @@ impl Config {
 
         let tts_enabled = parse_bool(lookup("SMOLIT_TTS_ENABLED").as_deref(), true);
         let tts_cmd = non_empty(lookup("SMOLIT_TTS_CMD"));
+        let tts_piper_cmd = non_empty(lookup("SMOLIT_TTS_PIPER_CMD"));
         let tts_timeout_seconds =
             parse_u64(lookup("SMOLIT_TTS_TIMEOUT_SECONDS").as_deref(), DEFAULT_TTS_TIMEOUT_SECONDS);
 
@@ -578,6 +588,7 @@ impl Config {
                 stt_enabled,
                 stt_cmd,
                 stt_whisper_cpp_cmd,
+                tts_piper_cmd,
                 stt_timeout_seconds,
                 auto_speak,
                 stt_provider_chain,

@@ -270,6 +270,19 @@ pub struct StatusPayload {
     pub tts_provider_cloud: bool,
     /// Geordnete Liste der produktiv instanziierten TTS-Kinds (PR 13).
     pub tts_provider_chain: Vec<String>,
+    /// Ob `piper` Teil der aktuellen TTS-Provider-Kette ist (PR 34).
+    /// Dient als Sichtbarkeits-Hebel für die Settings-Shell: nur wenn
+    /// das Kind in der Kette steht, zeigt die UI den
+    /// `SMOLIT_TTS_PIPER_CMD`-Hinweis.
+    #[serde(default)]
+    pub tts_piper_in_chain: bool,
+    /// Ob `SMOLIT_TTS_PIPER_CMD` gesetzt ist (PR 34). Ehrliche
+    /// „ready for spawn"-Grenze — analog zu `stt_whisper_cpp_configured`
+    /// (PR 27) und `llamafile_configured` / `local_http_configured` /
+    /// `cloud_http_configured`. Unabhängig davon, ob das Kind in der
+    /// Kette steht.
+    #[serde(default)]
+    pub tts_piper_configured: bool,
     // --- Local-HTTP-Provider (PR 8, additiv) -----------------------
     /// Ob `local_http` Teil der aktuellen Text-Provider-Kette ist.
     /// Bei `false` sind die übrigen `local_http_*`-Felder bedeutungslos
@@ -1873,6 +1886,24 @@ impl App {
             .map(|c| !c.trim().is_empty())
             .unwrap_or(false);
 
+        // TTS-Piper-Projektion (PR 34). Zwei Booleans, symmetrisch zur
+        // STT-whisper.cpp-Linie. Der Command-String selbst wandert
+        // **nicht** in den StatusPayload, analog zu `tts_cmd`.
+        let tts_chain_kinds: Vec<String> = tts_resolver
+            .chain_kinds()
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect();
+        let tts_piper_in_chain = tts_chain_kinds.iter().any(|k| k == "piper");
+        let tts_piper_configured = self
+            .live_audio
+            .lock()
+            .expect("live audio mutex poisoned")
+            .tts_piper_cmd
+            .as_deref()
+            .map(|c| !c.trim().is_empty())
+            .unwrap_or(false);
+
         // Cloud-HTTP-Projektion (PR 10). Vier Felder, **alle** nicht-
         // sensitiv: chain-Mitgliedschaft, Master-Flag, „configured"-
         // Status (erfordert Endpoint **und** Key), und ein boolscher
@@ -1935,11 +1966,9 @@ impl App {
             tts_provider_availability: tts_provider.availability,
             tts_provider_last_error: tts_provider.last_error,
             tts_provider_cloud: tts_provider.cloud,
-            tts_provider_chain: tts_resolver
-                .chain_kinds()
-                .into_iter()
-                .map(|s| s.to_string())
-                .collect(),
+            tts_provider_chain: tts_chain_kinds,
+            tts_piper_in_chain,
+            tts_piper_configured,
             local_http_in_chain,
             local_http_enabled: local_http_cfg.enabled,
             local_http_configured,
