@@ -246,6 +246,18 @@ pub struct StatusPayload {
     /// hier bereits verworfen. Seit PR 13 über
     /// `settings_set_stt_provider_chain` editierbar.
     pub stt_provider_chain: Vec<String>,
+    /// Ob `whisper_cpp` Teil der aktuellen STT-Provider-Kette ist (PR 27).
+    /// Dient als Sichtbarkeits-Hebel für die Settings-Shell: nur wenn
+    /// das Kind in der Kette steht, zeigt die UI den
+    /// `SMOLIT_STT_WHISPER_CPP_CMD`-Hinweis.
+    #[serde(default)]
+    pub stt_whisper_cpp_in_chain: bool,
+    /// Ob `SMOLIT_STT_WHISPER_CPP_CMD` gesetzt ist (PR 27). Ehrliche
+    /// „ready for spawn"-Grenze — analog zu `llamafile_configured` /
+    /// `local_http_configured` / `cloud_http_configured`. Unabhängig
+    /// davon, ob das Kind in der Kette steht.
+    #[serde(default)]
+    pub stt_whisper_cpp_configured: bool,
     // --- TTS Provider (PR 6, additiv) ------------------------------
     pub tts_provider_configured: String,
     pub tts_provider_active: String,
@@ -1667,6 +1679,24 @@ impl App {
             .unwrap_or(false);
         let local_http_configured = local_http_cfg.enabled && local_http_endpoint_present;
 
+        // STT-whisper.cpp-Projektion (PR 27). Zwei Booleans — Sichtbarkeits-
+        // Hebel für die Settings-Shell. Der Command-String selbst wandert
+        // **nicht** in den StatusPayload, analog zu `stt_cmd`.
+        let stt_chain_kinds: Vec<String> = stt_resolver
+            .chain_kinds()
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect();
+        let stt_whisper_cpp_in_chain = stt_chain_kinds.iter().any(|k| k == "whisper_cpp");
+        let stt_whisper_cpp_configured = self
+            .live_audio
+            .lock()
+            .expect("live audio mutex poisoned")
+            .stt_whisper_cpp_cmd
+            .as_deref()
+            .map(|c| !c.trim().is_empty())
+            .unwrap_or(false);
+
         // Cloud-HTTP-Projektion (PR 10). Vier Felder, **alle** nicht-
         // sensitiv: chain-Mitgliedschaft, Master-Flag, „configured"-
         // Status (erfordert Endpoint **und** Key), und ein boolscher
@@ -1721,11 +1751,9 @@ impl App {
             stt_provider_availability: stt_provider.availability,
             stt_provider_last_error: stt_provider.last_error,
             stt_provider_cloud: stt_provider.cloud,
-            stt_provider_chain: stt_resolver
-                .chain_kinds()
-                .into_iter()
-                .map(|s| s.to_string())
-                .collect(),
+            stt_provider_chain: stt_chain_kinds,
+            stt_whisper_cpp_in_chain,
+            stt_whisper_cpp_configured,
             tts_provider_configured: tts_provider.configured,
             tts_provider_active: tts_provider.active,
             tts_provider_availability: tts_provider.availability,

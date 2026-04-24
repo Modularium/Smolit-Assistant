@@ -112,6 +112,14 @@ pub struct AudioConfig {
     pub tts_timeout_seconds: u64,
     pub stt_enabled: bool,
     pub stt_cmd: Option<String>,
+    /// Command template for the `whisper_cpp` STT provider kind (PR 27).
+    /// Env-only (`SMOLIT_STT_WHISPER_CPP_CMD`); not editable via
+    /// Settings-Shell runtime. `None` means the kind is not configured
+    /// and the resolver reports `not_configured` / `unavailable` when
+    /// it is primary. Whisper.cpp is not a build dependency — this is
+    /// an external-process adapter just like the `command` kind.
+    #[serde(default)]
+    pub stt_whisper_cpp_cmd: Option<String>,
     pub stt_timeout_seconds: u64,
     pub auto_speak: bool,
     /// Geordnete STT-Provider-Kette (PR 6). Env-Override
@@ -427,6 +435,7 @@ impl Config {
 
         let stt_enabled = parse_bool(lookup("SMOLIT_STT_ENABLED").as_deref(), true);
         let stt_cmd = non_empty(lookup("SMOLIT_STT_CMD"));
+        let stt_whisper_cpp_cmd = non_empty(lookup("SMOLIT_STT_WHISPER_CPP_CMD"));
         let stt_timeout_seconds =
             parse_u64(lookup("SMOLIT_STT_TIMEOUT_SECONDS").as_deref(), DEFAULT_STT_TIMEOUT_SECONDS);
 
@@ -568,6 +577,7 @@ impl Config {
                 tts_timeout_seconds,
                 stt_enabled,
                 stt_cmd,
+                stt_whisper_cpp_cmd,
                 stt_timeout_seconds,
                 auto_speak,
                 stt_provider_chain,

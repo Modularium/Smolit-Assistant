@@ -36,17 +36,26 @@ use crate::config::AudioConfig;
 /// auffällt.
 pub const PROVIDER_NAME_STT_COMMAND: &str = "command";
 
-/// Kuratierte Whitelist bekannter STT-Kinds. Heute: nur `command`.
-/// Neue Kinds werden hier eingetragen, wenn ihre Runtime wirklich
-/// gelandet ist — kein freier Registrierungs-Pfad. Seit PR 13 wird
-/// die Liste vom Chain-Editor-Validator (`validate_stt_chain`) und
-/// von der Settings-Shell konsumiert; `#[allow(dead_code)]` ist
-/// deshalb entfallen.
-pub const KNOWN_STT_KINDS: &[&str] = &[PROVIDER_NAME_STT_COMMAND];
+/// Kanonischer Namensstring für den whisper.cpp-STT-Provider (PR 27).
+/// Externer Command-Adapter — whisper.cpp ist keine Build-Abhängigkeit,
+/// kein Modell-Manager, kein Streaming-Pfad. Semantisch eine zweite
+/// command-basierte Adapter-Variante, damit der Resolver-Fallback
+/// (z. B. Chain `["whisper_cpp", "command"]`) real wird.
+pub const PROVIDER_NAME_STT_WHISPER_CPP: &str = "whisper_cpp";
 
-/// Default-STT-Kette. Wird vom Chain-Editor-Reset-Pfad und als
-/// Startup-Fallback verwendet. Spiegel zu `DEFAULT_STT_PROVIDER_CHAIN`
-/// in `crate::config`; dort für die Startup-Env-Parser-Linie.
+/// Kuratierte Whitelist bekannter STT-Kinds. Seit PR 27: `command` +
+/// `whisper_cpp`. Neue Kinds werden hier eingetragen, wenn ihre
+/// Runtime wirklich gelandet ist — kein freier Registrierungs-Pfad.
+/// Die Liste wird vom Chain-Editor-Validator (`validate_stt_chain`),
+/// vom `from_chain`-Resolver und von der Settings-Shell konsumiert.
+pub const KNOWN_STT_KINDS: &[&str] =
+    &[PROVIDER_NAME_STT_COMMAND, PROVIDER_NAME_STT_WHISPER_CPP];
+
+/// Default-STT-Kette. **Bleibt** `["command"]` — PR 27 fügt
+/// `whisper_cpp` nur zur Whitelist hinzu, ändert aber den
+/// Compile-Time-Default nicht. Wird vom Chain-Editor-Reset-Pfad und
+/// als Startup-Fallback verwendet. Spiegel zu
+/// `DEFAULT_STT_PROVIDER_CHAIN` in `crate::config`.
 pub const DEFAULT_STT_PROVIDER_CHAIN: &[&str] = &[PROVIDER_NAME_STT_COMMAND];
 
 /// Fehlerklassen für die STT-Chain-Validierung (PR 13). Spiegel zu
@@ -139,16 +148,22 @@ pub struct SttProviderChainItem {
     pub kind: String,
 }
 
-/// Enum-Dispatch über die heutigen STT-Provider. Heute: nur `Command`.
+/// Enum-Dispatch über die heutigen STT-Provider. Seit PR 27 zwei
+/// Varianten: `Command` (bestehend, `SMOLIT_STT_CMD`) und
+/// `WhisperCpp` (env-only, `SMOLIT_STT_WHISPER_CPP_CMD`). Beide sind
+/// command-basiert; whisper.cpp ist kein neues Audio-Subsystem,
+/// sondern ein zweiter Adapter unter demselben Spawn-Pfad.
 #[derive(Debug)]
 pub enum SttProviderImpl {
     Command(SttCommandProvider),
+    WhisperCpp(SttWhisperCppProvider),
 }
 
 impl SttProviderImpl {
     pub fn kind_name(&self) -> &'static str {
         match self {
             Self::Command(_) => PROVIDER_NAME_STT_COMMAND,
+            Self::WhisperCpp(_) => PROVIDER_NAME_STT_WHISPER_CPP,
         }
     }
 
@@ -191,6 +206,7 @@ impl SttProviderImpl {
     pub fn is_ready(&self) -> bool {
         match self {
             Self::Command(p) => p.is_ready(),
+            Self::WhisperCpp(p) => p.is_ready(),
         }
     }
 
@@ -198,12 +214,24 @@ impl SttProviderImpl {
     pub fn is_cloud(&self) -> bool {
         match self {
             Self::Command(_) => false,
+            Self::WhisperCpp(_) => false,
+        }
+    }
+
+    /// Feature-State (`enabled` + `available`) des konkreten Kinds.
+    /// Wird vom Resolver für den legacy `stt_enabled`/`stt_available`-
+    /// Feldpaar-Pfad am Primär-Provider abgefragt.
+    pub fn feature_state(&self) -> AudioFeatureState {
+        match self {
+            Self::Command(p) => p.feature_state(),
+            Self::WhisperCpp(p) => p.feature_state(),
         }
     }
 
     pub async fn run(&self) -> Result<String> {
         match self {
             Self::Command(p) => p.run().await,
+            Self::WhisperCpp(p) => p.run().await,
         }
     }
 }
@@ -245,46 +273,107 @@ impl SttCommandProvider {
     }
 
     pub async fn run(&self) -> Result<String> {
-        if !self.enabled {
-            bail!("STT is disabled");
-        }
-        let cmd = self
-            .command
-            .as_deref()
-            .context("STT command is not configured")?;
-        let (program, args) =
-            split_command(cmd).context("STT command is empty after parsing")?;
+        run_external_stt_command(self.enabled, self.command.as_deref(), self.timeout_seconds).await
+    }
+}
 
-        debug!(program = %program, "invoking STT command");
-        let output = timeout(
-            Duration::from_secs(self.timeout_seconds),
-            Command::new(&program).args(&args).output(),
-        )
-        .await
-        .context("STT command timed out")?
-        .with_context(|| format!("failed to spawn STT command `{program}`"))?;
+/// PR 27 — `whisper_cpp`-STT-Provider. Zweiter command-basierter Adapter
+/// unter einer eigenen Env-Variable (`SMOLIT_STT_WHISPER_CPP_CMD`). Die
+/// Laufzeit ist identisch zum `command`-Provider — Binary spawnen,
+/// stdout als erkannten Text lesen. whisper.cpp selbst ist **keine**
+/// Build-Abhängigkeit; der Adapter erwartet, dass der externe
+/// Command selbst die Modell-/Audio-Orchestrierung macht und trimmten
+/// Text auf stdout ausgibt.
+///
+/// Identisches `enabled`-Feld zum Command-Provider: die globale Audio-
+/// Achse (`SMOLIT_STT_ENABLED`) gilt auch für whisper.cpp. Eine
+/// dedizierte Per-Kind-Enabled-Flag gibt es bewusst **nicht** — das
+/// hätte eine zweite Schalter-Oberfläche bedeutet; das `command`-
+/// Feld selbst entscheidet über „konfiguriert" vs. „nicht
+/// konfiguriert".
+#[derive(Debug, Clone)]
+pub struct SttWhisperCppProvider {
+    enabled: bool,
+    command: Option<String>,
+    timeout_seconds: u64,
+}
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            let detail = if stderr.is_empty() {
-                "process exited without error output".to_string()
-            } else {
-                stderr
-            };
-            bail!(
-                "STT command `{program}` failed with status {}: {}",
-                output.status,
-                detail
+impl SttWhisperCppProvider {
+    pub fn from_config(config: &AudioConfig) -> Self {
+        if config.stt_enabled && config.stt_whisper_cpp_cmd.is_none() {
+            warn!(
+                "STT is enabled and whisper_cpp is in the chain but SMOLIT_STT_WHISPER_CPP_CMD is empty; whisper_cpp will be unavailable",
             );
         }
-
-        let stdout = String::from_utf8(output.stdout).context("STT stdout was not valid UTF-8")?;
-        let recognized = stdout.trim().to_string();
-        if recognized.is_empty() {
-            bail!("STT command `{program}` returned no recognized text");
+        Self {
+            enabled: config.stt_enabled,
+            command: config.stt_whisper_cpp_cmd.clone(),
+            timeout_seconds: config.stt_timeout_seconds,
         }
-        Ok(recognized)
     }
+
+    pub fn is_ready(&self) -> bool {
+        self.enabled && self.command.is_some()
+    }
+
+    pub fn feature_state(&self) -> AudioFeatureState {
+        AudioFeatureState::new(self.enabled, self.command.is_some())
+    }
+
+    pub async fn run(&self) -> Result<String> {
+        run_external_stt_command(self.enabled, self.command.as_deref(), self.timeout_seconds).await
+    }
+}
+
+/// Geteilter Spawn-Pfad für command-basierte STT-Provider (PR 27).
+/// Beide Kinds (`command`, `whisper_cpp`) teilen die exakt gleiche
+/// Bail-Formulierung, damit `SttProviderImpl::classify_error` für
+/// beide die gleichen Klassen liefert (`disabled`, `not_configured`,
+/// `timeout`, `process_missing`, `invalid_response`, `empty_response`,
+/// `exit_nonzero`). Der Adapter trimmt stdout und verweigert leere
+/// Ergebnisse — kein Audio-Bytes im Status, keine Nutzerinhalte in
+/// Lifecycle-Events.
+async fn run_external_stt_command(
+    enabled: bool,
+    command: Option<&str>,
+    timeout_seconds: u64,
+) -> Result<String> {
+    if !enabled {
+        bail!("STT is disabled");
+    }
+    let cmd = command.context("STT command is not configured")?;
+    let (program, args) =
+        split_command(cmd).context("STT command is empty after parsing")?;
+
+    debug!(program = %program, "invoking STT command");
+    let output = timeout(
+        Duration::from_secs(timeout_seconds),
+        Command::new(&program).args(&args).output(),
+    )
+    .await
+    .context("STT command timed out")?
+    .with_context(|| format!("failed to spawn STT command `{program}`"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let detail = if stderr.is_empty() {
+            "process exited without error output".to_string()
+        } else {
+            stderr
+        };
+        bail!(
+            "STT command `{program}` failed with status {}: {}",
+            output.status,
+            detail
+        );
+    }
+
+    let stdout = String::from_utf8(output.stdout).context("STT stdout was not valid UTF-8")?;
+    let recognized = stdout.trim().to_string();
+    if recognized.is_empty() {
+        bail!("STT command `{program}` returned no recognized text");
+    }
+    Ok(recognized)
 }
 
 /// Snapshot des Laufzeit-Status. Wird 1:1 in den StatusPayload
@@ -356,6 +445,11 @@ impl SttProviderResolver {
                         audio,
                     )));
                 }
+                PROVIDER_NAME_STT_WHISPER_CPP => {
+                    providers.push(SttProviderImpl::WhisperCpp(
+                        SttWhisperCppProvider::from_config(audio),
+                    ));
+                }
                 other => skipped.push(other.to_string()),
             }
         }
@@ -402,10 +496,11 @@ impl SttProviderResolver {
     /// Feature-State für das bestehende `stt_enabled`/`stt_available`-
     /// Feldpaar im StatusPayload. Liest immer vom Primärprovider —
     /// Chain-Glieder ab Position 1 sind Fallback und bestimmen die
-    /// „Kernsichtbarkeit" der Audio-Achse nicht.
+    /// „Kernsichtbarkeit" der Audio-Achse nicht. Seit PR 27
+    /// generalisiert auf alle `SttProviderImpl`-Varianten.
     pub fn feature_state(&self) -> AudioFeatureState {
         match self.providers.first() {
-            Some(SttProviderImpl::Command(p)) => p.feature_state(),
+            Some(p) => p.feature_state(),
             None => AudioFeatureState::new(false, false),
         }
     }
@@ -480,12 +575,21 @@ mod tests {
     use super::*;
 
     fn audio_with(stt_enabled: bool, stt_cmd: Option<&str>) -> AudioConfig {
+        audio_with_both(stt_enabled, stt_cmd, None)
+    }
+
+    fn audio_with_both(
+        stt_enabled: bool,
+        stt_cmd: Option<&str>,
+        stt_whisper_cpp_cmd: Option<&str>,
+    ) -> AudioConfig {
         AudioConfig {
             tts_enabled: true,
             tts_cmd: None,
             tts_timeout_seconds: 5,
             stt_enabled,
             stt_cmd: stt_cmd.map(|s| s.to_string()),
+            stt_whisper_cpp_cmd: stt_whisper_cpp_cmd.map(|s| s.to_string()),
             stt_timeout_seconds: 5,
             auto_speak: false,
             stt_provider_chain: vec!["command".into()],
@@ -496,6 +600,12 @@ mod tests {
     fn command_item() -> SttProviderChainItem {
         SttProviderChainItem {
             kind: PROVIDER_NAME_STT_COMMAND.to_string(),
+        }
+    }
+
+    fn whisper_cpp_item() -> SttProviderChainItem {
+        SttProviderChainItem {
+            kind: PROVIDER_NAME_STT_WHISPER_CPP.to_string(),
         }
     }
 
@@ -648,7 +758,149 @@ mod tests {
 
     #[test]
     fn known_stt_kinds_stable_set() {
-        assert_eq!(KNOWN_STT_KINDS, &["command"]);
+        // PR 27 lockt die Whitelist auf `[command, whisper_cpp]`.
+        // Default bleibt bewusst `[command]` (siehe PR-27-Review).
+        assert_eq!(KNOWN_STT_KINDS, &["command", "whisper_cpp"]);
         assert_eq!(DEFAULT_STT_PROVIDER_CHAIN, &["command"]);
+    }
+
+    // --- PR 27: whisper_cpp-Kind -------------------------------------------
+
+    #[test]
+    fn validate_stt_chain_accepts_whisper_cpp_kind() {
+        let normalized = validate_stt_chain(&["whisper_cpp".to_string()]).expect("valid chain");
+        assert_eq!(normalized, vec!["whisper_cpp"]);
+    }
+
+    #[test]
+    fn validate_stt_chain_accepts_whisper_cpp_then_command_fallback() {
+        let normalized = validate_stt_chain(&[
+            "whisper_cpp".to_string(),
+            "command".to_string(),
+        ])
+        .expect("valid chain");
+        assert_eq!(normalized, vec!["whisper_cpp", "command"]);
+    }
+
+    #[test]
+    fn validate_stt_chain_rejects_duplicate_whisper_cpp() {
+        let err = validate_stt_chain(&["whisper_cpp".into(), "whisper_cpp".into()]).unwrap_err();
+        match err {
+            SttChainValidationError::Duplicate(k) => assert_eq!(k, "whisper_cpp"),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn from_chain_with_whisper_cpp_instantiates_whisper_cpp_provider() {
+        let r = SttProviderResolver::from_chain(
+            &[whisper_cpp_item()],
+            &audio_with_both(true, None, Some("/bin/echo hi")),
+        );
+        assert_eq!(r.chain_kinds(), vec!["whisper_cpp"]);
+        assert_eq!(r.status().configured, "whisper_cpp");
+        assert!(r.is_available());
+        assert!(!r.status().cloud);
+    }
+
+    #[test]
+    fn whisper_cpp_primary_without_command_reports_unavailable() {
+        let r = SttProviderResolver::from_chain(
+            &[whisper_cpp_item()],
+            &audio_with_both(true, None, None),
+        );
+        let st = r.status();
+        assert_eq!(st.configured, "whisper_cpp");
+        assert_eq!(st.availability, "unavailable");
+        assert!(!r.is_available());
+    }
+
+    #[tokio::test]
+    async fn whisper_cpp_run_without_command_reports_not_configured() {
+        let r = SttProviderResolver::from_chain(
+            &[whisper_cpp_item()],
+            &audio_with_both(true, None, None),
+        );
+        let err = r.run().await.unwrap_err();
+        match err {
+            SttProviderError::AllFailed(class) => assert_eq!(class, "not_configured"),
+            other => panic!("unexpected: {other:?}"),
+        }
+        let st = r.status();
+        assert_eq!(st.last_error.as_deref(), Some("not_configured"));
+    }
+
+    #[tokio::test]
+    async fn whisper_cpp_run_success_sets_active_to_whisper_cpp() {
+        let r = SttProviderResolver::from_chain(
+            &[whisper_cpp_item()],
+            &audio_with_both(true, None, Some("/bin/echo transcribed")),
+        );
+        let out = r.run().await.unwrap();
+        assert_eq!(out, "transcribed");
+        let st = r.status();
+        assert_eq!(st.configured, "whisper_cpp");
+        assert_eq!(st.active, "whisper_cpp");
+        assert_eq!(st.availability, "available");
+        assert!(st.last_error.is_none());
+        assert!(!st.cloud);
+    }
+
+    #[tokio::test]
+    async fn whisper_cpp_run_empty_stdout_reports_empty_response() {
+        let r = SttProviderResolver::from_chain(
+            &[whisper_cpp_item()],
+            &audio_with_both(true, None, Some("/bin/true")),
+        );
+        let err = r.run().await.unwrap_err();
+        match err {
+            SttProviderError::AllFailed(class) => assert_eq!(class, "empty_response"),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn whisper_cpp_run_missing_binary_reports_process_missing() {
+        let r = SttProviderResolver::from_chain(
+            &[whisper_cpp_item()],
+            &audio_with_both(true, None, Some("/no/such/whisper-cpp-binary")),
+        );
+        let err = r.run().await.unwrap_err();
+        match err {
+            SttProviderError::AllFailed(class) => assert_eq!(class, "process_missing"),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn fallback_chain_whisper_cpp_then_command_uses_command_when_whisper_cpp_missing() {
+        // Primary `whisper_cpp` is unset → error; secondary `command`
+        // has a valid echo and must produce the result. `active`
+        // mirrors the producing kind; `availability` becomes
+        // `fallback_active`.
+        let r = SttProviderResolver::from_chain(
+            &[whisper_cpp_item(), command_item()],
+            &audio_with_both(true, Some("/bin/echo fallback-ok"), None),
+        );
+        let out = r.run().await.unwrap();
+        assert_eq!(out, "fallback-ok");
+        let st = r.status();
+        assert_eq!(st.configured, "whisper_cpp");
+        assert_eq!(st.active, "command");
+        assert_eq!(st.availability, "fallback_active");
+        assert!(st.last_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn fallback_chain_whisper_cpp_wins_when_configured() {
+        let r = SttProviderResolver::from_chain(
+            &[whisper_cpp_item(), command_item()],
+            &audio_with_both(true, Some("/bin/echo command"), Some("/bin/echo whisper")),
+        );
+        let out = r.run().await.unwrap();
+        assert_eq!(out, "whisper");
+        let st = r.status();
+        assert_eq!(st.active, "whisper_cpp");
+        assert_eq!(st.availability, "available");
     }
 }

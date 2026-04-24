@@ -439,6 +439,7 @@ mod tests {
             tts_timeout_seconds: 5,
             stt_enabled: true,
             stt_cmd: None,
+            stt_whisper_cpp_cmd: None,
             stt_timeout_seconds: 5,
             auto_speak: false,
             stt_provider_chain: vec!["command".into()],
