@@ -879,6 +879,31 @@ sie eindeutig einem `action_id` zuordnen.
   nicht ein zweites Mal. **Nicht** erlaubt: echte Aktionen, Shell,
   Desktop-Automation, Provider-Mutationen, Dateioperationen.
 
+- `audit_recent` (PR 19) — **read-only** Abfrage des lokalen
+  In-Memory-Audit-Ringbuffers. Felder:
+  - `limit: integer` (optional, auf `1000` hart geklemmt).
+    Standardmäßig liefert der Core den vollen Ringbuffer-Inhalt.
+
+  Antwort: `audit_recent`-Envelope mit
+  `payload.events: AuditEvent[]`, neueste zuletzt. Jeder
+  `AuditEvent` enthält:
+  - `audit_id: string` (`aud_NNNNNN`)
+  - `timestamp_ms: integer` (Unix epoch ms)
+  - `kind: string` — einer aus
+    `ipc_command_received` / `ipc_command_rejected` /
+    `action_planned` / `approval_requested` / `approval_resolved` /
+    `action_started` / `action_completed` / `action_cancelled` /
+    `action_failed`
+  - optional `action_id: string`, `approval_id: string`,
+    `risk: "low"|"medium"|"high"`, `result: string`,
+    `source: "user"|"timeout"|"system"|"ui"|"core"`,
+    `summary: string` (hart auf 80 Zeichen gekürzt, Whitespace
+    gestrippt). Felder ohne Wert werden nicht serialisiert.
+
+  **Keine** Persistenz, **kein** Export, **keine** Schreib-Variante.
+  Siehe [`docs/security/AUDIT_TRAIL.md`](./security/AUDIT_TRAIL.md)
+  für Datenschutz-Grenzen und Zukunftsüberlegungen.
+
 #### Ausgehend (Core → UI)
 
 - `approval_requested` — Core bittet um Freigabe. `payload` ist eine

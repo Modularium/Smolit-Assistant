@@ -1404,8 +1404,125 @@ Build), bleiben die Zeilen stumm.
 - **Weitere Demo-Kinds.** `demo_echo` / `demo_wait` / `noop` sind
   ein kuratiertes Minimum. Eine Erweiterung müsste ihre
   Seiteneffekt-Freiheit selbst garantieren.
-- **Persistenz / Audit-Log.** Weiterhin offen, genauso wie für
-  PR 17.
+- **Persistenz / Audit-Log.** Die Audit-Linie landet mit PR 19
+  (siehe §8.4f); Persistenz bleibt weiter offen.
+
+### 8.4f Local Audit Trail v1 — Dev-Only View (PR 19, Ist-Zustand)
+
+*Accountability without surveillance.* PR 19 ergänzt eine **kleine,
+lokale, in-memory** Audit-Schicht oberhalb des
+Approval-Gated-Demo-Pfads aus PR 18. Der Store erfasst Lifecycle-
+Ereignisse und ein paar IPC-Grenzfälle als redacted
+`AuditEvent`s; eine schmale, Dev-only UI macht sie sichtbar. Kein
+Produkt-Feature, keine Persistenz, kein Export.
+
+**Datei-Layout.**
+
+```text
+core/src/audit/
+├── event.rs                      # AuditEvent, AuditFields, Sanitizer
+├── store.rs                      # AuditStore (Ring-Buffer)
+└── mod.rs                        # Re-Exports
+
+ui/scripts/audit/
+├── audit_model.gd                # Pure UI-Formatter (Kind-Labels,
+│                                 # Color-Tabelle, short_id/summary/time)
+└── audit_panel.gd                # Dev-only Panel-Controller
+
+ui/scenes/audit/
+└── audit_panel.tscn              # default visible=false
+
+scripts/
+└── audit_panel_smoke.gd          # Smoke für Modell + Panel
+```
+
+**Core.** `AuditStore` ist ein thread-safer Ring-Buffer über
+`VecDeque<AuditEvent>`. Default 100 Einträge, hartes Maximum 1000
+(`SMOLIT_AUDIT_MAX_EVENTS` klemmt hinein). Neue Einträge evictieren
+den ältesten. Jeder Eintrag trägt:
+
+- `audit_id` (`aud_NNNNNN`), `timestamp_ms` (Unix epoch ms),
+- eine der neun `AuditKind`-Kategorien,
+- optional `action_id`, `approval_id`, `risk`, `result`, `source`,
+- eine **hart gekürzte** `summary` (≤ 80 Zeichen).
+
+`source` und `result` werden gegen fest kuratierte Whitelists
+geprüft; unbekannte Werte fallen auf `None`, damit sie nicht
+serialisiert werden. `risk` nutzt die Whitelist aus PR 17 /
+[`crate::approvals`](../core/src/approvals/request.rs).
+`App::plan_demo_action` und der Executor aus PR 18 rufen den Store
+an sechs Stellen (IPC-Received, Planned, Approval-Requested,
+Approval-Resolved, Action-Started, Action-Completed/Cancelled).
+`handle_approval_response` zeichnet außerdem einen
+`ipc_command_rejected`-Eintrag, wenn ein Approve/Deny auf eine
+unbekannte oder bereits aufgelöste `approval_id` trifft — so wird
+die Idempotenz-Garantie aus PR 18 auditiv sichtbar.
+
+**Wire-Form.** Ein neuer read-only Command `audit_recent { limit? }`
+antwortet mit `audit_recent { payload: { events: [...] } }` (siehe
+[`docs/api.md` §2.7](./api.md)). Kein Schreib-Pfad, kein Clear-
+Command, kein Export.
+
+**UI.** Das `AuditPanel` rendert pro Event eine schmale Zeile:
+
+- Uhrzeit (`HH:MM:SS`) — nur informativ, keine Zeitzone, kein Datum.
+- Kind-Kurzlabel (`planned`, `apr req`, `apr res`, `started`,
+  `done`, `cancel`, `cmd rej`, …), farblich gemäß `result`.
+- Optional ein Risk-Badge, gekürzte ID (`aud_00001…`), und ein
+  Summary (weitere visuelle Kürzung auf 60 Zeichen, die hartem
+  Kürzen durch den Core vorgeschoben ist).
+
+Sichtbarkeit: **standardmäßig hidden**. Nur bei
+`SMOLIT_UI_DEV_CONTROLS=1` sichtbar geschaltet. Ein „Refresh"-
+Button sendet einen `audit_recent`-Request; es gibt **keinen**
+Auto-Refresh. `ipc_disconnected` deaktiviert den Button-Text
+visuell, ohne die bestehende Liste hart zu löschen.
+
+**Bindende Grenzen (Scope-Kuratierung).**
+
+- **Keine Persistenz.** Weder Datei, noch DB, noch Cloud-Upload.
+- **Keine Export-Funktion.** Kein `audit_save`, kein Copy-to-
+  Clipboard.
+- **Keine vollständigen User-Prompts / Response-Texte.** Summaries
+  sind ≤ 80 Zeichen; der Core übergibt dem Store keine langen
+  Inhalte.
+- **Keine Audio-Bytes, keine Transkripte.** Der TTS-Lifecycle aus
+  PR 14 hat bereits keinen Text im Event; PR 19 erweitert das
+  nicht.
+- **Keine Approval-Historie als Produktfeature.** Die UI zeigt
+  nur den aktuellen Ring-Inhalt — keine Suche, keine Filterung.
+- **Keine kryptografische Signatur.** Der Store ist weder
+  manipulationssicher noch authentifiziert. Wer den Core-Prozess
+  kompromittiert, kann Einträge frei manipulieren.
+- **Keine Policy-Engine.** Der Store beobachtet, entscheidet aber
+  nichts.
+- **Read-only IPC-Oberfläche.** Nur `audit_recent`; kein
+  `audit_clear`, kein `audit_save`, kein Schreib-Pfad.
+
+**Verifikation.**
+[`scripts/audit_panel_smoke.gd`](../scripts/audit_panel_smoke.gd)
+(Harness-Case `audit-panel-smoke`) prüft pure Model-Helfer
+(Kind-Labels, Color-Tabelle, defensive Payload-Lesung, Short-ID/
+Summary/Time) plus das Panel (default hidden, Render einer
+gesetzten Liste, Toleranz bei fehlenden Feldern, Toggle,
+`reset_for_tests`). Core-Tests (`cargo test`) decken Event-
+Sanitisierung, Ring-Buffer-Verhalten (Eviction, Limit-Clamp,
+`clear_for_tests`), die volle Plan-Lifecycle-Kette (ohne/mit
+Approval, Deny, Doppel-Approve) und den IPC-Roundtrip ab.
+
+**Offene Restschuld (nicht Teil von PR 19).**
+
+- **Persistenz.** Falls ein späteres PR Persistenz braucht, gelten
+  die in [`docs/security/AUDIT_TRAIL.md`](./security/AUDIT_TRAIL.md)
+  formulierten Leitplanken (opt-in, verschlüsselt, rotiert).
+- **Filter / Suche / Export.** Nicht in PR 19. Jede Erweiterung
+  erhöht die Surveillance-Oberfläche und muss eine eigene
+  Produkt-Entscheidung rechtfertigen.
+- **Manipulationssicherheit.** PR 19 liefert keine Tamper-
+  Detektion. Ein zukünftiger `audit_chain`-Pfad (hash-linked
+  entries) wäre eine eigene Design-Entscheidung.
+- **Workflow-Overlay-Integration.** Das Overlay bleibt passiv.
+  Audit-Einträge erscheinen nicht als Workflow-Step.
 
 ### 8.5 Visual Action Mode (UI-Staging MVP, Phase 3.3, Ist-Zustand)
 

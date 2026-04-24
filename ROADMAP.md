@@ -546,6 +546,37 @@ Desktop Interaction Layer, die UI projiziert nur.
       Historie, kryptografische Signaturen. Der Executor ist ein
       Mock — Grundlage für eine spätere sichere Tool-/Desktop-/
       AdminBot-Gating-Schicht, nicht der Schalter dafür.
+- [x] **Local Audit Trail v1 (PR 19)** —
+      *accountability without surveillance.* Neues Modul
+      `core/src/audit/` mit `AuditEvent` (kuratiertes Kind-Enum,
+      sanitisierte `source`/`result`/`risk`-Whitelists, hart
+      gekürzte `summary` auf 80 Zeichen) und `AuditStore` (thread-
+      safer In-Memory-Ring-Buffer, Default 100 Einträge, hartes
+      Maximum 1000, Env-Override `SMOLIT_AUDIT_MAX_EVENTS`).
+      `App::plan_demo_action` und der PR-18-Executor rufen den
+      Store an sechs Lifecycle-Stellen; unbekannte/bereits
+      aufgelöste `approval_id`s werden als `ipc_command_rejected`
+      auditiv sichtbar. Read-only IPC-Command `audit_recent
+      { limit? }` liefert eine gekürzte Liste; kein Schreib-Pfad,
+      kein Export. Dev-only UI (`ui/scripts/audit/audit_panel.gd`
+      + `audit_model.gd`) rendert eine schmale Liste (Zeit +
+      Kind-Kurzlabel + Risk + gekürzte ID + Summary) hinter
+      `SMOLIT_UI_DEV_CONTROLS=1`; ohne Opt-in bleibt das Panel
+      hidden. Verifiziert durch neue Core-Tests in
+      `core/src/audit/` und `core/src/ipc/server.rs` (sechs
+      Lifecycle-Szenarien inkl. Idempotenz) plus den neuen
+      Harness-Case `audit-panel-smoke` (38 Assertions). Details in
+      [docs/api.md §2.7](./docs/api.md),
+      [docs/ui_architecture.md §8.4f](./docs/ui_architecture.md)
+      und [docs/security/AUDIT_TRAIL.md](./docs/security/AUDIT_TRAIL.md).
+      **Ausdrücklich NICHT Teil von PR 19:** persistente Speicherung
+      (weder Datei noch DB noch Cloud), Datei-Export, vollständige
+      User-Prompts, vollständige TTS-/STT-Texte, Audio-Bytes,
+      Approval-Historie als Produktfeature, kryptografische
+      Signatur / Manipulationssicherheit, Policy-Engine,
+      AdminBot-/Desktop-/Shell-Aktionen. Der Store ist ein
+      Dev-/Debug-Hilfsmittel; ein Core-Restart leert ihn
+      vollständig.
 - [ ] Emotion-Mapping Core → UI (setzt Protokollerweiterung um
       `emotion` voraus)
 - [x] Speech-Sync (TTS-Lebenszyklus-Events → Animation) — MVP via
@@ -1693,9 +1724,14 @@ die Ausführung hart (siehe
 [docs/ui_architecture.md §8.4e](./docs/ui_architecture.md)). Der
 Executor ist weiterhin ein Mock — PR 18 ist Grundlage, nicht
 Schalter, für eine spätere sichere Tool-Gating-Schicht.
+PR 19 ergänzt einen kleinen **Local Audit Trail v1** (in-memory
+Ring-Buffer, read-only Envelope `audit_recent`, Dev-only UI hinter
+`SMOLIT_UI_DEV_CONTROLS=1`) — *accountability without
+surveillance*, ohne Persistenz und ohne Export (siehe
+[docs/security/AUDIT_TRAIL.md](./docs/security/AUDIT_TRAIL.md)).
 Tieferer Speech-Sync (Phonem, Audio-Timeline) und Emotion-Mapping
-aus ABrain bleiben in Phase C geparkt — weder PR 15, PR 16, PR 17
-noch PR 18 ändern das Protokoll über additive Felder hinaus.
+aus ABrain bleiben in Phase C geparkt — weder PR 15, PR 16, PR 17,
+PR 18 noch PR 19 ändern das Protokoll über additive Felder hinaus.
 
 Für den Desktop Interaction Layer läuft jetzt ein konkreter
 **Approval / Confirmation Flow MVP**: freigabepflichtige Aktionen
