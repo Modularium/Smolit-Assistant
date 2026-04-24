@@ -4367,6 +4367,237 @@ mod tests {
         assert!(frame.contains(r#""result":"rejected""#));
     }
 
+    // --- PR 32 — Audit coverage for the real interaction lifecycle ---
+    //
+    // The existing `audit_recent_records_plan_*` tests cover the
+    // Demo-Planner chain. The following tests lock the real
+    // `interaction_open_application` / `interaction_focus_window`
+    // lifecycle — policy v0 + PR 32 audit wiring — against drift.
+
+    #[tokio::test]
+    async fn audit_recent_records_open_application_approved_full_chain() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_open_application","application":"calendar"}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let _planned = recv_text(&mut ws).await;
+        let requested = recv_text(&mut ws).await;
+        let approval_id = extract_approval_id(&requested);
+        let approve = format!(
+            r#"{{"type":"approval_response","approval_id":"{approval_id}","decision":"approved"}}"#
+        );
+        ws.send(Message::Text(approve)).await.unwrap();
+        // Drain broadcast envelopes (resolved / started / step / step /
+        // verification / completed).
+        for _ in 0..6 {
+            let _ = recv_text(&mut ws).await;
+        }
+
+        ws.send(Message::Text(r#"{"type":"audit_recent"}"#.into()))
+            .await
+            .unwrap();
+        let frame = recv_text(&mut ws).await;
+        for kind in [
+            "ipc_command_received",
+            "action_planned",
+            "approval_requested",
+            "approval_resolved",
+            "action_started",
+            "action_completed",
+        ] {
+            assert!(
+                frame.contains(&format!(r#""kind":"{kind}""#)),
+                "audit frame missing {kind}: {frame}",
+            );
+        }
+        // PR 32: summary references the action_id + interaction kind,
+        // never the command template ("/bin/true") or an env-var name.
+        assert!(
+            frame.contains(r#"interaction_open_application"#),
+            "summary should reference interaction_open_application: {frame}"
+        );
+        assert!(
+            !frame.contains("/bin/true"),
+            "command template must not leak into audit summary: {frame}"
+        );
+        assert!(
+            !frame.contains("SMOLIT_INTERACTION_OPEN_APP_CMD"),
+            "env var name must not appear in audit summary: {frame}"
+        );
+        assert!(frame.contains(r#""result":"approved""#));
+        assert!(frame.contains(r#""result":"completed""#));
+        assert!(!frame.contains(r#""kind":"action_cancelled""#));
+    }
+
+    #[tokio::test]
+    async fn audit_recent_records_open_application_denied_chain() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_open_application","application":"calendar"}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let _planned = recv_text(&mut ws).await;
+        let requested = recv_text(&mut ws).await;
+        let approval_id = extract_approval_id(&requested);
+        let deny = format!(
+            r#"{{"type":"approval_response","approval_id":"{approval_id}","decision":"denied"}}"#
+        );
+        ws.send(Message::Text(deny)).await.unwrap();
+        let _resolved = recv_text(&mut ws).await;
+        let _cancelled = recv_text(&mut ws).await;
+
+        ws.send(Message::Text(r#"{"type":"audit_recent"}"#.into()))
+            .await
+            .unwrap();
+        let frame = recv_text(&mut ws).await;
+        assert!(frame.contains(r#""kind":"approval_resolved""#));
+        assert!(frame.contains(r#""result":"denied""#));
+        assert!(frame.contains(r#""kind":"action_cancelled""#));
+        // No backend run on denied → no action_started / action_completed.
+        assert!(!frame.contains(r#""kind":"action_started""#));
+        assert!(!frame.contains(r#""kind":"action_completed""#));
+    }
+
+    #[tokio::test]
+    async fn audit_recent_records_open_application_timeout_chain() {
+        // Short timeout keeps the test fast; the watchdog path converts
+        // the missing approval into a `timed_out` decision, which audit
+        // records with `result=expired`.
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 1 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_open_application","application":"calendar"}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let _planned = recv_text(&mut ws).await;
+        let _requested = recv_text(&mut ws).await;
+        let _resolved = recv_text(&mut ws).await;
+        let _cancelled = recv_text(&mut ws).await;
+
+        ws.send(Message::Text(r#"{"type":"audit_recent"}"#.into()))
+            .await
+            .unwrap();
+        let frame = recv_text(&mut ws).await;
+        assert!(frame.contains(r#""kind":"approval_resolved""#));
+        assert!(frame.contains(r#""result":"expired""#));
+        assert!(frame.contains(r#""kind":"action_cancelled""#));
+        assert!(frame.contains(r#""source":"timeout""#));
+        assert!(!frame.contains(r#""kind":"action_started""#));
+        assert!(!frame.contains(r#""kind":"action_completed""#));
+    }
+
+    #[tokio::test]
+    async fn audit_recent_records_focus_window_approved_chain_generic() {
+        // PR 32 Option A — generic interaction audit. focus_window
+        // goes through the same dispatch path and must produce the
+        // same lifecycle audit as open_application.
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_focus_window","target":{"type":"window","name":"calendar"}}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let _planned = recv_text(&mut ws).await;
+        let requested = recv_text(&mut ws).await;
+        let approval_id = extract_approval_id(&requested);
+        let approve = format!(
+            r#"{{"type":"approval_response","approval_id":"{approval_id}","decision":"approved"}}"#
+        );
+        ws.send(Message::Text(approve)).await.unwrap();
+        // Drain broadcast envelopes.
+        for _ in 0..6 {
+            let _ = recv_text(&mut ws).await;
+        }
+
+        ws.send(Message::Text(r#"{"type":"audit_recent"}"#.into()))
+            .await
+            .unwrap();
+        let frame = recv_text(&mut ws).await;
+        for kind in [
+            "ipc_command_received",
+            "action_planned",
+            "approval_requested",
+            "approval_resolved",
+            "action_started",
+            "action_completed",
+        ] {
+            assert!(
+                frame.contains(&format!(r#""kind":"{kind}""#)),
+                "focus_window audit frame missing {kind}: {frame}",
+            );
+        }
+        assert!(
+            frame.contains(r#"interaction_focus_window"#),
+            "focus_window audit should reference the interaction kind: {frame}"
+        );
+        // Template never leaks — same security invariant as open_application.
+        assert!(!frame.contains("wmctrl"), "wmctrl template must not leak: {frame}");
+        assert!(!frame.contains("/bin/true"), "command template must not leak: {frame}");
+        assert!(frame.contains(r#""result":"approved""#));
+        assert!(frame.contains(r#""result":"completed""#));
+    }
+
+    #[tokio::test]
+    async fn audit_recent_open_application_double_approve_does_not_double_complete() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_open_application","application":"calendar"}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let _planned = recv_text(&mut ws).await;
+        let requested = recv_text(&mut ws).await;
+        let approval_id = extract_approval_id(&requested);
+        let approve = format!(
+            r#"{{"type":"approval_response","approval_id":"{approval_id}","decision":"approved"}}"#
+        );
+        ws.send(Message::Text(approve.clone())).await.unwrap();
+        for _ in 0..6 {
+            let _ = recv_text(&mut ws).await;
+        }
+        // Second approve for the same id → ipc_command_rejected audit,
+        // not a second completion.
+        ws.send(Message::Text(approve)).await.unwrap();
+        let _error = recv_text(&mut ws).await;
+
+        ws.send(Message::Text(r#"{"type":"audit_recent"}"#.into()))
+            .await
+            .unwrap();
+        let frame = recv_text(&mut ws).await;
+        let completed_count = frame.matches(r#""kind":"action_completed""#).count();
+        assert_eq!(completed_count, 1, "exactly one action_completed: {frame}");
+        assert!(frame.contains(r#""kind":"ipc_command_rejected""#));
+        assert!(frame.contains(r#""result":"rejected""#));
+    }
+
     #[tokio::test]
     async fn audit_recent_limit_bounds_response() {
         let url = spawn_server_with_approval(
