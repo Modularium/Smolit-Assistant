@@ -34,3 +34,4 @@ jeweilige Architekturdatei unter [`docs/`](../), nicht in einen ADR.
 | --- | ----- | ------ | ----- |
 | [ADR-0001](./ADR-0001-smolitux-design-contract.md) | Smolitux Design Contract for Smolit-Assistant | Accepted | 2026-04-24 |
 | [ADR-0002](./ADR-0002-accessibility-rpc-readonly.md) | Accessibility RPC Spike — Read-only AT-SPI | Accepted | 2026-04-24 |
+| [ADR-0003](./ADR-0003-abrain-native-integration.md) | ABrain Native Integration Path | Proposed | 2026-04-24 |

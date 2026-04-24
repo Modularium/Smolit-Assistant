@@ -148,6 +148,13 @@ ist einzeln entscheid- und ablehnbar.
 - **ABrain (Ist-Zustand).** CLI-Adapter über `ABRAIN_CMD`
   (`docs/api.md` §3). Bleibt Default und Referenz-Provider, solange
   er konfiguriert ist. Kein Cloud-Pfad.
+  > **Zukunft (PR 39, Proposed):** ein **zusätzlicher** Text-Provider-
+  > Kind `abrain_native` ist als Native-Pfad in
+  > [`ADR-0003`](./adr/ADR-0003-abrain-native-integration.md) skizziert.
+  > Heute **nicht** in der Whitelist, **kein** Default, **kein**
+  > Cloud-Pfad; der ADR ist Docs-only, es existiert kein
+  > `abrain_native`-Code. Der CLI-Pfad bleibt unverändert und die
+  > Default-Chain bleibt `["abrain"]`.
 - **Lokaler CLI-/Command-Provider.** Beliebiges externes Kommando,
   das einen Prompt auf stdin / CLI-Argument entgegennimmt und die
   Antwort auf stdout liefert. Symmetrisch zum ABrain-CLI-Adapter,

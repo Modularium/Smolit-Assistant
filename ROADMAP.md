@@ -219,8 +219,16 @@ Single-Source für offene Punkte:
 - **G. Avatar Animation / Stage C Research** — PR 30 gelandet;
   Stage C bleibt Research-Gate. Nächster Kandidat wartet auf
   Token-Export auf der smolitux-ui-Seite (siehe J / PR 35).
-- **H. ABrain Native Integration** — heute CLI; native API ist
-  Ziel-Zustand. Nächster Kandidat: ADR (PR 39) vor Code.
+- **H. ABrain Native Integration** — heute CLI
+  (`AbrainCliProvider` via `ABRAIN_CMD`). Native-Pfad-Rahmen
+  entschieden (PR 39,
+  [`ADR-0003`](./docs/adr/ADR-0003-abrain-native-integration.md),
+  Status **Proposed** / Docs-ADR-only): zukünftiger Kind
+  `abrain_native` als Zusatz, nicht Ersatz; Default bleibt
+  `["abrain"]`; jede Action läuft durch Approval/Policy/Audit.
+  Nächster Kandidat (Future Work, nicht priorisiert): FA-1
+  Provider-Spike hinter Feature-Flag, FA-2 Cross-Repo-Contract-ADR
+  mit ABrain.
 - **I. Packaging / Release / CI** — README/SETUP/.env.example
   gelandet (PR 29). Minimale GitHub-Actions-CI gelandet (PR 38,
   [`ci.yml`](./.github/workflows/ci.yml)): Job `core-test`
@@ -278,7 +286,7 @@ PR 31 selbst ist dieser Roadmap-Checkpoint (Docs-only).
 | 36 | D | **Settings-Shell-UX-Cleanup** (2026-04-24, gelandet): Text / STT / TTS folgen derselben dreiteiligen Lesereihenfolge **Summary · Details · Editoren**. Summary benennt `Primary (intended)` (chain[0]), `Active (running)`, `Availability`, `Local / Cloud` in eigenen Zeilen — Fallback-Fälle werden so beim ersten Blick sichtbar. Privacy-Section bekommt einen expliziten `— Safety notes —`-Block (Opt-in cloud, Secrets nie angezeigt, env-only `SMOLIT_STT_WHISPER_CPP_CMD` / `SMOLIT_TTS_PIPER_CMD`, Probes side-effect-frei). Text-Chain-Editor bekommt eine Note, die cloud_http als Opt-in ausweist. **Keine** neuen IPC-Commands, **keine** neuen `StatusPayload`-Felder, **keine** Core-Änderung, **keine** Default-Änderung — Smoke-Guard gegen neue IPC-Helfer im Controller hält das live. Details: [`docs/provider_fallback_and_settings_architecture.md`](./docs/provider_fallback_and_settings_architecture.md) §13. |
 | 37 | F | **Accessibility RPC Spike Decision (AT-SPI read-only)** (2026-04-24, gelandet, **Docs/ADR-only**): [`ADR-0002`](./docs/adr/ADR-0002-accessibility-rpc-readonly.md) entscheidet den Rahmen vor Code. Read-only `GetChildren` auf Registry-Root; `atspi`+`zbus` hinter einem `accessibility_rpc`-Feature-Flag (default-off); **keine** Input-Injection, **kein** `DoAction`, **kein** Baum-Walk über eine Tiefe hinaus, **keine** Passwort-/Secret-Felder, **keine** Wayland-Compositor-Aktion, **kein** Approval-Bypass. `confidence: verified` bleibt exklusiv für Items mit Registry-Evidenz — Hint-Echos bleiben `discovered`. Wire-Schema (`docs/api.md` §2.8) unverändert, keine neuen IPC-Commands. |
 | 38 | I | **Release/CI Foundation** (2026-04-24, gelandet): GitHub-Actions-Workflow [`ci.yml`](./.github/workflows/ci.yml) mit zwei Jobs — `core-test` (`cargo test --manifest-path core/Cargo.toml --locked` auf `ubuntu-latest`, Rust stable) und `ui-smoke` (Godot 4.6 headless, pinned via `GODOT_VERSION`, fünf Smokes: `settings-shell-smoke`, `avatar-render-polish-smoke`, `workflow-visibility-smoke`, `approval-card-smoke`, `audit-panel-smoke`). Beide Jobs laufen mit `HOME` / `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` unterhalb `runner.temp` — damit sind stray `~/.config/smolit-assistant/`-Dev-Artefakte strukturell ausgeschlossen. Lokaler Parity-Helper: [`scripts/ci_verify.sh`](./scripts/ci_verify.sh). **Kein** Packaging-Format, **keine** Signing-Stufe, **kein** Artifact-Upload, **kein** Release-Tagging, **kein** Docker-Image, **keine** Secrets, **keine** Provider-Endpunkte, **keine** echten TTS/STT-Binaries. |
-| 39 | H | **ABrain Native Integration ADR.** API-Scope, Ownership der API-Definition, Migration aus dem CLI-Pfad. Noch kein Code; Entscheidung über Schnittstellen-Besitz kommt vor Implementation. |
+| 39 | H | **ABrain Native Integration ADR** (2026-04-24, gelandet, **Docs/ADR-only**, Status **Proposed**): [`ADR-0003`](./docs/adr/ADR-0003-abrain-native-integration.md) fixiert den Rahmen vor Code. Native-Pfad kommt als **zusätzlicher** Text-Provider-Kind (Arbeitsname `abrain_native`, Default-Chain bleibt `["abrain"]`), nicht als Ersatz; typed request/response; lokal-first (Unix-Socket / Loopback); jede ABrain-induzierte Action läuft durch Approval/Policy/Audit (PR 25 / PR 19 / PR 32); **kein** AdminBot-/Shell-/Desktop-Bypass, **kein** Streaming, **keine** Tool-Call-Execution in der ersten Version, **kein** Cloud-Default, **keine** Änderung an `ABRAIN_CMD`. Status bleibt Proposed, bis ABrain-Seite einen Gegenvorschlag publiziert hat. |
 | 40 | — | **OceanData Data-Layer Integration ADR** (cross-repo falls nötig). Beschreibt einen *hypothetischen* Anbindungsweg eines Data-Layers an Smolit-Assistant. OceanData bleibt explizit **kein** UI-/Design-System. Nur ADR, keine Implementation. |
 
 ---

@@ -411,24 +411,57 @@ ein kleiner reversibler Smolit-Assistant-Spike sinnvoll.
 Response und Tool-Calls sind nur mit nativer API machbar.
 **Blocker:** ABrain-Roadmap-seitige Entscheidung. Keine Core-
 seitigen technischen Blocker.
-**Nächster kleinster PR:**
+**Erledigt (Decision only):**
 
-- **PR 39 H-ABrain-Native-Integration-ADR.** ADR *vor* Code: der
-  Native-API-Scope, die Ownership der API-Definition
-  (Smolit-Assistant vs. ABrain), die Migration aus dem CLI-Pfad
-  und der Umgang mit Streaming-Response + Tool-Calls werden
-  entschieden, bevor eine Implementation startet. Reines Docs-
-  PR.
+- **PR 39 H-ABrain-Native-Integration-ADR** *(2026-04-24, gelandet,
+  Docs/ADR-only, Status **Proposed**)*.
+  [`ADR-0003`](./adr/ADR-0003-abrain-native-integration.md) fixiert den
+  Rahmen für einen zukünftigen Native-Pfad, bevor ABrain-seitig ein
+  verbindlicher API-Vertrag steht. Kernaussagen: der Native-Pfad
+  kommt als **zusätzlicher** Text-Provider-Kind (Arbeitsname
+  `abrain_native`, Default-Chain bleibt `["abrain"]`), nicht als
+  Ersatz — `ABRAIN_CMD` und der heutige `AbrainCliProvider` bleiben
+  unverändert. Typed request/response, lokal-first (Unix-Socket /
+  Loopback), **jede** ABrain-induzierte Action läuft durch den
+  bestehenden Approval-/Policy-/Audit-Gate (PR 25 / PR 19 / PR 32),
+  kein AdminBot-/Shell-/Desktop-Bypass, kein Streaming und keine
+  Tool-Call-Execution in der ersten Version. Status bleibt
+  **Proposed**, bis ABrain-Seite einen Gegenvorschlag gegen §4+§7
+  publiziert.
 
-**Nicht-Ziele:**
+**Nächster kleinster PR (Future Work, nicht priorisiert):**
+
+- **FA-1 — `abrain_native`-Provider-Spike.** Typed API-Client hinter
+  Feature-Flag, Chain-Whitelist-Erweiterung, Wire-Schema aus
+  ADR-0003 §6 geprüft. Kein Action-Intent-Pfad, kein Streaming.
+- **FA-2 — Cross-Repo-Contract-ADR** (Smolit-Assistant ↔ ABrain):
+  fixiert das JSON-Schema als verbindlich, inkl. Versionierung und
+  Breaking-Change-Regeln.
+- **FA-3 — Action-Intent-Schema + Approval/Audit-Integration.**
+  Strukturiertes `action_intents`-Array wird im Core in
+  `action_planned`-Events verdrahtet — Kind-Whitelist startet mit
+  `open_application` / `focus_window`.
+- **FA-4 — Streaming.** Eigenes Lifecycle-Protokoll
+  (`response_started` / `response_chunk` / `response_ended`),
+  eigener ADR vor Code.
+- **FA-5 — ABrain-seitiger Contract-Doc.** ABrain-Repo spiegelt den
+  Vertrag als Gegenstück zu ADR-0003 §6.
+
+**Nicht-Ziele (unverändert):**
 
 - Keine Tool-Call-Engine in Smolit, bevor die ABrain-Seite
   geklärt ist.
 - Keine Emotion-Felder in `response` ohne Core-Signal.
+- Kein AdminBot-/Shell-/Desktop-Bypass über den Native-Pfad.
+- Kein Cloud-Default für `abrain_native`; Cloud-Endpoints brauchen
+  eigenen Follow-up-ADR analog zu `cloud_http`.
+- Keine Änderung an `ABRAIN_CMD` oder am bestehenden CLI-Pfad.
 
 **Tests / Verifikation:**
 
-- Bestehender `abrain`-Provider-Test-Pfad (CLI-Echo) bleibt grün.
+- Bestehender `abrain`-Provider-Test-Pfad (CLI-Echo) bleibt grün
+  (PR 39 ist Docs-only, keine Code-Änderung).
+- `cargo test` und `settings-shell-smoke` bleiben unverändert grün.
 
 ---
 

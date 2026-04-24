@@ -2053,11 +2053,31 @@ projiziert.
 ## 5. Core ↔ ABrain: natives API (Ziel-Zustand)
 
 Geplant, **noch nicht implementiert**. Sobald ABrain als Bibliothek oder
-als IPC-Server verfügbar ist, ersetzt die native Schnittstelle den
-CLI-Prozess. Ziele:
+als IPC-Server verfügbar ist, ergänzt die native Schnittstelle den
+CLI-Prozess — sie **ersetzt** ihn nicht.
+
+> **PR 39 (2026-04-24, Proposed) — Rahmen entschieden:**
+> [`ADR-0003`](./adr/ADR-0003-abrain-native-integration.md) legt den
+> Rahmen eines zukünftigen Native-Pfades fest, bevor Code entsteht.
+> Kernaussagen: `ABRAIN_CMD` und der heutige CLI-Adapter bleiben
+> unverändert; der Native-Pfad kommt als **zusätzlicher** Text-
+> Provider-Kind (Arbeitsname `abrain_native`, Default-Chain bleibt
+> `["abrain"]`, Opt-in per Env + Chain-Eintrag); typed
+> request/response; lokal-first (Unix-Socket / Loopback, kein
+> Cloud-Default); jede ABrain-induzierte Action läuft durch den
+> bestehenden Approval-/Policy-/Audit-Pfad; kein AdminBot-/Shell-/
+> Desktop-Bypass; kein Streaming und keine Tool-Call-Execution in
+> der ersten Version. Der ADR ist **Docs-only** — es existiert kein
+> Native-Client, kein `abrain_native`-Code, kein neues IPC-Event.
+> Heute bleibt der CLI-Adapter aus §3 die einzige produktive Quelle
+> von ABrain-Antworten.
+
+Ziele der späteren Native-Schnittstelle (Ziel-Zustand, siehe
+ADR-0003 für die verbindliche Messlatte):
 
 - strukturierte Requests (Kontext, Modalitäten, Session-IDs),
-- strukturierte Responses (Text + optional Emotion/Actions/Tool Calls),
+- strukturierte Responses (Text + optional Action-Intents / Task-ID;
+  Emotion-/Voice-/Tool-Call-Felder bleiben Future Work),
 - Streaming,
 - geringere Latenz als Prozess-Spawn.
 
