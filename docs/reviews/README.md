@@ -1,0 +1,52 @@
+# Reviews & Reality Checks
+
+> Dieser Ordner hält **Review-Berichte**, **Reality-Checks** und
+> **ehrliche Post-mortems** zu einzelnen PRs oder Phasen. Detail-
+> geschichten zu einzelnen PRs leben **hier**, nicht in
+> [`ROADMAP.md`](../../ROADMAP.md). Die Roadmap beschreibt den Weg
+> nach vorn; dieser Ordner beschreibt, wie die Arbeit tatsächlich
+> lief.
+
+## Zweck
+
+- **Entkoppeln von Roadmap und Historie.** ROADMAP.md bleibt in
+  zwei Minuten erfassbar. Wer pro PR eine lange Erzählung sucht,
+  findet sie hier.
+- **Reality Checks sind kein Changelog.** Ein Eintrag hier ist ein
+  Review: was war der Plan, was wurde tatsächlich gebaut, wo sind
+  die Abweichungen, welche Folgearbeit bleibt offen.
+- **Offene Folgearbeit ist dokumentiert**, aber die bindende
+  Single-Source für offene Arbeiten bleibt
+  [`docs/OPEN_WORK.md`](../OPEN_WORK.md) — nicht dieser Ordner.
+
+## Aktueller Bestand
+
+| Datei | Gegenstand | Kurz |
+|-------|-----------|------|
+| [`phase-3-avatar-ui_inventory.md`](./phase-3-avatar-ui_inventory.md) | Phase 3 Avatar UI | Inventur des Phase-3-Avatar-UI-Spikes (vor PR 14) |
+| [`phase-3-avatar-ui_review.md`](./phase-3-avatar-ui_review.md) | Phase 3 Avatar UI | Review der Phase-3-Arbeit |
+| [`PR20_DOCS_REALITY_CHECK.md`](./PR20_DOCS_REALITY_CHECK.md) | PR 20 Docs Reality Check | Ehrlicher Abgleich Ist-Code vs. gesamte Dokumentation; Grundlage für den ROADMAP-Rebase und `OPEN_WORK.md`. |
+
+## Konventionen für neue Einträge
+
+- **Dateiname:** `PR<N>_<SHORT_SLUG>.md` oder
+  `phase-<N>_<SLUG>.md` — kurze, maschinenlesbare Slugs.
+- **Header-Block:** Kurzer Scope-Absatz, Stand-Datum, Pointer auf
+  den PR-Commit-Bereich (SHA-Range), falls sinnvoll.
+- **Ehrlichkeit vor Schönheit.** Reality-Checks dürfen unbequem
+  sein — das ist ihre Arbeit. Wo etwas schiefgelaufen ist, steht
+  es hier.
+- **Keine Feature-Arbeit.** Reviews ändern keine Core-/UI-Logik.
+- **Pointer statt Copy-Paste.** Wer eine technische Aussage aus
+  einer Architektur-Datei (z. B. `docs/ui_architecture.md`)
+  braucht, verlinkt sie hier statt sie zu duplizieren.
+
+## Verwandte Dokumente
+
+- [`ROADMAP.md`](../../ROADMAP.md) — kanonische Roadmap (Phasen,
+  offene Workstreams, Next PRs, Explicitly Deferred).
+- [`docs/OPEN_WORK.md`](../OPEN_WORK.md) — Single-Source offene
+  Arbeiten pro Workstream.
+- [`docs/GLOSSARY.md`](../GLOSSARY.md) — einheitliches Vokabular
+  (Approval, Audit Trail, Workflow-Overlay, Presence, Expression,
+  Action Event, Interaction Layer, Provider Chain, Stage C).

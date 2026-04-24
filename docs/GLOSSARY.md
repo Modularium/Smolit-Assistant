@@ -1,0 +1,182 @@
+# Smolit-Assistant Glossar
+
+> Einheitliches Vokabular für den Smolit-Assistant-Code und die
+> begleitende Dokumentation. Wenn zwei Dokumente denselben Begriff
+> anders verwenden, gewinnt die Definition hier. Begriffe, die im
+> Repo heute gelebt werden, stehen oben; Forschungs-/Zukunftsbegriffe
+> (z. B. „Stage C") am Ende.
+
+## Approval
+
+Ein vom Core ausgesprochenes „Bitte bestätigen" vor einer potenziell
+relevanten Aktion. Technisch getragen vom
+[`ApprovalRequest`](../core/src/approvals/request.rs)-Envelope
+(outgoing) und einer UI-Antwort (`approval_approve`,
+`approval_deny` oder `approval_response`). Der Core hält pending
+Approvals in einer
+[`PendingApprovalRegistry`](../core/src/approvals/state.rs), die
+Idempotenz garantiert: ein zweiter Approve/Deny auf dieselbe
+`approval_id` erzeugt niemals ein zweites `approval_resolved`,
+sondern einen `error`-Frame.
+
+**Scope heute:**
+
+- Interaction-Flow: `open_application` läuft durch Approval, wenn
+  `SMOLIT_INTERACTION_REQUIRE_CONFIRMATION=1`.
+- Demo-Flow: `request_approval_demo` (PR 17) und
+  `plan_demo_action` (PR 18) sind Mock-Pfade — **keine echten
+  Systemaktionen**.
+
+Siehe [`docs/security/APPROVAL_UX.md`](./security/APPROVAL_UX.md)
+und [`docs/api.md §2.7`](./api.md).
+
+## Audit Trail
+
+Bounded, in-memory Ring-Buffer für sanitisierte Lifecycle-Events
+der Approval-Gated Demo-Actions plus ein paar IPC-Grenzfälle. Kein
+Produkt-Feature, kein Export, keine Persistenz (ein Core-Restart
+leert den Store). Zugriff über das read-only IPC-Kommando
+`audit_recent`.
+
+**Nicht dasselbe wie:** `audit_snapshot` (existiert nicht),
+User-facing Activity-Log, Audit-Log als Compliance-Artefakt.
+
+Default-Kapazität 100, hartes Maximum 1 000, Env-Override
+`SMOLIT_AUDIT_MAX_EVENTS`. Einträge redacted: `summary` ≤ 80
+Zeichen, `source`/`result`/`risk` gegen Whitelists geprüft.
+
+Siehe [`docs/security/AUDIT_TRAIL.md`](./security/AUDIT_TRAIL.md).
+
+## Workflow Overlay
+
+**Veraltete Bezeichnung** für die drei-Knoten-Kurzprojektion aus
+Phase 3.1 (`ui/scripts/workflow_overlay/`,
+`ui/scenes/workflow_overlay/workflow_overlay_root.tscn`). Rendert
+Trigger → Action → Result als knappe Zusammenfassung laufender
+Action Events. **Nicht** das neuere, lineare Panel aus PR 16
+(siehe nächster Eintrag).
+
+Beide Overlays koexistieren bewusst — ein Konsolidierungs-PR ist
+als Follow-up vorgemerkt (siehe
+[`docs/OPEN_WORK.md`](./OPEN_WORK.md) Workstream A).
+
+Siehe [`docs/ui_architecture.md`](./ui_architecture.md) §6a und §8a.
+
+## Workflow Visibility Overlay
+
+Das **neuere** read-only Panel aus PR 16 neben dem Avatar. Rendert
+eine lineare Kartenliste über neun Schritt-Kategorien (HEARD,
+THINKING, RESPONSE, ACTION, STEP, SPEAKING, APPROVAL, COMPLETED,
+FAILED), je Eintrag Status + gekürzte ID + Snippet. Standardmäßig
+hidden, opt-in über `SMOLIT_WORKFLOW_OVERLAY=1` oder Dev-Toggle.
+Keine neuen IPC-Events; konsumiert bestehende Signale.
+
+Siehe [`docs/ui_architecture.md`](./ui_architecture.md) §8.4c.
+
+## Presence
+
+Das **Ist-Verhalten der UI-Hülle** im Sinne der Produkt-Vision
+„sichtbare Desktop-Präsenz". Trägt die Modi `docked`,
+`expanded`, `action`, `disconnected` und moduliert Avatar,
+Utterance-Bubble, Workflow-Overlay und Action-Banner. Implementiert
+in `ui/scripts/presence/presence_controller.gd`.
+
+**Nicht dasselbe wie:** eine Always-on-top- oder
+Click-through-Funktion — das sind orthogonale Window-Behavior-
+Themen (siehe
+[`docs/linux_window_overlay_architecture.md`](./linux_window_overlay_architecture.md)).
+
+Siehe [`docs/presence_desktop_interaction.md`](./presence_desktop_interaction.md).
+
+## Expression
+
+Eine **Behavioral-Expression-Layer-v1**-Ausdrucksstufe aus PR 15,
+die oberhalb der bestehenden Avatar-State-Maschine als Multiplier-/
+Tint-Patch wirkt. Sechs kuratierte Modi: `neutral`, `focused`,
+`curious`, `speaking`, `pleased`, `error_soft`. Rein UI-seitig,
+kein Protokoll, kein Core-Hook.
+
+Eine Expression ersetzt weder den Avatar-State noch einen
+Action-Event. Sie moduliert Puls-Amplitude, Wiggle-Stärke und
+Tint — und respektiert dabei den Template-Capability-Contract
+(`orb.wiggle = NONE` bleibt auch in `curious` still).
+
+Siehe [`docs/ui_architecture.md`](./ui_architecture.md) §8.4b.
+
+## Action Event
+
+Ein Outgoing-Envelope aus dem **Action Event Model v1**
+(`core/src/actions/event.rs`), der einen Schritt einer Aktion
+sichtbar macht. Neun Varianten: `action_planned`, `action_started`,
+`action_step`, `action_progress` (reserviert, heute nicht
+emittiert), `action_verification`, `action_completed`,
+`action_failed`, `action_cancelled`.
+
+**Unterscheidung:** ein Action Event ist **kein** Approval (der
+Entscheidungspfad), **kein** Audit-Eintrag (die Beobachtung) und
+**kein** TTS-Lifecycle-Event (die Audio-Klammer). Die vier Kanäle
+leben parallel auf derselben WebSocket-Leitung.
+
+Siehe [`docs/api.md §2.5`](./api.md).
+
+## Interaction Layer
+
+Der Core-Baustein, der Desktop-Aktionen modelliert und ausführt:
+`core/src/interaction/`. Kennt die `InteractionKind`-Familie
+(`OpenApplication`, `FocusWindow`, `TypeText`, `SendShortcut`,
+`Noop`, `Unknown`). Heute real verdrahtet ist nur
+**`OpenApplication`** via `CommandBackend`; die anderen drei
+Kinds sind `BackendUnsupported` (MVP).
+
+Eingebunden in den Approval-Flow: `requires_confirmation=true`
+löst den Approval-Dialog aus, bevor der Executor läuft.
+Allow-Lists über `SMOLIT_INTERACTION_ALLOW_*`-Env-Vars.
+
+Siehe [`docs/api.md §2.6`](./api.md) und
+[`docs/presence_desktop_interaction.md`](./presence_desktop_interaction.md).
+
+## Provider Chain
+
+Eine geordnete Liste von **Provider-Kind-Namen** pro Achse (text /
+stt / tts), mit Fallback-Semantik: der Resolver probiert das erste
+Kind; scheitert es, rutscht er zum nächsten. Whitelists:
+
+- **Text:** `abrain`, `llamafile_local`, `local_http`, `cloud_http`
+- **STT:** `command`
+- **TTS:** `command`
+
+Der Compile-Zeit-Default ist konservativ (`["abrain"]` bzw.
+`["command"]`). User-Ketten werden im Settings-Store persistiert;
+unbekannte Kinds und Duplikate werden validator-seitig abgelehnt.
+
+Siehe
+[`docs/provider_fallback_and_settings_architecture.md`](./provider_fallback_and_settings_architecture.md).
+
+## Stage C
+
+Ein **Forschungs-Gate**, kein Feature. Beschreibt die hypothetische
+spätere Avatar-Stufe, in der kuratierte Identitäten durch weitere
+Pfade ergänzt werden könnten (statische Asset-Bundles,
+deklarative lokale Manifeste, echte User-Imports). Alle vier
+Optionen (C1–C4) sind **nicht begonnen**.
+
+**Hard-blocked**, solange Sicherheits-/Vertrauensmodell,
+Manifest-Format und Render-Capability-Contract für User-supplied
+Inhalte nicht entschieden sind.
+
+Siehe [`docs/avatar_stage_c_research.md`](./avatar_stage_c_research.md).
+
+---
+
+## Nicht im Glossar enthalten (bewusst)
+
+- **Phase A / B / B+ / B++ / C** (Avatar-Rendering-Stufen) —
+  interne Staging-Taxonomie der Avatar-Pipeline; **nicht**
+  dasselbe wie die Produkt-Roadmap-Phasen. Siehe
+  [`docs/ui_architecture.md §7`](./ui_architecture.md).
+- **Phase 0 – 10** (Produkt-Roadmap-Phasen) — siehe
+  [`ROADMAP.md`](../ROADMAP.md).
+- **workflow_snapshot / audit_snapshot** — existieren **nicht**
+  im Protokoll. Das Wire-Format heißt `audit_recent`; eine
+  `workflow_snapshot`-Variante ist ausdrücklich nicht Teil des
+  Protokolls (siehe [`docs/api.md`](./api.md)).
