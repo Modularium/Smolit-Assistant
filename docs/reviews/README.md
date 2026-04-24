@@ -28,6 +28,7 @@
 | [`PR20_DOCS_REALITY_CHECK.md`](./PR20_DOCS_REALITY_CHECK.md) | PR 20 Docs Reality Check | Ehrlicher Abgleich Ist-Code vs. gesamte Dokumentation; Grundlage für den ROADMAP-Rebase und `OPEN_WORK.md`. |
 | [`PR23_FOCUS_WINDOW_DECISION.md`](./PR23_FOCUS_WINDOW_DECISION.md) | PR 23 focus_window Reality Decision | Entscheidung für Option 1 („bleibt, weil bereits realisiert"); Code-Inventur, Machbarkeitsprüfung X11, Doku-Pointer. |
 | [`PR25_POLICY_V0_APPROVAL_DEFAULT.md`](./PR25_POLICY_V0_APPROVAL_DEFAULT.md) | PR 25 Policy v0 | Safety-/Docs-/Tests-PR: fixiert die Default-Approval-Baseline für echte Interaction Actions (`open_application` approval-gated, `focus_window` doppeltes Opt-in, `type_text`/`send_shortcut` weiterhin unsupported). Ehrliche Audit-Grenze dokumentiert. |
+| [`PR28_PRESENCE_DESKTOP_INTERACTION_TRIM.md`](./PR28_PRESENCE_DESKTOP_INTERACTION_TRIM.md) | PR 28 Presence & Desktop Interaction Trim | Docs-only: `presence_desktop_interaction.md` auf Ist-Zustand gekürzt (1096 → 491 Zeilen, 12-Abschnitt-Struktur). Zielbild komplett in Future Work / Non-goals isoliert. Altanker-Mapping für eingehende Verweise. |
 
 ## Konventionen für neue Einträge
 
