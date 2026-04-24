@@ -42,7 +42,8 @@ Je Feature:
 | Feature | Tool | Warum |
 | --- | --- | --- |
 | ABrain-Text-Pfad | ABrain-CLI | Default-Text-Provider (`SMOLIT_TEXT_PROVIDER_CHAIN=abrain`). |
-| TTS-Kind `command` | `espeak`, `piper`, `kokoro`, eigenes Skript | `SMOLIT_TTS_CMD` liest stdin, spricht. |
+| TTS-Kind `command` | `espeak`, `kokoro`, eigenes Skript | `SMOLIT_TTS_CMD` liest stdin, spricht. |
+| TTS-Kind `piper` | Piper-Binary (PR 34) | `SMOLIT_TTS_PIPER_CMD` — gleicher stdin-Spawn-Vertrag wie `command`. |
 | STT-Kind `command` | `whisper`, `vosk`, eigenes Skript | `SMOLIT_STT_CMD` nimmt auf, druckt erkannten Text auf stdout. |
 | STT-Kind `whisper_cpp` | whisper.cpp-Binary | `SMOLIT_STT_WHISPER_CPP_CMD` — gleicher Spawn-Vertrag wie `command`. |
 | `focus_window` (X11) | `wmctrl` | X11-Template `SMOLIT_INTERACTION_FOCUS_WINDOW_CMD="wmctrl -a {name}"`. |
@@ -149,6 +150,7 @@ Defaults**. Leerer Wert = nicht konfiguriert (ehrlich
 | `SMOLIT_STT_ENABLED` | `true` | STT-Achse an/aus. |
 | `SMOLIT_STT_CMD` | *leer* | STT-`command`-Kind. Stdout = erkannter Text. |
 | `SMOLIT_STT_WHISPER_CPP_CMD` | *leer* | STT-`whisper_cpp`-Kind (PR 27). Env-only. |
+| `SMOLIT_TTS_PIPER_CMD` | *leer* | TTS-`piper`-Kind (PR 34). Env-only. |
 | `SMOLIT_STT_TIMEOUT_SECONDS` | `20` | Pro Spawn. |
 | `SMOLIT_AUDIO_AUTO_SPEAK` | `true` | Antworten automatisch über TTS sprechen. |
 | `SMOLIT_STT_PROVIDER_CHAIN` | `command` | Komma-separiert. Whitelist: `command`, `whisper_cpp`. |
@@ -229,9 +231,14 @@ SMOLIT_STT_WHISPER_CPP_CMD="/opt/whisper.cpp/main -m /opt/models/ggml-base.bin"
 SMOLIT_STT_PROVIDER_CHAIN="whisper_cpp,command"
 
 SMOLIT_TTS_ENABLED=true
-SMOLIT_TTS_CMD="piper --model /opt/piper/de-thorsten-low.onnx --output-raw"
+SMOLIT_TTS_PIPER_CMD="piper --model /opt/piper/de-thorsten-low.onnx --output-raw"
+SMOLIT_TTS_PROVIDER_CHAIN="piper,command"
 SMOLIT_AUDIO_AUTO_SPEAK=true
 ```
+
+Ist nur das Env gesetzt, aber `piper` nicht in der Chain, meldet
+die Settings-Shell
+`configured (via SMOLIT_TTS_PIPER_CMD), aber nicht in der Chain`.
 
 ### 4.3 `focus_window` auf X11 aktivieren
 

@@ -93,25 +93,27 @@ nested-Wayland-Tool auf diesem Host verfügbar.
 
 ## C — Audio Pipeline v2
 
-**Status:** STT hat seit PR 27 (2026-04-24) **zwei** produktive Kinds
-(`command`, `whisper_cpp`), beide command-basiert; TTS bleibt bei
-einem Kind (`command`). TTS-Lifecycle-Events aus PR 14 liegen
-unverändert vor. Keine Streaming-Audio-Pipeline.
-**Warum wichtig:** Die Fallback-Kette `["whisper_cpp", "command"]`
-ist jetzt real nutzbar — der Resolver spiegelt `active=command` /
-`availability=fallback_active`, wenn whisper.cpp nicht konfiguriert
-ist oder fehlschlägt. Ehrliche Tests decken beide Pfade.
+**Status:** STT (seit PR 27) und TTS (seit **PR 34, 2026-04-24**)
+haben **je zwei** produktive command-basierte Kinds: STT
+`[command, whisper_cpp]`, TTS `[command, piper]`. Audio-Pipeline
+bleibt command-basiert; TTS-Lifecycle-Events aus PR 14 tragen
+unverändert ein `provider`-Feld (heute ein echter Unterschied —
+`piper` oder `command` je nach Resolver-Ausgang). Keine
+Streaming-Audio-Pipeline.
+**Warum wichtig:** Die Fallback-Ketten `["whisper_cpp", "command"]`
+und `["piper", "command"]` sind jetzt beide real nutzbar — der
+Resolver spiegelt `active=command` / `availability=fallback_active`,
+wenn das Primär-Kind nicht konfiguriert ist oder fehlschlägt. Die
+in der PR-31-Drift-Watchlist benannte **TTS-Monokultur** (nur ein
+produktives Kind) ist damit geschlossen.
 **Blocker:** keiner; der Provider-Resolver aus PR 6/13 nimmt
-whisper_cpp jetzt als vollwertiges Chain-Kind.
-**Nächster kleinster PR:**
-
-- **PR 34 C-TTS-Alternative.** Zweites TTS-Kind (z. B. `piper_http`
-  oder ein weiterer command-basierter Adapter) analog zur
-  whisper_cpp-Linie: eigene Env-Variable, Whitelist-Erweiterung
-  (`[command, <neu>]`), Default bleibt `[command]`. **Keine**
-  Build-Abhängigkeit, **kein** Streaming-Audio, **kein** Runtime-
-  Editor. TTS-Fallback-Monokultur (heute nur `command`) wird damit
-  adressiert; siehe PR-31-Checkpoint-Watchlist.
+sowohl `whisper_cpp` als auch `piper` als vollwertiges Chain-Kind.
+**Nächster kleinster PR:** kein zwingender C-PR in der nahen Reihe.
+Mögliche Folgearbeit (ohne Priorität): ein drittes Kind mit
+anderer Spawn-Semantik (z. B. `http_local` STT/TTS), oder das
+`sanitize_*`-Vokabular um Cloud-Kennzeichnung erweitern — beides
+bräuchte eigene Design-Entscheidungen. **Keine** Streaming-Pipeline,
+**kein** Modell-Manager.
 
 **Nicht-Ziele:**
 
@@ -120,22 +122,25 @@ whisper_cpp jetzt als vollwertiges Chain-Kind.
 - Keine Cloud-STT/-TTS-Provider als Default.
 - Kein neuer Audio-Subsystem-Stack — bestehender
   `core/src/audio/` bleibt.
-- Keine Build-Abhängigkeit auf whisper.cpp; das Kind bleibt
-  external-command-based.
-- Kein Modell-/Download-Manager in PR 27.
-- Kein Runtime-Editor für `SMOLIT_STT_WHISPER_CPP_CMD` —
-  Kommando ist env-only.
+- Keine Build-Abhängigkeit auf whisper.cpp oder Piper; beide
+  Kinds bleiben external-command-based.
+- Kein Modell-/Download-Manager in PR 27 oder PR 34.
+- Kein Runtime-Editor für `SMOLIT_STT_WHISPER_CPP_CMD` oder
+  `SMOLIT_TTS_PIPER_CMD` — beide Kommandos sind env-only.
 
 **Tests / Verifikation:**
 
-- `core/src/providers/stt.rs`: elf neue PR-27-Tests, u. a.
-  `validate_stt_chain_accepts_whisper_cpp_kind`,
-  `whisper_cpp_primary_without_command_reports_unavailable`,
-  `fallback_chain_whisper_cpp_then_command_uses_command_when_whisper_cpp_missing`.
-- Chain-Validator-Test (Whitelist, Duplikate, Empty-Reject) deckt
-  das neue Kind ab.
+- `core/src/providers/stt.rs`: elf PR-27-Tests.
+- `core/src/providers/tts.rs`: elf PR-34-Tests, u. a.
+  `validate_tts_chain_accepts_piper_kind`,
+  `piper_primary_without_command_reports_unavailable`,
+  `fallback_chain_piper_then_command_uses_command_when_piper_missing`.
+- Chain-Validator-Tests (Whitelist, Duplikate, Empty-Reject)
+  decken beide neuen Kinds ab.
 - `speech-sync-smoke` und `settings-shell-smoke` bleiben grün;
-  letzterer erhält sechs neue PR-27-Checks.
+  letzterer erhält sechs neue PR-27-Checks plus sechs neue
+  PR-34-Checks (`_check_tts_chain_editor_*`,
+  `_check_tts_lines_piper_*`).
 
 ---
 

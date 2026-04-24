@@ -397,11 +397,23 @@ Klassen (`ok` / `not_in_chain` / `disabled` / `not_configured` /
 ### 4.3 TTS
 
 - **Lokaler Command-Provider (Ist-Zustand, PR 6).** `SMOLIT_TTS_CMD`
-  — z. B. `piper`, `kokoro`, eigenes Skript. Seit PR 6 hinter einer
+  — z. B. `kokoro`, eigenes Skript. Seit PR 6 hinter einer
   kleinen Provider-Abstraktion
   ([`providers::tts`](../core/src/providers/tts.rs)) mit Resolver,
   Laufzeitstatus und Fehlerklassifikator (inkl. spezifischer Klasse
   `stdin_write_failed`).
+- **`piper`-Kind (PR 34, Ist-Zustand).** Zweiter command-basierter
+  Adapter unter einer eigenen Env-Variable `SMOLIT_TTS_PIPER_CMD`.
+  Inhaltlich identischer Spawn-/stdin-Vertrag wie das `command`-
+  Kind; die Trennung ist bewusst — so macht die Fallback-Kette
+  `["piper", "command"]` real Sinn (z. B. Piper als primärer
+  Lokal-Pfad, ein einfacheres Fallback-Kommando auf `command`).
+  **Piper selbst ist keine Build-Abhängigkeit und kein Modell-/
+  Download-Manager** — der Nutzer orchestriert Binary und Stimme/
+  Modell außerhalb des Cores; der Core ruft nur den konfigurierten
+  Command auf und füttert den Text über stdin. Env-only
+  konfigurierbar; keine Persistenz und kein Runtime-Editor in der
+  Settings-Shell.
 - **Lokaler HTTP-Provider.** Analog. **Noch nicht implementiert.**
 - **Cloud-Provider.** Analog; zusätzlich beachten, dass TTS-Texte
   potenziell sensible Nutzerinhalte enthalten und die Cloud-
@@ -638,11 +650,33 @@ PR 27 ergänzt zwei additive StatusPayload-Booleans:
   `cloud_http_configured`). Beide Felder sind Booleans; der
   Command-String selbst landet **nicht** im StatusPayload.
 
-**TTS-Achse (produktiv seit PR 6).** `tts_enabled` / `tts_available`
-/ `auto_speak` bleiben als Legacy-Feld-Tripel erhalten. Ergänzt um
-fünf additive Felder analog STT (`tts_provider_configured` usw.).
-Einziges Kind heute `command`; Chain env-überschreibbar via
-`SMOLIT_TTS_PROVIDER_CHAIN`.
+**TTS-Achse (produktiv seit PR 6, zweites Kind seit PR 34).**
+`tts_enabled` / `tts_available` / `auto_speak` bleiben als
+Legacy-Feld-Tripel erhalten. Ergänzt um fünf additive Felder
+analog STT (`tts_provider_configured` usw.). Produktive Kinds:
+
+- `command` — bestehender `SMOLIT_TTS_CMD`-Pfad (PR 6).
+- `piper` — zweiter command-basierter Adapter unter
+  `SMOLIT_TTS_PIPER_CMD` (PR 34). Env-only, keine Persistenz,
+  keine Build-Abhängigkeit auf Piper.
+
+Chain env-überschreibbar via `SMOLIT_TTS_PROVIDER_CHAIN`. Default
+bleibt `["command"]` — PR 34 ändert den Compile-Time-Default
+nicht.
+
+PR 34 ergänzt zwei additive StatusPayload-Booleans:
+
+- `tts_piper_in_chain` — Sichtbarkeits-Hebel für die UI.
+- `tts_piper_configured` — spiegelt, ob `SMOLIT_TTS_PIPER_CMD`
+  einen nicht-leeren Wert trägt (analog zu
+  `stt_whisper_cpp_configured` / `llamafile_configured` /
+  `local_http_configured` / `cloud_http_configured`). Beide
+  Felder sind Booleans; der Command-String selbst landet
+  **nicht** im StatusPayload.
+
+Die Speaking-Lifecycle-Events (PR 14) tragen das `provider`-Feld
+unverändert: es spiegelt den tatsächlich aktiven Kind-Namen
+(`piper` oder `command` je nach Resolver-Ausgang).
 
 **Privacy-Rollup (UI-Projektion, kein Core-Feld).** Die Shell
 kombiniert `text_provider_cloud`, `llamafile_in_chain` und

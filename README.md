@@ -23,7 +23,8 @@ Honest MVP. Was **heute** in der Hauptlinie lebt:
 - **Text-Chat** via ABrain-CLI-Adapter; optional `llamafile_local`,
   `local_http`, `cloud_http` als Fallback-Provider in der Text-Chain.
 - **STT/TTS** command-basiert (externe Binaries). STT-Whitelist seit
-  PR 27: `command` + `whisper_cpp`. TTS-Whitelist: `command`.
+  PR 27: `command` + `whisper_cpp`. TTS-Whitelist seit PR 34:
+  `command` + `piper`.
 - **Approval UX v1** — jede `open_application`-Aktion läuft per
   Default durch die Approval-Kette (Policy v0, PR 25).
 - **Desktop Interaction**: real verdrahtet sind `open_application` und
@@ -157,7 +158,10 @@ mit einer Quick-Action „Use local-first chain"
 `whisper_cpp`. whisper.cpp-Kind ist env-only
 (`SMOLIT_STT_WHISPER_CPP_CMD`); kein Runtime-Editor.
 
-**TTS-Provider-Chain**: Whitelist `command`. Kein zweites Kind heute.
+**TTS-Provider-Chain** (Default `["command"]`): Whitelist `command`,
+`piper`. piper-Kind ist env-only (`SMOLIT_TTS_PIPER_CMD`); kein
+Runtime-Editor. Speaking-Lifecycle-Events (PR 14) tragen den real
+aktiven Kind-Namen im `provider`-Feld.
 
 **cloud_http — Opt-in-Warnung.** cloud_http ist strikt opt-in: **nicht
 Teil des Default-Chain**, nicht automatisch aktiviert. Vor dem

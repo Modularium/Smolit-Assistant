@@ -146,7 +146,10 @@ PR 7 erweitert):
   `whisper_cpp` kommt nur dann in die Kette, wenn der Nutzer sie
   explizit setzt.
 - `settings_set_tts_provider_chain` / `settings_reset_tts_provider_chain`
-  (PR 13) — spiegel für die TTS-Achse.
+  (PR 13, seit PR 34 zwei Kinds) — spiegel für die TTS-Achse.
+  Whitelist: `command`, `piper`. Default bleibt `["command"]`.
+  PR 34 fügt `piper` nur zur Whitelist hinzu; das Kind kommt nur
+  dann in die Kette, wenn der Nutzer sie explizit setzt.
 
 **PR 26 — Provider-Onboarding UX v1 (keine neuen IPC-Commands).**
 Der in der Settings-Shell ergänzte Onboarding-Block (siehe
@@ -437,10 +440,11 @@ strukturell dem Text-Readout entsprechen:
   `settings_set_{stt,tts}_provider_chain` editierbar; ein
   Reset-Pfad stellt den Default `["command"]` wieder her.
 
-Die TTS-Achse hat heute ein produktives Kind (`command`), das den
-bisherigen `SMOLIT_TTS_CMD`-Pfad 1:1 übernimmt. Die STT-Achse hat
-seit PR 27 zwei Kinds: `command` (bestehend, `SMOLIT_STT_CMD`) und
-`whisper_cpp` (PR 27, `SMOLIT_STT_WHISPER_CPP_CMD`). Beide sind
+Die STT-Achse hat seit PR 27 zwei Kinds: `command` (bestehend,
+`SMOLIT_STT_CMD`) und `whisper_cpp` (PR 27,
+`SMOLIT_STT_WHISPER_CPP_CMD`). Die TTS-Achse hat seit PR 34
+ebenfalls zwei Kinds: `command` (bestehend, `SMOLIT_TTS_CMD`) und
+`piper` (PR 34, `SMOLIT_TTS_PIPER_CMD`). Alle vier sind
 command-basierte Adapter, keine eingebundene Bibliothek und kein
 Modell-/Download-Manager. Die Chain ist env-überschreibbar über
 `SMOLIT_STT_PROVIDER_CHAIN` / `SMOLIT_TTS_PROVIDER_CHAIN`; unbekannte
@@ -476,6 +480,43 @@ Neue StatusPayload-Booleans (PR 27, additiv):
 `settings_set_stt_provider_chain`-Pfad akzeptiert `whisper_cpp` in
 der `chain`-Payload (Whitelist wurde erweitert); der Command-
 String selbst ist env-only und wird nicht über IPC gesetzt.
+
+**PR 34 — piper TTS.** Das TTS-Gegenstück zur PR-27-Linie: ein
+zweiter command-basierter Spawn-/stdin-Adapter. Eigene Env-
+Variable:
+
+- `SMOLIT_TTS_PIPER_CMD` — vollständiger Spawn-Befehl
+  (Binary + Args), z. B.
+  `piper --model /opt/piper/de-thorsten-low.onnx --output-raw`.
+  **Leer/nicht gesetzt** → das Kind bleibt `unavailable`; der
+  Resolver fällt auf den nächsten Chain-Eintrag zurück.
+
+`SMOLIT_TTS_ENABLED` gilt als globale Master-Flag für alle TTS-
+Kinds; eine dedizierte Per-Kind-Enabled-Variable gibt es bewusst
+**nicht**. Die Error-Klassifikation aus dem Command-Kind
+(`not_configured` / `timeout` / `process_missing` /
+`stdin_write_failed` / `exit_nonzero` / `disabled` / `unknown`)
+gilt 1:1 auch für `piper` — beide Kinds teilen denselben
+Spawn-/stdin-Pfad, damit `tts_provider_last_error` stabil bleibt.
+
+Die Speaking-Lifecycle-Events aus PR 14 tragen das
+`provider`-Feld unverändert: bei erfolgreichem Piper-Lauf trägt
+`speaking_ended.payload.provider` den String `"piper"` (bzw.
+`"command"`, wenn der Fallback übernimmt); `ok` / `error_class`
+werden vom Resolver gefüllt.
+
+Neue StatusPayload-Booleans (PR 34, additiv):
+
+- `tts_piper_in_chain` — ob `piper` Teil der produktiv
+  instanziierten TTS-Chain ist.
+- `tts_piper_configured` — ob `SMOLIT_TTS_PIPER_CMD` einen
+  nicht-leeren Wert hat. Unabhängig von der Chain-Mitgliedschaft,
+  analog zu `stt_whisper_cpp_configured` (PR 27).
+
+**Keine neuen IPC-Commands in PR 34.** Der bestehende
+`settings_set_tts_provider_chain`-Pfad akzeptiert `piper` in der
+`chain`-Payload (Whitelist wurde erweitert); der Command-String
+selbst ist env-only und wird nicht über IPC gesetzt.
 
 ### 2.4 Flow-Beispiele
 
@@ -1953,7 +1994,12 @@ Kommandos auf:
   kein Runtime-Editor in der Settings-Shell. Wird ignoriert, solange
   `whisper_cpp` nicht Teil der `stt_provider_chain` ist.
 - `SMOLIT_TTS_CMD`: Command, das den zu sprechenden Text auf `stdin`
-  bekommt und selbst die Ausgabe macht.
+  bekommt und selbst die Ausgabe macht. Wird vom `command`-Kind
+  konsumiert.
+- `SMOLIT_TTS_PIPER_CMD` (PR 34): gleicher stdin-Spawn-Kontrakt wie
+  `SMOLIT_TTS_CMD`, aber vom `piper`-Kind konsumiert. Env-only;
+  kein Runtime-Editor in der Settings-Shell. Wird ignoriert,
+  solange `piper` nicht Teil der `tts_provider_chain` ist.
 - Timeouts konfigurierbar über `SMOLIT_STT_TIMEOUT_SECONDS` bzw.
   `SMOLIT_TTS_TIMEOUT_SECONDS` (Default 20 s).
 - Ist das Feature an (`*_ENABLED=true`), aber kein Command gesetzt,
