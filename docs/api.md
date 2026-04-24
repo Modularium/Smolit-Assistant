@@ -2032,3 +2032,8 @@ optionale Felder:
 - `core/src/config.rs` — Env-Konfiguration (`SMOLIT_*`).
 - `ui/autoload/ipc_client.gd` — Godot-seitige Referenzimplementierung
   des Protokolls.
+- [`docs/GLOSSARY.md`](./GLOSSARY.md) — einheitliches Vokabular
+  (Approval, Audit Trail, Workflow-Overlay, Workflow Visibility
+  Overlay, Presence, Expression, Action Event, Interaction Layer,
+  Provider Chain, Stage C). Wenn diese Datei einen Begriff anders
+  nutzt, gewinnt das Glossar.

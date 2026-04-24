@@ -252,7 +252,13 @@ davon würde eine eigene Design-Entscheidung brauchen:
   `docs/wayland_always_on_top_refusal_results.md`)
 - **Avatar-Stage-C-Forschung:**
   [`docs/avatar_stage_c_research.md`](./docs/avatar_stage_c_research.md)
-- **Reviews & PR-Historie:** [`docs/reviews/`](./docs/reviews/)
-  inkl. [`PR20_DOCS_REALITY_CHECK.md`](./docs/reviews/PR20_DOCS_REALITY_CHECK.md)
+- **Reviews & PR-Historie:**
+  [`docs/reviews/`](./docs/reviews/) — Index:
+  [`docs/reviews/README.md`](./docs/reviews/README.md), inkl.
+  [`PR20_DOCS_REALITY_CHECK.md`](./docs/reviews/PR20_DOCS_REALITY_CHECK.md).
 - **Offene Arbeiten (Live-Single-Source):**
   [`docs/OPEN_WORK.md`](./docs/OPEN_WORK.md)
+- **Einheitliches Vokabular:**
+  [`docs/GLOSSARY.md`](./docs/GLOSSARY.md) — Approval, Audit Trail,
+  Workflow-Overlay, Presence, Expression, Action Event,
+  Interaction Layer, Provider Chain, Stage C.

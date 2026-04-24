@@ -42,6 +42,13 @@ Lifecycle-Reihe (inkl. Approval/Audit) ab. Ein zukünftiger PR
 kann die Konsolidierung beider Komponenten angehen — siehe
 [`docs/OPEN_WORK.md`](./OPEN_WORK.md) Workstream A.
 
+**Einheitliches Vokabular.** Begriffe wie `Approval`, `Audit Trail`,
+`Workflow-Overlay`, `Workflow Visibility Overlay`, `Presence`,
+`Expression`, `Action Event`, `Interaction Layer`, `Provider Chain`
+und `Stage C` sind in
+[`docs/GLOSSARY.md`](./GLOSSARY.md) definiert. Wenn in dieser
+Datei ein Begriff anders erscheint, gewinnt das Glossar.
+
 ---
 
 
@@ -1373,7 +1380,7 @@ keine echte Tool-, Shell-, Desktop- oder Provider-Verdrahtung.
 **Zusammenspiel Core ↔ UI.**
 
 - **Core** (`core/src/actions/plan.rs` + `App::plan_demo_action`)
-  erzeugt einen [`DemoPlan`](../../core/src/actions/plan.rs) mit
+  erzeugt einen [`DemoPlan`](../core/src/actions/plan.rs) mit
   sanitisiertem Titel (≤ 80), Summary (≤ 140), Kind (`demo_echo` /
   `demo_wait` / `noop`; unbekannt → `noop`) und Risk (`low` /
   `medium` / `high`; unbekannt → `medium`). `action_planned` geht
@@ -1418,7 +1425,7 @@ Build), bleiben die Zeilen stumm.
   Event-Klammer. Kein Shell, kein Dateisystem, kein Desktop-
   Automation-Call, keine Provider-Mutation, kein AdminBot.
 - **Keine neue Approval-Semantik.** Deny, Cancel, Timeout gehen
-  durch die bestehende [`PendingApprovalRegistry`](../../core/src/approvals/state.rs)
+  durch die bestehende [`PendingApprovalRegistry`](../core/src/approvals/state.rs)
   aus PR 17; Idempotenz ist dort enforced.
 - **Kein Persistenz-/Historien-Pfad.** Plans leben nur bis zu
   ihrem Terminal-Event.
