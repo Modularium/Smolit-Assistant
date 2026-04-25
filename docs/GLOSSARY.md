@@ -470,11 +470,16 @@ Vertrauensgrenze, Agent / Brain darf nur typisiert anfragen.
 In Smolit-Assistant fixiert
 [`ADR-0005`](./adr/ADR-0005-adminbot-safety-boundary.md) (Proposed,
 PR 45) den Safety-Boundary-Rahmen für einen hypothetischen späteren
-Smolit-Assistant ↔ AdminBot-Pfad — *bevor* irgendein Codepfad
-entsteht. Es existiert heute weiterhin keine direkte Verdrahtung;
-der Implementation-Gap bleibt bewusst offen, bis FA-1 (Capability
-Contract `docs/contracts/ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md`,
-Future Work) und FA-2 (Audit Correlation ID Spec) geschrieben sind.
+Smolit-Assistant ↔ AdminBot-Pfad. Die operative Lesart liegt seit
+PR 47 als Draft / Proposed unter
+[`docs/contracts/ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md`](./contracts/ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md):
+vier Initial-Klassen, 13-Eintrags-Deny-Baseline, 15 Pflichtfelder
+pro Capability-Eintrag, 15 benannte Failure-Modes. Es existiert
+heute weiterhin **keine direkte Verdrahtung** — keine Capability-
+Konstanten im Code, kein AdminBot-Client, kein IPC. Der
+Implementation-Gap bleibt bewusst offen, bis die Implementation-
+FAs aus AUDIT_CORRELATION_ID_SPEC §12 + CAPABILITY_VOCABULARY §12 +
+ADMINBOT_SAFETY_BOUNDARY_CONTRACT §17 gelandet sind.
 
 ## Cross-runtime UI Consistency
 

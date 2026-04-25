@@ -2227,6 +2227,16 @@ optionale Felder:
   / Proposed unter
   [`docs/contracts/CAPABILITY_VOCABULARY.md`](./contracts/CAPABILITY_VOCABULARY.md);
   eine Wire-/Code-Aufnahme passiert erst hinter eigenen Folge-PRs.
+- **Direktes AdminBot-IPC** — **gibt es heute nicht.** Smolit-
+  Assistant hat keine `adminbot_*`-IPC-Commands, keinen
+  AdminBot-Client und keinen Adapter. Der Designrahmen lebt in
+  [`ADR-0005`](./adr/ADR-0005-adminbot-safety-boundary.md), die
+  Capability-Klassen und die Deny-Baseline in
+  [`docs/contracts/ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md`](./contracts/ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md).
+  Die ABrain-Tool-Call-Beispiel-Form aus §5.4 (`tool="adminbot"`)
+  bleibt Schema-Beispiel, kein Wire-Vertrag — sie wird erst dann
+  zu einem Pfad, wenn die Implementation-FAs aus dem
+  Capability-Contract §17 gelandet sind.
 
 ---
 

@@ -133,7 +133,7 @@ folgende Linien einhalten:
 |---|------|-----------|--------------------------------------|--------|----------------------|------|--------------------|-------------------------------|-------|
 | 1 | Smolit-Assistant ↔ ABrain | Assistant → ABrain: text / reasoning request. ABrain → Assistant: text response, optional `action_intents` als Vorschläge. | Smolit-Assistant [`ADR-0003`](../adr/ADR-0003-abrain-native-integration.md); ABrain [`docs/contracts/SMOLIT_ASSISTANT_NATIVE_API.md`](https://github.com/Modularium/Agent-NN/blob/main/docs/contracts/SMOLIT_ASSISTANT_NATIVE_API.md) | draft / proposed | CLI-Adapter via `ABRAIN_CMD` (Default-Chain `["abrain"]`). Kein `abrain_native`-Provider. | medium → high, sobald `action_intents` aktiviert werden | text-only; **keine** `action_intents`-Ausführung in v1 | Cross-Repo-Contract-Review (FA-2); typed Rust-Client; **kein** direktes Tool-/Desktop-Execution; Approval-/Audit-Bridge **bevor** `action_intents` zugelassen werden | PR 39 (ADR-0003) und ABrain Native Contract Draft sind PR 43 verlinkt; Implementation ist FA-Reihe, nicht PR 44 |
 | 2 | ABrain ↔ AdminBot | ABrain → AdminBot: typisierte Tool-Calls (`adminbot_system_status`, `adminbot_system_health`, `adminbot_service_status`, …). | ABrain [`docs/integrations/adminbot/*`](https://github.com/Modularium/Agent-NN/tree/main/docs/integrations/adminbot) (`ADMINBOT_AGENT_CONTRACT.md`, `SECURITY_INVARIANTS.md`, `TOOL_SURFACE.md`); Smolit_AdminBot [`docs/integrations/`](https://github.com/Modularium/Smolit_AdminBot/tree/main/docs/integrations) + [`docs/adminbot_v2/`](https://github.com/Modularium/Smolit_AdminBot/tree/main/docs/adminbot_v2) | exists, beidseitig dokumentiert; Naming-Drift Agent-NN ↔ ABrain | außerhalb von Smolit-Assistant verdrahtet | high — privilegierte lokale Aktionen | dry-run / describe-only für jede neu hinzukommende Surface | Capability-Whitelist (fixed `tool_name`); kein generischer Shell-/`exec`-Pass-Through; Audit-Correlation-ID; Naming-Sync später | **PR 44 schreibt diese Verträge nicht um.** Pfad ist außerhalb der Smolit-Assistant-Hoheit; hier nur indexiert |
-| 3 | Smolit-Assistant ↔ AdminBot | (heute keiner — by design) | Smolit-Assistant [`ADR-0005`](../adr/ADR-0005-adminbot-safety-boundary.md) (Proposed); kanonische AdminBot-Doku in [Smolit_AdminBot `docs/adminbot_v2/`](https://github.com/Modularium/Smolit_AdminBot/tree/main/docs/adminbot_v2) + [`docs/security/`](https://github.com/Modularium/Smolit_AdminBot/tree/main/docs/security) | proposed (Safety-Boundary-Rahmen via ADR-0005); weiterhin **not implemented** | none | high — privilegierte lokale Aktionen würden Approval-/Audit-Linie kreuzen | status / read-only only (`adminbot_status`: `system.status` / `system.health` / `describe_capabilities` / dry-run) | Capability Contract (`docs/contracts/ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md`, FA-1 aus ADR-0005); Audit Correlation ID Spec; Capability-Whitelist; Approval-/Audit-Hop für jede Mutation; **kein** direkter Shell-Pfad; **kein** generischer Tool-Passthrough; **kein** Bypass des bestehenden Policy-v0-Gates; **kein** ABrain-`action_intent` → AdminBot-Shortcut; **kein** Desktop-Interaction-Backdoor | ADR-0005 fixiert den Designrahmen vor Code (PR 45). Implementation bleibt aufgeschoben hinter FA-Reihe |
+| 3 | Smolit-Assistant ↔ AdminBot | (heute keiner — by design) | Smolit-Assistant [`ADR-0005`](../adr/ADR-0005-adminbot-safety-boundary.md) (Proposed) + [`ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md`](./ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md) (Draft / Proposed seit PR 47); kanonische AdminBot-Doku in [Smolit_AdminBot `docs/adminbot_v2/`](https://github.com/Modularium/Smolit_AdminBot/tree/main/docs/adminbot_v2) + [`docs/security/`](https://github.com/Modularium/Smolit_AdminBot/tree/main/docs/security) | proposed (Safety-Boundary-Rahmen via ADR-0005 + Capability-Contract via PR 47); weiterhin **not implemented** | none | high — privilegierte lokale Aktionen würden Approval-/Audit-Linie kreuzen | status / read-only only (`admin.status.read` + `admin.capability.describe` aus Capability-Contract §8.1/8.2; Stufe 0 in ADR-0005 §5.2) | Audit-Correlation-Spec **Implementation** (Feld in `AuditEvent`, fail-closed-Verhalten); Capability-Whitelist als Code-Konstanten (CAPABILITY_VOCABULARY FA-1); pro `target_capability_id` ein eigener Contract-Eintrag (CONTRACT §17 AC-1); Approval-/Audit-Hop für jede Mutation; **kein** direkter Shell-Pfad (deny-by-default §9); **kein** generischer Tool-Passthrough; **kein** Bypass des bestehenden Policy-v0-Gates; **kein** ABrain-`action_intent` → AdminBot-Shortcut; **kein** Desktop-Interaction-Backdoor | ADR-0005 (PR 45) fixiert den Designrahmen, PR 47 fixiert die initiale Capability-Klassen-Liste + Deny-Baseline. Implementation bleibt aufgeschoben hinter FA-Reihe |
 | 4 | Smolit-Assistant ↔ OceanData | Assistant → OceanData: `decide_access` für externen Provider-Export, `query_context` / `list_available_contexts` / `fetch_context_summary` als read-only Kontext-Pfad. | Smolit-Assistant [`ADR-0004`](../adr/ADR-0004-oceandata-data-layer-integration.md); OceanData [`docs/integrations/smolit_assistant.md`](https://github.com/EcoSphereNetwork/OceanData/blob/main/docs/integrations/smolit_assistant.md) | proposed / docs-only (beidseitig) | none in Smolit-Assistant; OceanData-Seite hat ausführbare Test-Vektoren | data / privacy | read-only lokale Kontext-Summary; lokal-first (Unix-Socket / Loopback); kein Cloud-Default | Context-Provider-SPI-ADR; Sensitivity-/Provenance-Schema; bounded results; Redaction **vor** externer Weitergabe; Honoring von `AccessDecision.effect` (`deny` / `require_approval` / `allow_local_only` / …) | Workstream K Folgearbeiten: FA-1…FA-6 (siehe ADR-0004) |
 | 5 | ABrain ↔ OceanData | ABrain → OceanData: `decide_access` vor Tool-/Provider-Use; `compute_jobs` für anonymisierten Export. | OceanData [`docs/integrations/abrain.md`](https://github.com/EcoSphereNetwork/OceanData/blob/main/docs/integrations/abrain.md) ist **kanonisch**; ABrain referenziert OceanData heute nur als negative Boundary in `SMOLIT_ASSISTANT_NATIVE_API.md` §2 + §"What this contract is not" | asymmetric docs-only — kanonisch nur OceanData-seitig | none **durch Smolit-Assistant**; eine direkte ABrain ↔ OceanData-Linie würde Smolit-Assistant nicht kreuzen | data exfiltration / overbroad context, falls ABrain unrestrictierten OceanData-Zugriff bekäme | redacted summaries only (gespiegelt durch Smolit-Assistant ADR-0004 D8 + ADR-0003 §"OceanData-Boundary") | purpose-bound access; **kein** unrestrictierter Data-Lake-Zugriff; Privacy-/Redaction-Gate; Honoring `AccessDecision` exakt | **PR 44 dupliziert den OceanData-Vertrag in ABrain nicht.** Naming-Drift in der ABrain-Seite (Spiegel fehlt) ist bekannt; eine spätere Spiegel-PR liegt im ABrain-Repo, nicht hier |
 | 6 | AdminBot ↔ OceanData | (heute keiner) | **missing** beidseitig | **deferred** | none | high, falls je mutierende Pfade entstehen | none — explizit zurückgestellt | Eigener ADR vor jeder Implementation; AdminBot bleibt Executor mit Policy-Boundary, OceanData bleibt Decide-Access-Quelle ohne Aktionsrecht | by design; kein Plan in nahe Reihe |
@@ -163,6 +163,11 @@ verlinkt sie nur — sie schreibt sie nicht um.
   Audit Correlation ID Spec (Draft / Proposed, PR 46, Docs/Contract-only).
 - [`docs/contracts/CAPABILITY_VOCABULARY.md`](./CAPABILITY_VOCABULARY.md) —
   Capability Vocabulary (Draft / Proposed, PR 46, Docs/Contract-only).
+- [`docs/contracts/ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md`](./ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md) —
+  AdminBot Safety Boundary Contract (Draft / Proposed, PR 47,
+  Docs/Contract-only; vier Initial-Klassen, 13-Eintrags-Deny-Liste,
+  15 Pflichtfelder pro Capability, 15 benannte Failure-Modes;
+  erste FA-1-Lesart aus ADR-0005 §14).
 - [`docs/security/APPROVAL_UX.md`](../security/APPROVAL_UX.md) —
   Approval-UX und Policy-v0-Verdrahtung.
 - [`docs/security/AUDIT_TRAIL.md`](../security/AUDIT_TRAIL.md) —
@@ -214,15 +219,17 @@ verlinkt sie nur — sie schreibt sie nicht um.
 ## 6. Explicit gaps
 
 - **Smolit-Assistant ↔ AdminBot — implementation gap, Safety
-  Boundary ADR vorhanden.** Seit PR 45 fixiert
-  [`ADR-0005`](../adr/ADR-0005-adminbot-safety-boundary.md) den
-  Designrahmen (read-only / status-first, capability-whitelisted,
-  kein Shell-Pfad, kein generischer Tool-Passthrough, Approval-/
-  Audit-Hop für jede Mutation, lokal-first, default-off). Der
-  Implementation-Gap bleibt: kein Code, kein IPC, kein Adapter.
-  Voraussetzung für jede Code-Berührung ist FA-1
-  (`docs/contracts/ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md`,
-  Future Work) plus Audit-Correlation-ID-Spec.
+  Boundary ADR + Capability Contract vorhanden.** PR 45 fixiert
+  via [`ADR-0005`](../adr/ADR-0005-adminbot-safety-boundary.md)
+  den Designrahmen; PR 47 fixiert via
+  [`ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md`](./ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md)
+  die initiale Capability-Klassen-Liste, die Deny-Baseline, die
+  Pflichtfelder pro Eintrag und das Failure-Mode-Vokabular. Der
+  Implementation-Gap bleibt: kein Code, kein IPC, kein Adapter,
+  keine Capability-Konstanten. Voraussetzung für jede
+  Code-Berührung sind die *Implementation*-FAs aus
+  AUDIT_CORRELATION_ID_SPEC §12 + CAPABILITY_VOCABULARY §12 +
+  ADMINBOT_SAFETY_BOUNDARY_CONTRACT §17.
 - **AdminBot ↔ OceanData — missing / deferred.** AdminBot ist
   Executor mit Policy-Boundary, OceanData ist Decide-Access-Quelle
   ohne Aktionsrecht; eine direkte Kopplung wäre Architektur-
