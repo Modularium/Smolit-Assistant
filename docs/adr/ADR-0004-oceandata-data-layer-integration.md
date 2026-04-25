@@ -368,10 +368,17 @@ bindend; jeder Schritt bekommt bei Bedarf einen eigenen ADR.
   OceanData-Repo)*. OceanData-Seite spiegelt §6 dieses ADR als
   verbindliches Gegenstück: Wire-Schema, Versionierung, Auth-Modell,
   Rate-Limits, Sensitivity-Semantik.
-- **FA-2 — Context-provider SPI ADR** *(Smolit-Assistant)*. Legt
-  die neue Context-Provider-Achse im Core an (Trait, Config-
-  Namespace, Audit-Integration). Keine Implementation, nur
-  Interface-Entscheidung.
+- **FA-2 — Context-provider SPI ADR** *(Smolit-Assistant)*. Auf
+  Doku-Ebene erledigt durch
+  [`ADR-0006`](./ADR-0006-oceandata-context-provider-spi.md)
+  (PR 48, Proposed, Docs/ADR-only): Context-Provider-Achse
+  parallel zu Text/STT/TTS, Kandidaten-Kinds
+  `local_static_context` / `oceandata_context`, Object-Model für
+  ProviderConfig + Request/Response, Capability-Mapping auf
+  `data.context.query` / `data.context.summary` /
+  `data.decide.access`, 13 benannte Failure-Modes, Audit-/
+  Correlation-Verzahnung. Implementation bleibt aufgeschoben
+  hinter ADR-0006 §17 (OC-1…OC-7).
 - **FA-3 — Read-only local endpoint spike** *(Smolit-Assistant)*.
   Erster Client hinter Feature-Flag, Unix-Socket / Loopback,
   Wire-Schema aus §6 geprüft. Kein Action-Pfad, kein Write-Pfad.
