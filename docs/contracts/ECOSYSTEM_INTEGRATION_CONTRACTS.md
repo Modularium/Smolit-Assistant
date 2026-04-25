@@ -159,6 +159,10 @@ verlinkt sie nur — sie schreibt sie nicht um.
   AdminBot Safety Boundary for Smolit-Assistant (Proposed,
   Docs/ADR-only; schließt den Smolit-Assistant ↔ AdminBot
   Boundary-Rahmen, Implementation bleibt aufgeschoben).
+- [`docs/contracts/AUDIT_CORRELATION_ID_SPEC.md`](./AUDIT_CORRELATION_ID_SPEC.md) —
+  Audit Correlation ID Spec (Draft / Proposed, PR 46, Docs/Contract-only).
+- [`docs/contracts/CAPABILITY_VOCABULARY.md`](./CAPABILITY_VOCABULARY.md) —
+  Capability Vocabulary (Draft / Proposed, PR 46, Docs/Contract-only).
 - [`docs/security/APPROVAL_UX.md`](../security/APPROVAL_UX.md) —
   Approval-UX und Policy-v0-Verdrahtung.
 - [`docs/security/AUDIT_TRAIL.md`](../security/AUDIT_TRAIL.md) —
@@ -232,14 +236,20 @@ verlinkt sie nur — sie schreibt sie nicht um.
   weiterhin als „Agent-NN". ABrain-Repo wurde umbenannt; die
   AdminBot-Seite zieht noch nicht mit. Ein Naming-Sync-PR liegt
   im AdminBot-Repo, nicht hier.
-- **Kein gemeinsamer Audit Correlation ID Spec.** Smolit-Assistant
-  Audit (`docs/security/AUDIT_TRAIL.md`), ABrain-Adapter und
-  AdminBot-IPC tragen je eigene Correlation-Felder; ein
-  cross-repo Vertrag dafür fehlt.
-- **Kein gemeinsames Capability Vocabulary.** AdminBot kennt
-  `adminbot_system_status` etc.; ABrain kennt `action_intents`;
-  Smolit-Assistant kennt Approval-`category`. Eine cross-repo
-  Capability-Vokabular-Definition existiert noch nicht.
+- **Audit Correlation ID Spec — Draft seit PR 46.** Cross-repo
+  Verhaltensvertrag liegt unter
+  [`docs/contracts/AUDIT_CORRELATION_ID_SPEC.md`](./AUDIT_CORRELATION_ID_SPEC.md)
+  (Status: Draft / Proposed, Docs-only). Implementation-Gap
+  bleibt offen: `AuditEvent` und Action-Events tragen heute kein
+  `correlation_id`-Feld. Voraussetzung für
+  `correlation_id_required = true` in
+  [`ADR-0005`](../adr/ADR-0005-adminbot-safety-boundary.md).
+- **Capability Vocabulary — Draft seit PR 46.** Cross-repo
+  Naming-Vertrag liegt unter
+  [`docs/contracts/CAPABILITY_VOCABULARY.md`](./CAPABILITY_VOCABULARY.md)
+  (Status: Draft / Proposed, Docs-only). Implementation-Gap
+  bleibt offen: keine Runtime-Registry, keine String-Konstanten
+  im Code; AdminBot-/OceanData-/ABrain-Mappings sind dokumentarisch.
 
 ## 7. Capability boundaries
 
@@ -368,14 +378,16 @@ Folge-PRs in **diesem** Repo (Reihenfolge nicht bindend):
   *missing by design*-Lücke aus §6. Implementation weiterhin
   aufgeschoben hinter FA-1 (Capability Contract) + FA-2 (Audit
   Correlation ID Spec).
-- **Audit Correlation ID Spec.** Cross-Repo-Korrelation zwischen
-  Smolit-Assistant Audit, ABrain-Adapter und AdminBot-Aktionen.
-  Idealerweise auf der ADR-Ebene, weil sie mehrere Verträge
-  gleichzeitig formt.
-- **Capability Vocabulary.** Gemeinsames Vokabular für
-  Capability-Klassen (`status_read`, `service_status`,
-  `action_intent`, `context_summary`, …), das die Verträge in §4
-  konsumieren.
+- **Audit Correlation ID Spec — Draft seit PR 46**
+  ([`docs/contracts/AUDIT_CORRELATION_ID_SPEC.md`](./AUDIT_CORRELATION_ID_SPEC.md)).
+  Implementation aufgeschoben: `correlation_id`-Feld in
+  `AuditEvent`, in Action-Events und in Cross-Repo-Wires
+  entsteht erst in eigenen Folge-PRs hinter Feature-Flag.
+- **Capability Vocabulary — Draft seit PR 46**
+  ([`docs/contracts/CAPABILITY_VOCABULARY.md`](./CAPABILITY_VOCABULARY.md)).
+  Implementation aufgeschoben: keine Runtime-Registry, keine
+  String-Konstanten im Code; AdminBot-/OceanData-/ABrain-Mappings
+  bleiben dokumentarisch bis zu eigenen Folge-PRs.
 - **ABrain ↔ OceanData Handoff Review.** Kein neuer Vertrag —
   Review der bestehenden OceanData-seitigen Verträge und der
   Smolit-Assistant-Linie aus ADR-0003 / ADR-0004 auf

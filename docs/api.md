@@ -2210,6 +2210,23 @@ optionale Felder:
 - `session_reset` — explizites Beenden/Zurücksetzen einer Session.
 - Vision-/Sensor-Modalitäten — erst nach Klärung von Datenschutz und
   Transportformat.
+- `correlation_id` — Cross-Repo-Trace-/Intent-Identifier. **Heute
+  nicht im Wire-Format.** Weder die WebSocket-Envelopes (Abschnitt 2),
+  noch der ABrain-CLI-Adapter (Abschnitt 3), noch der STT/TTS-
+  Command-Layer (Abschnitt 4), noch das aktuelle Action-Event-Modell
+  tragen ein `correlation_id`-Feld. Das gewünschte Verhalten —
+  Format, Lebenszyklus, Propagationspunkte, Privacy-Regeln — ist seit
+  PR 46 als Draft / Proposed unter
+  [`docs/contracts/AUDIT_CORRELATION_ID_SPEC.md`](./contracts/AUDIT_CORRELATION_ID_SPEC.md)
+  beschrieben. Eine Wire-Aufnahme passiert erst hinter eigenen
+  Folge-PRs (siehe AUDIT_CORRELATION_ID_SPEC §12).
+- `capability_id` — kanonisches Cross-Repo-Vokabular für
+  Aktions-Capabilities (`interaction.*` / `admin.*` / `data.*` /
+  `assistant.*` / `provider.*` / `audit.*`). **Heute nicht im
+  Wire-Format und keine Code-Konstanten.** Das Vokabular ist Draft
+  / Proposed unter
+  [`docs/contracts/CAPABILITY_VOCABULARY.md`](./contracts/CAPABILITY_VOCABULARY.md);
+  eine Wire-/Code-Aufnahme passiert erst hinter eigenen Folge-PRs.
 
 ---
 

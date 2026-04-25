@@ -101,3 +101,15 @@ keine Schemas, keine Build-Artefakte aus den verlinkten Repos.
   zentrale Matrix aller acht Repo-Paare, Status-, Risiko- und
   Lückenliste, Capability-/Approval-/Audit-/Privacy-/Transport-
   Erwartungen, explizite Non-goals.
+- [`AUDIT_CORRELATION_ID_SPEC.md`](./AUDIT_CORRELATION_ID_SPEC.md) —
+  Draft / Proposed (Docs-only). Format, Lebenszyklus,
+  Propagationspunkte und cross-repo Erwartungen einer zukünftigen
+  gemeinsamen `correlation_id`. Voraussetzung für
+  `correlation_id_required = true` in
+  [`ADR-0005`](../adr/ADR-0005-adminbot-safety-boundary.md).
+- [`CAPABILITY_VOCABULARY.md`](./CAPABILITY_VOCABULARY.md) —
+  Draft / Proposed (Docs-only). Naming-Regeln und initiales
+  Vokabular (`interaction.*` / `admin.*` / `data.*` /
+  `assistant.*` / `provider.*` / `audit.*`); Mappings auf
+  bestehende Smolit-Assistant-Code-Identitäten und auf zukünftige
+  AdminBot- und OceanData-Surfaces. Keine Runtime-Registry.

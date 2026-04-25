@@ -290,17 +290,41 @@ Adapter, kein Provider-Kind. Begleitend aktualisiert:
 Pair 3 (jetzt mit ADR-0005-Verweis) und §6 *Explicit gaps*
 (Lücke ist jetzt nur noch Implementation-Gap).
 
-**Folgearbeiten aus PR 45 (alle Docs/ADR-only oder hinter
+**Erledigt in PR 46 (2026-04-25, Docs/Contract-only):** zwei
+cross-repo Verträge für die noch fehlenden Grundlagen liegen jetzt
+im Repo vor —
+[`docs/contracts/AUDIT_CORRELATION_ID_SPEC.md`](./contracts/AUDIT_CORRELATION_ID_SPEC.md)
+(Draft / Proposed: Format, Lebenszyklus, Propagationspunkte,
+cross-repo Erwartungen, Privacy/Sanitization, Failure-Modes) und
+[`docs/contracts/CAPABILITY_VOCABULARY.md`](./contracts/CAPABILITY_VOCABULARY.md)
+(Draft / Proposed: Naming-Regeln, sechs Kategorien
+`interaction.*` / `admin.*` / `data.*` / `assistant.*` /
+`provider.*` / `audit.*`, initiales Vokabular mit Mappings auf
+bestehende Smolit-Assistant-Code-Identitäten und auf zukünftige
+AdminBot-/OceanData-Surfaces, Risk-Levels, Pflicht-Metadaten).
+ADR-0005 FA-2/FA-3-Verweise und der Matrix-Eintrag „Explicit gaps"
+sind aktualisiert: die *dokumentarische* Lücke ist geschlossen,
+der *Implementation*-Gap bleibt offen — keine Runtime-Registry,
+kein `correlation_id`-Feld im Code, keine String-Konstanten.
+
+**Folgearbeiten aus PR 45 + PR 46 (alle Docs/ADR-only oder hinter
 expliziem Opt-in, kein zwingender Code-PR in der nahen Reihe):**
 
 - **FA-1.** `docs/contracts/ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md`
   — Capability Contract pro zugelassener Capability (Stufe 0
   read-only zuerst). Docs-only.
-- **FA-2.** Audit Correlation ID Spec (cross-repo, aus PR 44 §12).
-  Voraussetzung für `correlation_id_required = true`.
-- **FA-3.** Capability Vocabulary (cross-repo, aus PR 44 §12).
+- **FA-2.** ~~Audit Correlation ID Spec~~ — **erledigt in PR 46**
+  ([`docs/contracts/AUDIT_CORRELATION_ID_SPEC.md`](./contracts/AUDIT_CORRELATION_ID_SPEC.md)).
+  *Implementation* (Feld in `AuditEvent`, Cross-Repo-Wire,
+  fail-closed-Verhalten) hingegen bleibt eigene Folge-PR-Reihe
+  (siehe AUDIT_CORRELATION_ID_SPEC §12 FA-1…FA-6).
+- **FA-3.** ~~Capability Vocabulary~~ — **erledigt in PR 46**
+  ([`docs/contracts/CAPABILITY_VOCABULARY.md`](./contracts/CAPABILITY_VOCABULARY.md)).
+  *Implementation* (Code-Konstanten, Validation-Tests, UI-Display-
+  Names) bleibt eigene Folge-PR-Reihe (siehe
+  CAPABILITY_VOCABULARY §12 FA-1…FA-6).
 - **FA-4.** Spike-PR (Stufe 0 read-only) hinter Feature-Flag, erst
-  nach FA-1 + FA-2.
+  nach FA-1 + Implementation-Teil von FA-2.
 - **FA-5.** Approval-Card-Erweiterung für AdminBot-Capabilities.
 - **FA-6.** Mutating spike (Stufe 1 dry-run) hinter Feature-Flag,
   erst nach FA-4 + FA-5.
