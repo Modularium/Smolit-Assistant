@@ -321,19 +321,51 @@ für die vollständige Reality-Check-Form.
 | 48 | K | **OceanData Context Provider SPI ADR** (2026-04-25, gelandet, **Docs/ADR-only**, Status **Proposed**): [`ADR-0006`](./docs/adr/ADR-0006-oceandata-context-provider-spi.md) schließt ADR-0004 §11 FA-2 auf Doku-Ebene. Context-Provider-Achse parallel zu Text/STT/TTS (kein Eintrag in `KNOWN_TEXT_KINDS`); Kandidaten-Kinds `local_static_context` / `oceandata_context`; Kandidaten-Operationen `list_available_contexts` / `query_context` / `fetch_context_summary` / `inspect_context_item_metadata`; ProviderConfig-Form (`enabled` default `false`, `transport` ∈ `unix` / `loopback_http`, `auth_mode` ∈ `local_peer` / `bearer`, `max_items_default`, `max_summary_chars`, `allow_sensitive` / `allow_external_forwarding` default `false`); ContextQueryRequest/Response-Form mit `contract_version`, `request_id`, optionaler `correlation_id`, `redaction = local_only` / `external_safe`, strukturierte `provenance`; Capability-Mapping auf `data.context.query` / `data.context.summary` / `data.decide.access`; 13 benannte Failure-Modes inkl. `context_scope_not_allowed` / `sensitivity_not_allowed` / `provenance_missing` / `too_many_results` / `redaction_required` / `external_forwarding_denied`; Audit-Felder (`provider_kind`, `context_scope`, `purpose`, `result_count`, `sensitivity_max`, `used_for_action`, `external_forwarding`); ABrain bekommt OceanData-Kontext **nur** bounded/redacted **über** Smolit-Assistant; AdminBot ↔ OceanData direkter Pfad explizit deferred. Begleitend: ADR-0004 FA-2 mit Link versehen, Matrix Pair 4 + Pair 5 aktualisiert, CAPABILITY_VOCABULARY §5.4 + AUDIT_CORRELATION_ID_SPEC §7 verlinken ADR-0006. **Keine** Code-Änderung, **keine** Eintrag in `KNOWN_TEXT_KINDS`, **kein** ContextProvider-Trait, **kein** neuer Provider-Kind, **kein** neuer IPC-Command, **keine** OceanData-Repo-Änderung, **keine** Privacy-/Redaction-Implementation, **keine** Vector-DB-Exposition, **keine** Sync-/Write-Operationen, **kein** Cloud-/Remote-Default. Implementation bleibt aufgeschoben hinter eigenen Folge-PRs (siehe ADR-0006 §17 OC-1…OC-7). |
 | 49 | A | **Roadmap Sync after Contracts PR 43–48** (2026-04-25, gelandet, **Docs-only**): Reality-Check-Review unter [`docs/reviews/PR49_ROADMAP_SYNC_AFTER_CONTRACTS.md`](./docs/reviews/PR49_ROADMAP_SYNC_AFTER_CONTRACTS.md). Synchronisiert ROADMAP, OPEN_WORK und Reviews-Index nach der PR-43–48-Contract-Serie. Korrigiert Drift: §6.3-Header zählte „drei Folge-PRs", real waren es vier (PR 45 + 46 + 47 + 48); OPEN_WORK Workstream I trug noch „PR 48 — Release Packaging Decision ADR" (jetzt verschoben hinter die Code-Spike-Reihe); §6.4 setzt die neue PR-50–55-Sequenz (konservativ — Docs/ADR vor Code: PR 50 Release Gate Review, PR 51 Packaging ADR, PR 52 Accessibility RPC FA-1, PR 53 Correlation ID Runtime, PR 54 Capability Constants Runtime, PR 55 OceanData Privacy/Redaction ADR). Runtime-Baseline durch PR 43–48 unverändert: kein `abrain_native` / `oceandata_context` / AdminBot-Adapter; `correlation_id` und `capability_id` weiter nicht im Code; `KNOWN_TEXT_KINDS` unverändert; `cargo test` 398 passed; `settings-shell-smoke` PASS. **Keine** Code-Änderung, **keine** ADR-Neuanlage, **keine** Contract-Neuanlage, **keine** IPC-/Provider-/UI-Änderung, **keine** Änderung an ABrain / Smolit_AdminBot / OceanData / smolitux-ui. |
 
-### 6.4 Vorgeschlagene Folge-PRs nach PR 49 (nicht bindend, ohne Termin)
+### 6.4 PR 50 + Folge-PRs nach v0.2-Gate (nicht bindend, ohne Termin)
 
 Konservative Reihenfolge — Docs/ADR vor Code; Begründung in
 [`docs/reviews/PR49_ROADMAP_SYNC_AFTER_CONTRACTS.md` §6](./docs/reviews/PR49_ROADMAP_SYNC_AFTER_CONTRACTS.md).
 
 | PR | Workstream | Gegenstand |
 | -- | ---------- | ---------- |
-| 50 | A | **v0.2 Release Gate Review** (Vorschlag, Docs-only): Reality-Check pro Workstream A–K analog [PR31 Roadmap Checkpoint](./docs/reviews/PR31_ROADMAP_CHECKPOINT.md). Was ist heute auf main, was bleibt nicht implementiert. Keine Code-Änderung. |
+| 50 | A | **v0.2 Release Gate Review** (2026-04-25, gelandet, **Docs-only**): Reality-Check unter [`docs/reviews/PR50_V0_2_RELEASE_GATE_REVIEW.md`](./docs/reviews/PR50_V0_2_RELEASE_GATE_REVIEW.md). Bewertung: **conditionally ready for v0.2 candidate** nach vier Verifikations-/Konfigurations-Punkten (GitHub-CI grün auf main, README/SETUP-Befehle korrekt, ROADMAP/OPEN_WORK keine Runtime-Drift, Branch-Protection konfiguriert oder dokumentiert). Lokal: `cargo test` 398 passed; alle fünf CI-Smokes (`settings-shell-smoke`, `avatar-render-polish-smoke`, `workflow-visibility-smoke`, `approval-card-smoke`, `audit-panel-smoke`) PASS. PR 43–48 haben Runtime-State **nicht** verändert; alle ADR/Contract-Drafts sind als Future gerahmt. **Kein** Tag, **kein** Version-Bump, **kein** Packaging in diesem PR — PR 50 ist ein Gate, kein Release. |
 | 51 | I | **Packaging Decision ADR** (Vorschlag, Docs/ADR-only): `.deb` vs. AppImage vs. Flatpak, Signing-Chain, Auto-Update-Linie. ADR vor Code. **Keine** Implementation. |
 | 52 | F | **Accessibility RPC FA-1 Spike** (Vorschlag, Code-Spike, default-off): Erster Code-Eintritt für [`ADR-0002`](./docs/adr/ADR-0002-accessibility-rpc-readonly.md) FA-1 — read-only `GetChildren` auf Registry-Root hinter `accessibility_rpc`-Feature-Flag. **Kein** `DoAction`, **keine** Input-Injection, **kein** Tree-Walk über eine Tiefe hinaus, **kein** Approval-Bypass. |
 | 53 | E | **Correlation ID Runtime Spike** (Vorschlag, Code-Spike, default-off): `correlation_id`-Feld in `AuditEvent` hinter Feature-Flag, additiv. Implementation-Eintritt für [AUDIT_CORRELATION_ID_SPEC §12 FA-1](./docs/contracts/AUDIT_CORRELATION_ID_SPEC.md). **Keine** Wire-Pflicht, **kein** Cross-Repo-Echo, **kein** fail-closed-Verhalten in v1. |
 | 54 | E | **Capability Constants Runtime Spike** (Vorschlag, Code-Spike, additiv): `pub const`-String-Konstanten für die heute live Capabilities (`interaction.*` / `assistant.*` / `provider.*` / `audit.*`) plus Validation-Tests. **Keine** Runtime-Registry-Datenstruktur, **keine** Policy-Engine. Implementation-Eintritt für [CAPABILITY_VOCABULARY §12 FA-1](./docs/contracts/CAPABILITY_VOCABULARY.md). |
 | 55 | K | **OceanData Privacy / Redaction ADR** (Vorschlag, Docs/ADR-only): Eintrittsbedingung für `redaction = external_safe` aus [ADR-0006 §10](./docs/adr/ADR-0006-oceandata-context-provider-spi.md) + [ADR-0004 FA-5](./docs/adr/ADR-0004-oceandata-data-layer-integration.md). **Keine** Implementation, **kein** Provider-Kind, **kein** IPC. |
+
+### 6.5 v0.2 Release Gate
+
+> **Status (2026-04-25):** *Conditionally ready for v0.2 candidate.*
+> Vollständiges Reality-Check-Review unter
+> [`docs/reviews/PR50_V0_2_RELEASE_GATE_REVIEW.md`](./docs/reviews/PR50_V0_2_RELEASE_GATE_REVIEW.md).
+
+**Gate-Bedingungen** (alle vor einem v0.2-Tag prüfen, in PR 50
+nicht selbst erledigt — PR 50 ist Gate, kein Release):
+
+1. Letzte CI-Aktion auf `main` ist grün (`core-test` + `ui-smoke`).
+2. README + SETUP Smoke-Befehle stimmen mit dem Repo überein
+   (heute der Fall).
+3. ROADMAP / OPEN_WORK haben keine Runtime-Drift gegen ADRs /
+   Contracts (heute der Fall nach PR 49).
+4. Branch-Protection ist gemäß
+   [`docs/ci/BRANCH_PROTECTION.md`](./docs/ci/BRANCH_PROTECTION.md)
+   konfiguriert oder als manueller Pre-Tag-Schritt dokumentiert.
+
+**Blocker für v0.2** sind ausschließlich die vier Punkte oben.
+**Nicht-Blocker:** ABrain Native Integration, AdminBot
+Integration, OceanData Integration, `correlation_id`/
+`capability_id`-Runtime, Accessibility RPC FA-1, Packaging,
+Persistent Audit, Token-Implementation, Wayland-Always-on-top,
+`type_text`/`send_shortcut`-Backends. Code-Spikes (PR 52 / 53 /
+54) entstehen **nach** dem v0.2-Tag, nicht davor.
+
+**Kein Tag wird in PR 50 gesetzt.** Ein zukünftiger
+Release-PR setzt den Tag, sobald die vier Bedingungen erfüllt
+sind und ein expliziter Operator-Approval erfolgt. Bis dahin gilt:
+kein Version-Bump im Code, kein `Cargo.toml`-Versionssprung, kein
+GitHub-Release, kein Packaging-Format.
 
 ---
 
