@@ -17,11 +17,17 @@ Zustand nach der PR-21–30-Stabilisierungsserie). Sammelblick:
 **Status:** aktiv. PR 20 (Docs Reality Check), PR 24 (Smolitux Design
 Contract ADR), **PR 28 (2026-04-24) — `presence_desktop_interaction.md`
 auf Ist-Zustand getrimmt (1096 → 491 Zeilen, 12-Abschnitt-Struktur,
-Zielbild konsequent in Future Work / Non-goals isoliert)** und
+Zielbild konsequent in Future Work / Non-goals isoliert)**,
 **PR 44 (2026-04-25) — Ecosystem Integration Contracts Matrix**
 ([`docs/contracts/ECOSYSTEM_INTEGRATION_CONTRACTS.md`](./contracts/ECOSYSTEM_INTEGRATION_CONTRACTS.md),
 Docs-only, indexiert ABrain / AdminBot / OceanData / smolitux-ui
-ohne diese Repos anzufassen) sind gelandet.
+ohne diese Repos anzufassen) und **PR 49 (2026-04-25) — Roadmap
+Sync after Contracts PR 43–48** ([`docs/reviews/PR49_ROADMAP_SYNC_AFTER_CONTRACTS.md`](./reviews/PR49_ROADMAP_SYNC_AFTER_CONTRACTS.md);
+Reality-Check, der die tatsächliche Sequenz PR 43–48 dokumentiert,
+Roadmap §6.3-Header von „drei" auf „vier" Folge-PRs korrigiert,
+OPEN_WORK Workstream I PR-48-Eintrag auf PR 51 verschiebt und die
+neue konservative PR-50–55-Sequenz setzt; Runtime-Baseline
+unverändert) sind gelandet.
 
 **Folgearbeiten aus PR 44 (alle Docs/ADR-only, kein Code, in-scope
 für dieses Repo):**
@@ -626,10 +632,14 @@ eine GitHub-Actions-Entscheidung; Packaging bleibt weiter aufgeschoben.
 
 **Nächster kleinster PR (Future Work, nicht priorisiert):**
 
-- **PR 48 — Release Packaging Decision ADR.** Welche Distributionen
-  zuerst (Ubuntu 24.04 gesetzt; Fedora / Arch / NixOS offen),
-  welches Format (`.deb` vs. AppImage vs. Flatpak), wie Signing-
-  Chain funktioniert. **Rein ADR, keine Implementation**, vor Code.
+- **PR 51 — Release Packaging Decision ADR** *(Vorschlag, Docs/
+  ADR-only)*. Welche Distributionen zuerst (Ubuntu 24.04 gesetzt;
+  Fedora / Arch / NixOS offen), welches Format (`.deb` vs.
+  AppImage vs. Flatpak), wie Signing-Chain funktioniert. **Rein
+  ADR, keine Implementation**, vor Code. *Hinweis:* PR-Nummer von
+  ehemals PR 48 verschoben — PR 48 ist seit der Contract-Serie
+  ADR-0006 (OceanData Context Provider SPI), siehe
+  [`docs/reviews/PR49_ROADMAP_SYNC_AFTER_CONTRACTS.md`](./reviews/PR49_ROADMAP_SYNC_AFTER_CONTRACTS.md).
 - **CI-Folgearbeit (ohne Priorität):** optionale Cross-Linux-Matrix
   (Ubuntu 24.04 + Arch-Container) sobald Packaging-ADR landet,
   Rust-toolchain-Pinning via `rust-toolchain.toml` wenn Edition-/
