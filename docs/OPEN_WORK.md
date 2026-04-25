@@ -775,23 +775,47 @@ OceanData-Seite (FA-1) entsteht kein Smolit-Assistant-Code.
   Code-Änderung, **keine** IPC-Commands, **keine** neue
   Abhängigkeit.
 
+**Erledigt in PR 48 (2026-04-25, Docs/ADR-only):**
+[`ADR-0006`](./adr/ADR-0006-oceandata-context-provider-spi.md)
+schließt ADR-0004 §11 FA-2 auf Doku-Ebene. Context-Provider-
+Achsen-Form fixiert (parallel zu Text/STT/TTS, kandidaten Kinds
+`local_static_context` / `oceandata_context`); ProviderConfig +
+Request/Response Object-Model (`contract_version`, `request_id`,
+optionale `correlation_id`, `redaction = local_only|external_safe`,
+`include_provenance`); Capability-Mapping auf
+`data.context.query` / `data.context.summary` /
+`data.decide.access`; 13 benannte Failure-Modes
+(`context_scope_not_allowed`, `sensitivity_not_allowed`,
+`provenance_missing`, `too_many_results`, `redaction_required`,
+`external_forwarding_denied`, …); explizite Ausschlüsse: keine
+Write-/Sync-/Vector-DB-Operationen, niemals in
+`text_provider_chain`, default-off. Begleitend: ADR-0004 FA-2 mit
+Link versehen, Matrix Pair 4 + Pair 5 aktualisiert,
+CAPABILITY_VOCABULARY §5.4 + AUDIT_CORRELATION_ID_SPEC §7
+verlinken ADR-0006.
+
 **Nächster kleinster PR (Future Work, nicht priorisiert):**
 
 - **FA-1 — OceanData-side contract doc** *(cross-repo)*. OceanData-
-  Repo spiegelt ADR-0004 §6 als verbindliches Wire-Schema
-  (Versionierung, Auth-Modell, Rate-Limits, Sensitivity-Semantik).
-- **FA-2 — Context-provider SPI ADR** *(Smolit-Assistant)*. Legt
-  die neue **Context-Provider-Achse** (parallel zu text/stt/tts)
-  als Trait / Config-Namespace / Audit-Integration fest. Keine
-  Implementation, nur Interface.
+  Repo spiegelt ADR-0004 §6 / ADR-0006 §7 als verbindliches
+  Wire-Schema (Versionierung, Auth-Modell, Rate-Limits,
+  Sensitivity-Semantik).
+- **FA-2 — Context-provider SPI ADR** — **erledigt in PR 48**
+  ([`ADR-0006`](./adr/ADR-0006-oceandata-context-provider-spi.md)).
+  *Implementation* (Trait, Config-Namespace, Spike-Client) bleibt
+  eigene Folge-PR-Reihe (siehe ADR-0006 §17 OC-1…OC-7).
 - **FA-3 — Read-only local endpoint spike** *(Smolit-Assistant)*.
   Erster Client hinter Feature-Flag, Unix-Socket / Loopback,
-  Wire-Schema aus §6 geprüft.
+  Wire-Schema aus ADR-0004 §6 + ADR-0006 §7 geprüft. Vorbedingung:
+  AUDIT_CORRELATION_ID_SPEC FA-1 (`correlation_id` in `AuditEvent`)
+  + CAPABILITY_VOCABULARY FA-1 (Code-Konstanten).
 - **FA-4 — Sensitivity-/Provenance-Schema** als eigener ADR.
 - **FA-5 — Privacy/Redaction-Layer** vor externer Weitergabe
-  (Cloud-fähige ABrain, `cloud_http`).
+  (Cloud-fähige ABrain, `cloud_http`); Eintrittsbedingung für
+  `redaction = external_safe` aus ADR-0006.
 - **FA-6 — ABrain-context handoff ADR** *(cross-repo)*. Format
-  des redacted Summaries, niemals OceanData-Handle-Pass-Through.
+  des redacted Summaries, niemals OceanData-Handle-Pass-Through;
+  spiegelt ADR-0006 §13.
 
 **Nicht-Ziele (unverändert):**
 

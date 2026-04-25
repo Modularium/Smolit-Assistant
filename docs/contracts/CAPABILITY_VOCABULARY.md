@@ -154,7 +154,7 @@ Spiegel des heute laufenden Code.
 | `admin.action.dry_run` | AdminBot dry-run für jede Capability mit `dry_run_supported` | `medium` | `true` | `true` | **Pflicht** | not implemented (ADR-0005 Stufe 1) |
 | `admin.action.execute` | AdminBot Mutation, z. B. `service.restart` | `high` | `true` | `true` | **Pflicht** (fail-closed bei `correlation_missing`) | not implemented (ADR-0005 Stufe 2) |
 
-### 5.4 Data (alle zukünftig — siehe ADR-0004)
+### 5.4 Data (alle zukünftig — siehe [ADR-0004](../adr/ADR-0004-oceandata-data-layer-integration.md) + [ADR-0006](../adr/ADR-0006-oceandata-context-provider-spi.md))
 
 | `capability_id` | Maps to | `risk_level` | `approval_required` | `audit_required` | `correlation_id_required` | Status |
 |-----------------|---------|--------------|---------------------|------------------|---------------------------|--------|

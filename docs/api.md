@@ -2237,6 +2237,18 @@ optionale Felder:
   bleibt Schema-Beispiel, kein Wire-Vertrag — sie wird erst dann
   zu einem Pfad, wenn die Implementation-FAs aus dem
   Capability-Contract §17 gelandet sind.
+- **Direktes OceanData-IPC / Context-Provider-Achse** — **gibt es
+  heute nicht.** Smolit-Assistant hat keine `oceandata_*`-IPC-
+  Commands, keinen Context-Provider-Trait und keinen Eintrag in
+  `KNOWN_TEXT_KINDS`. Der Boundary-Rahmen lebt in
+  [`ADR-0004`](./adr/ADR-0004-oceandata-data-layer-integration.md),
+  die SPI-Form (Achse parallel zu Text/STT/TTS, ProviderConfig,
+  Request/Response, 13 Failure-Modes, niemals in
+  `text_provider_chain`) in
+  [`ADR-0006`](./adr/ADR-0006-oceandata-context-provider-spi.md).
+  Die `correlation_id` ist auch in der OceanData-SPI **noch nicht**
+  Wire-Feld; das `request_id`-Feld aus ADR-0006 §7.1 ist eine
+  Soll-Form, keine bestehende Konstante.
 
 ---
 
