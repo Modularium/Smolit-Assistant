@@ -27,13 +27,25 @@ Reality-Check, der die tatsächliche Sequenz PR 43–48 dokumentiert,
 Roadmap §6.3-Header von „drei" auf „vier" Folge-PRs korrigiert,
 OPEN_WORK Workstream I PR-48-Eintrag auf PR 51 verschiebt und die
 neue konservative PR-50–55-Sequenz setzt; Runtime-Baseline
-unverändert) und **PR 50 (2026-04-25) — v0.2 Release Gate Review**
+unverändert), **PR 50 (2026-04-25) — v0.2 Release Gate Review**
 ([`docs/reviews/PR50_V0_2_RELEASE_GATE_REVIEW.md`](./reviews/PR50_V0_2_RELEASE_GATE_REVIEW.md);
 Bewertung *conditionally ready for v0.2 candidate* nach vier
 Verifikations-Punkten — GitHub-CI grün auf main, README/SETUP-
 Befehle stimmen, keine Runtime-Drift, Branch-Protection
 konfiguriert oder dokumentiert; lokal `cargo test` 398 passed +
-fünf CI-Smokes PASS; **kein Tag in PR 50**) sind gelandet.
+fünf CI-Smokes PASS; **kein Tag in PR 50**) und **PR 51
+(2026-04-26) — v0.2 Gate Fix**
+([`docs/reviews/PR51_V0_2_GATE_FIX.md`](./reviews/PR51_V0_2_GATE_FIX.md);
+fixt drei reale Gate-Blocker, die der PR-50-Check zutage gefördert
+hat: invalide CI-YAML in `jobs.ui-smoke.name` mit
+`${{ env.GODOT_VERSION }}`-Ausdruck, stale `workflow-state-smoke`
+in `docs/SETUP.md §2.4`, plain `cargo test` ohne XDG-Isolation
+(396/2 fail durch `~/.config/smolit-assistant/text_chain.json`-Drift);
+README + SETUP empfehlen jetzt `scripts/ci_verify.sh core` als
+kanonischen Gate-Befehl, `scripts/ci_verify.sh` und der CI-XDG-
+Block exportieren zusätzlich `XDG_DATA_HOME`; Packaging Decision
+ADR rückt von PR 51 auf PR 52; **kein** Runtime-Code, **kein**
+Tag, **kein** Version-Bump) sind gelandet.
 
 **Folgearbeiten aus PR 44 (alle Docs/ADR-only, kein Code, in-scope
 für dieses Repo):**
@@ -638,14 +650,16 @@ eine GitHub-Actions-Entscheidung; Packaging bleibt weiter aufgeschoben.
 
 **Nächster kleinster PR (Future Work, nicht priorisiert):**
 
-- **PR 51 — Release Packaging Decision ADR** *(Vorschlag, Docs/
+- **PR 52 — Release Packaging Decision ADR** *(Vorschlag, Docs/
   ADR-only)*. Welche Distributionen zuerst (Ubuntu 24.04 gesetzt;
   Fedora / Arch / NixOS offen), welches Format (`.deb` vs.
   AppImage vs. Flatpak), wie Signing-Chain funktioniert. **Rein
-  ADR, keine Implementation**, vor Code. *Hinweis:* PR-Nummer von
-  ehemals PR 48 verschoben — PR 48 ist seit der Contract-Serie
-  ADR-0006 (OceanData Context Provider SPI), siehe
-  [`docs/reviews/PR49_ROADMAP_SYNC_AFTER_CONTRACTS.md`](./reviews/PR49_ROADMAP_SYNC_AFTER_CONTRACTS.md).
+  ADR, keine Implementation**, vor Code. *Hinweis:* PR-Nummer
+  zweifach verschoben — ehemals PR 48 (vor PR 49 Sync), dann
+  PR 51 (nach PR 49 Sync), nun PR 52 (PR 51 ist v0.2 Gate Fix
+  geworden — siehe
+  [`docs/reviews/PR51_V0_2_GATE_FIX.md`](./reviews/PR51_V0_2_GATE_FIX.md)).
+  Der Packaging-ADR rückt erst nach geschlossenem v0.2-Gate.
 - **CI-Folgearbeit (ohne Priorität):** optionale Cross-Linux-Matrix
   (Ubuntu 24.04 + Arch-Container) sobald Packaging-ADR landet,
   Rust-toolchain-Pinning via `rust-toolchain.toml` wenn Edition-/
