@@ -408,9 +408,16 @@ Reihenfolge nicht bindend; alle Schritte Docs/ADR-only oder hinter
 explizitem Opt-in:
 
 - **FA-1 — `docs/contracts/ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md`.**
-  Das Capability-Contract-Dokument auf Basis von §6. Pro Capability
-  ein Eintrag, beginnend mit Stufe 0 (read-only). Docs-only, kein
-  Code.
+  Draft / Proposed seit PR 47:
+  [`docs/contracts/ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md`](../contracts/ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md).
+  Vier Initial-Klassen (`admin.status.read`,
+  `admin.capability.describe`, `admin.action.dry_run`,
+  `admin.action.execute`), 13-Eintrags-Deny-Baseline
+  (`admin.shell.execute`, `admin.sudo.execute`, …), 15 Pflichtfelder
+  pro Eintrag, 15 benannte Failure-Modes. Die *dokumentarische*
+  Lücke ist damit geschlossen; *Implementation* (Capability-
+  Konstanten, AdminBot-Client, Wire) bleibt eigene Folge-PR-Reihe
+  hinter den FAs in ADMINBOT_SAFETY_BOUNDARY_CONTRACT §17.
 - **FA-2 — Audit Correlation ID Spec.** Draft / Proposed seit
   PR 46:
   [`docs/contracts/AUDIT_CORRELATION_ID_SPEC.md`](../contracts/AUDIT_CORRELATION_ID_SPEC.md).

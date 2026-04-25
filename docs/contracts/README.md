@@ -113,3 +113,14 @@ keine Schemas, keine Build-Artefakte aus den verlinkten Repos.
   `assistant.*` / `provider.*` / `audit.*`); Mappings auf
   bestehende Smolit-Assistant-Code-Identitäten und auf zukünftige
   AdminBot- und OceanData-Surfaces. Keine Runtime-Registry.
+- [`ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md`](./ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md) —
+  Draft / Proposed (Docs-only). Erste Capability-Contract-Lesart
+  aus [`ADR-0005 §14 FA-1`](../adr/ADR-0005-adminbot-safety-boundary.md).
+  Vier Initial-Klassen (`admin.status.read`,
+  `admin.capability.describe`, `admin.action.dry_run`,
+  `admin.action.execute`), 13-Eintrags-Deny-Liste
+  (`admin.shell.execute`, `admin.sudo.execute`,
+  `admin.filesystem.write_unscoped`, `admin.secret.read`, …),
+  15 Pflichtfelder pro Capability-Eintrag, 15 benannte
+  Failure-Modes, JSON-Beispiele. Keine Runtime-Registry, kein
+  AdminBot-Client.

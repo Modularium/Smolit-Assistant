@@ -307,25 +307,48 @@ sind aktualisiert: die *dokumentarische* Lücke ist geschlossen,
 der *Implementation*-Gap bleibt offen — keine Runtime-Registry,
 kein `correlation_id`-Feld im Code, keine String-Konstanten.
 
-**Folgearbeiten aus PR 45 + PR 46 (alle Docs/ADR-only oder hinter
-expliziem Opt-in, kein zwingender Code-PR in der nahen Reihe):**
+**Erledigt in PR 47 (2026-04-25, Docs/Contract-only):**
+[`docs/contracts/ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md`](./contracts/ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md)
+schließt ADR-0005 FA-1 auf Doku-Ebene. Vier Initial-Klassen
+(`admin.status.read`, `admin.capability.describe`,
+`admin.action.dry_run`, `admin.action.execute`), 13-Eintrags-
+Deny-Baseline (`admin.shell.execute`, `admin.sudo.execute`,
+`admin.filesystem.write_unscoped`, `admin.secret.read`,
+`admin.network.exfiltrate`, `admin.process.kill_unscoped`,
+`admin.service.restart_unscoped`, `admin.package.install_unscoped`,
+`admin.user.modify`, `admin.auth.modify`, `admin.backup.delete`,
+`admin.audit.clear`, `admin.policy.disable`), 15 Pflichtfelder pro
+Capability-Eintrag, 15 benannte Failure-Modes, vier JSON-Beispiele
+(drei akzeptierte Klassen + ein abgelehntes `admin.shell.execute`).
+Begleitend: Matrix Pair 3 + ADR-0005 FA-1 + contracts/README
+verlinken den neuen Contract.
 
-- **FA-1.** `docs/contracts/ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md`
-  — Capability Contract pro zugelassener Capability (Stufe 0
-  read-only zuerst). Docs-only.
-- **FA-2.** ~~Audit Correlation ID Spec~~ — **erledigt in PR 46**
-  ([`docs/contracts/AUDIT_CORRELATION_ID_SPEC.md`](./contracts/AUDIT_CORRELATION_ID_SPEC.md)).
+**Folgearbeiten aus PR 45 + PR 46 + PR 47 (alle Docs/ADR-only oder
+hinter expliziem Opt-in, kein zwingender Code-PR in der nahen
+Reihe):**
+
+- **FA-1.** ~~`ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md`~~ — **erledigt
+  in PR 47**
+  ([`docs/contracts/ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md`](./contracts/ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md)).
+  *Implementation* (Capability-Konstanten, AdminBot-Client, Wire,
+  pro `target_capability_id` ein eigener Contract-Eintrag) bleibt
+  eigene Folge-PR-Reihe (siehe ADMINBOT_SAFETY_BOUNDARY_CONTRACT
+  §17 AC-1…AC-7).
+- **FA-2.** ~~Audit Correlation ID Spec~~ — **erledigt in PR 46**.
   *Implementation* (Feld in `AuditEvent`, Cross-Repo-Wire,
-  fail-closed-Verhalten) hingegen bleibt eigene Folge-PR-Reihe
-  (siehe AUDIT_CORRELATION_ID_SPEC §12 FA-1…FA-6).
-- **FA-3.** ~~Capability Vocabulary~~ — **erledigt in PR 46**
-  ([`docs/contracts/CAPABILITY_VOCABULARY.md`](./contracts/CAPABILITY_VOCABULARY.md)).
+  fail-closed-Verhalten) bleibt eigene Folge-PR-Reihe.
+- **FA-3.** ~~Capability Vocabulary~~ — **erledigt in PR 46**.
   *Implementation* (Code-Konstanten, Validation-Tests, UI-Display-
-  Names) bleibt eigene Folge-PR-Reihe (siehe
-  CAPABILITY_VOCABULARY §12 FA-1…FA-6).
+  Names) bleibt eigene Folge-PR-Reihe.
 - **FA-4.** Spike-PR (Stufe 0 read-only) hinter Feature-Flag, erst
-  nach FA-1 + Implementation-Teil von FA-2.
-- **FA-5.** Approval-Card-Erweiterung für AdminBot-Capabilities.
+  nach Implementation-Teil von FA-2 (`correlation_id` in
+  `AuditEvent`) + FA-3 (Capability-Konstanten).
+- **FA-5.** Approval-Card-Erweiterung für AdminBot-Capabilities
+  mit Pflichtfeldern aus
+  ADMINBOT_SAFETY_BOUNDARY_CONTRACT §10
+  (`target_capability_id`, `risk_level`, kuratiertes
+  `side_effects`-Summary, `rollback_supported`-Anzeige,
+  `timeout_ms`, `correlation_id`).
 - **FA-6.** Mutating spike (Stufe 1 dry-run) hinter Feature-Flag,
   erst nach FA-4 + FA-5.
 
