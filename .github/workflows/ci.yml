@@ -40,6 +40,16 @@ env:
   CARGO_TERM_COLOR: always
   # Pinned Godot-Version — siehe docs/SETUP.md § Godot.
   GODOT_VERSION: "4.6-stable"
+  # Pinned SHA512 des offiziellen Linux-x86_64-Zip. Quelle:
+  # https://github.com/godotengine/godot/releases/download/4.6-stable/SHA512-SUMS.txt
+  # (Eintrag für `Godot_v4.6-stable_linux.x86_64.zip`).
+  #
+  # Warum SHA512 statt SHA256: die Godot-Release-Seite publiziert
+  # ausschließlich `SHA512-SUMS.txt`. Eine selbst abgeleitete
+  # SHA256 wäre „dynamic hash derivation" und damit schwächer als
+  # der upstream-signierte Hash — deshalb verifizieren wir den
+  # stärkeren Hash, den der Projekt-Maintainer ohnehin publiziert.
+  GODOT_SHA512: "0c1bc5e8dca8f892a9a5fd0628b742f399fbd520e5f0051ecac021c0aa4ea5a8f0d237c8ed6b767b2afda7f7a4b32001118f1b04a82e335a5e35b947a1217940"
 
 jobs:
   core-test:
@@ -104,12 +114,31 @@ jobs:
             libxkbcommon0 \
             unzip
 
-      - name: Download Godot ${{ env.GODOT_VERSION }} headless
+      - name: Cache Godot ${{ env.GODOT_VERSION }} binary
+        # Single-Key-Cache — keine Matrix, kein Multi-Version-Scheme.
+        # Key bindet nur an `GODOT_VERSION`; der SHA512-Check im
+        # nächsten Schritt verifiziert die Inhalte unabhängig vom
+        # Cache-Treffer (auch ein kompromittierter Cache-Hit fällt
+        # dadurch auf).
+        id: cache-godot
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/godot-bin
+          key: godot-${{ env.GODOT_VERSION }}
+
+      - name: Download Godot ${{ env.GODOT_VERSION }} headless (if not cached)
         # Wir nutzen das offizielle Linux-Standard-Binary (nicht
         # `godot_server`), weil es `--headless` unterstützt und der
         # Smoke-Wrapper diesen Flag bereits setzt. Pinned Version →
-        # reproduzierbar; Checksum-Check wäre FA-Work (siehe
-        # docs/SETUP.md § CI / Local verification parity).
+        # reproduzierbar.
+        #
+        # PR 42 — SHA512-Verifikation gegen die upstream-publizierte
+        # `SHA512-SUMS.txt`. Fail-fast: `sha512sum -c` schlägt hart
+        # fehl, wenn der Download nicht bitweise mit `GODOT_SHA512`
+        # übereinstimmt. Der Check läuft auch bei Cache-Hit — falls
+        # das gecachte Binary unerwartet gedriftet ist (z. B. nach
+        # manueller Cache-Manipulation), bricht CI sichtbar ab.
+        if: steps.cache-godot.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           GODOT_URL="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_linux.x86_64.zip"
@@ -117,14 +146,21 @@ jobs:
           GODOT_BIN_DIR="${RUNNER_TEMP}/godot-bin"
           mkdir -p "${GODOT_BIN_DIR}"
           curl -fsSL "${GODOT_URL}" -o "${GODOT_ZIP}"
+          echo "${GODOT_SHA512}  ${GODOT_ZIP}" | sha512sum -c -
           unzip -q "${GODOT_ZIP}" -d "${GODOT_BIN_DIR}"
+          rm -f "${GODOT_ZIP}"
           # Das Archiv enthält `Godot_v<version>_linux.x86_64` — auf
           # stabilen Namen umbenennen, damit der Smoke-Wrapper `godot`
           # aufrufen kann.
           mv "${GODOT_BIN_DIR}/Godot_v${GODOT_VERSION}_linux.x86_64" \
              "${GODOT_BIN_DIR}/godot"
           chmod +x "${GODOT_BIN_DIR}/godot"
-          echo "${GODOT_BIN_DIR}" >> "$GITHUB_PATH"
+
+      - name: Register Godot in PATH
+        # Nach Cache-Hit **und** nach Download: den festen Pfad an
+        # `$GITHUB_PATH` anhängen, damit der Smoke-Wrapper `godot`
+        # ohne zusätzliche Pfad-Hacks aufrufen kann.
+        run: echo "${RUNNER_TEMP}/godot-bin" >> "$GITHUB_PATH"
 
       - name: Verify Godot is callable
         run: godot --version

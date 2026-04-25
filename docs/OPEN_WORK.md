@@ -501,17 +501,34 @@ eine GitHub-Actions-Entscheidung; Packaging bleibt weiter aufgeschoben.
   Signing-Stufe, **kein** Artifact-Upload, **kein** Release-Tagging,
   **kein** Docker-Image — das bleibt eigener Folge-PR.
 
+- **PR 42 I-CI-Hardening** *(2026-04-25, gelandet)*. Zwei kleine
+  Härtungen am bestehenden Workflow — kein Release-Engineering:
+  (1) **SHA512-Verifikation** des Godot-Binaries gegen die
+  upstream-publizierte `SHA512-SUMS.txt`; `GODOT_SHA512` ist hart
+  im Workflow gepinnt, `sha512sum -c` läuft nach dem Download und
+  bricht fail-fast. Warum SHA512 statt SHA256: Godot veröffentlicht
+  ausschließlich SHA512; eine selbst abgeleitete SHA256 wäre
+  schwächer als der upstream-signierte Hash. (2) **Binary-Cache**
+  via `actions/cache@v4` unter dem Single-Key `godot-${GODOT_VERSION}`
+  — spart 30–60 s pro Run, kein Multi-Version-Scheme. Zusätzlich:
+  Branch-Protection-Empfehlungen für `main` als Doku in
+  [`docs/ci/BRANCH_PROTECTION.md`](./ci/BRANCH_PROTECTION.md) —
+  Required checks `core-test` + `ui-smoke`, Required review 1,
+  keine Auto-merge, keine Required deployments, keine Merge-Queue.
+  **Keine** Packaging-Formate, **keine** Signing-Chain, **kein**
+  Docker, **kein** Release-Tag, **kein** Dependabot, **keine**
+  Matrix, **kein** Rust-Toolchain-Pinning.
+
 **Nächster kleinster PR (Future Work, nicht priorisiert):**
 
-- **Packaging-Entscheidungs-ADR.** Welche Distributionen zuerst
-  (Ubuntu 24.04 gesetzt; Fedora / Arch / NixOS offen), welches
-  Format (`.deb` vs. AppImage vs. Flatpak), wie Signing-Chain
-  funktioniert. **Rein ADR, keine Implementation**, vor Code.
-- **CI-Folgearbeit (ohne Priorität):** Checksum-Verifikation des
-  Godot-Binaries (heute rein Version-Pin), optionale Cross-Linux-
-  Matrix (Ubuntu 24.04 + Arch-Container) sobald Packaging-ADR
-  landet, Rust-toolchain-Pinning via `rust-toolchain.toml` wenn
-  Edition-/MSRV-Stabilität zum Thema wird.
+- **PR 48 — Release Packaging Decision ADR.** Welche Distributionen
+  zuerst (Ubuntu 24.04 gesetzt; Fedora / Arch / NixOS offen),
+  welches Format (`.deb` vs. AppImage vs. Flatpak), wie Signing-
+  Chain funktioniert. **Rein ADR, keine Implementation**, vor Code.
+- **CI-Folgearbeit (ohne Priorität):** optionale Cross-Linux-Matrix
+  (Ubuntu 24.04 + Arch-Container) sobald Packaging-ADR landet,
+  Rust-toolchain-Pinning via `rust-toolchain.toml` wenn Edition-/
+  MSRV-Stabilität zum Thema wird.
 
 **Nicht-Ziele (unverändert):**
 
