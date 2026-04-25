@@ -222,17 +222,22 @@ ADR-0003 und ADR-0004):
   keine IPC-Commands, kein Provider-Kind, keine Persistenz.
 
 **Zukünftige Rolle (Proposed in
-[ADR-0004](./adr/ADR-0004-oceandata-data-layer-integration.md)):**
+[ADR-0004](./adr/ADR-0004-oceandata-data-layer-integration.md) +
+[ADR-0006](./adr/ADR-0006-oceandata-context-provider-spi.md)):**
 OceanData ist als optionaler **Data-/Kontext-Provider** skizziert,
 der strukturierte Kontext-/Retrieval-Einträge liefert
 (`query_context` / `list_available_contexts` /
-`fetch_context_summary`). Erste Integration ist strikt read-only,
-lokal-first (Unix-Socket / Loopback), kein Cloud-Default, kein
-UI-Komponentenimport, kein Tool-/Desktop-/AdminBot-Bypass. Jede
-Action, die aus Kontext abgeleitet würde, läuft durch den
-bestehenden Approval-/Policy-/Audit-Gate. ABrain bekommt **keinen**
-unrestrictierten OceanData-Zugriff — nur indirekt, als redacted
-Summary über den Core.
+`fetch_context_summary`). Die SPI-Form (Achse parallel zu
+Text/STT/TTS, kandidaten Kinds `local_static_context` /
+`oceandata_context`, ProviderConfig + Request/Response-Object-Model,
+13 Failure-Modes) ist seit PR 48 in ADR-0006 fixiert. Erste
+Integration ist strikt read-only, lokal-first (Unix-Socket /
+Loopback), kein Cloud-Default, kein UI-Komponentenimport, kein
+Tool-/Desktop-/AdminBot-Bypass; **niemals** in
+`text_provider_chain` aufgenommen. Jede Action, die aus Kontext
+abgeleitet würde, läuft durch den bestehenden Approval-/Policy-/
+Audit-Gate. ABrain bekommt **keinen** unrestrictierten OceanData-
+Zugriff — nur indirekt, als redacted Summary über den Core.
 
 Der ADR ist Docs-only; es existiert kein Code, keine IPC-
 Commands, kein Context-Provider-Trait. Alle Folgearbeiten stehen

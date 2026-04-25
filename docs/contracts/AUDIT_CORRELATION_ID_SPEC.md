@@ -203,8 +203,8 @@ weitergegeben** werden, sobald die Implementation existiert:
 | AdminBot describe-only / status-read (zukünftig) | `request_id` (AdminBot IPC) | empfohlen | Stufe 0 in ADR-0005, kein Approval, aber Audit-Sichtbarkeit |
 | AdminBot dry-run (zukünftig) | `request_id` | **Pflicht** | Stufe 1 in ADR-0005 |
 | AdminBot execute (zukünftig) | `request_id` | **Pflicht** | Stufe 2 in ADR-0005, fail-closed bei `correlation_missing` |
-| OceanData `decide_access` (zukünftig) | `actor` (Audit-Hint) | **Pflicht**, wenn Decision in Action fließt | `UsageRecord` server-seitig korreliert über Audit-Trail |
-| OceanData `query_context` (zukünftig) | — | empfohlen | Pflicht, wenn Ergebnis in Action fließt |
+| OceanData `decide_access` (zukünftig) | `actor` (Audit-Hint) | **Pflicht**, wenn Decision in Action fließt | `UsageRecord` server-seitig korreliert über Audit-Trail; SPI-Form siehe [ADR-0006](../adr/ADR-0006-oceandata-context-provider-spi.md) |
+| OceanData `query_context` (zukünftig) | `request_id` (per-call, lokal aus ADR-0006 §7.1) | empfohlen | Pflicht, wenn Ergebnis in Action fließt; SPI-Form siehe [ADR-0006](../adr/ADR-0006-oceandata-context-provider-spi.md) §7 |
 | `action_started` | `action_id` | **Pflicht** | |
 | `action_completed` / `action_failed` / `action_cancelled` | `action_id` | **Pflicht** | |
 | `audit_recent` Eintrag-Read | `audit_id` | nicht erforderlich | siehe §9 zur Anti-Rekursion |
