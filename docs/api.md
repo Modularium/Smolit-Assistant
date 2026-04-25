@@ -2133,6 +2133,15 @@ ADR-0003 für die verbindliche Messlatte):
 {"type":"tool_call","tool":"adminbot","payload":{}}
 ```
 
+> **Heute nicht implementiert. ADR-0003 fixiert „keine Tool-Call-
+> Execution in der ersten Version". Speziell für `tool="adminbot"`
+> ergänzt [`ADR-0005`](./adr/ADR-0005-adminbot-safety-boundary.md)
+> den Smolit-Assistant ↔ AdminBot Safety-Boundary-Rahmen: kein
+> direkter AdminBot-IPC, kein Shell-Pfad, kein generischer
+> Tool-Passthrough; jede zukünftige AdminBot-Capability läuft über
+> Capability-Whitelist + Approval-/Audit-Hop. Der hier gezeigte
+> JSON-Frame ist Schema-Beispiel, kein Wire-Vertrag.**
+
 Bis dieses API existiert, bleibt der CLI-Adapter aus Abschnitt 3 die
 einzige reale Quelle von ABrain-Antworten. Das WebSocket-Protokoll aus
 Abschnitt 2 muss für eine native ABrain-Schicht **nicht** geändert werden,

@@ -275,6 +275,36 @@ Abschnitt „Coverage für reale Interaction-Actions (PR 32)".
   `SMOLIT_INTERACTION_OPEN_APP_CMD` tauchen **nicht** in der
   Audit-Antwort auf.
 
+**Erledigt in PR 45 (2026-04-25, Docs/ADR-only):**
+[`ADR-0005`](./adr/ADR-0005-adminbot-safety-boundary.md) fixiert
+den Smolit-Assistant ↔ AdminBot Safety-Boundary-Rahmen, bevor
+Code entsteht. Kernlinien: read-only / status-first, capability-
+whitelisted, kein Shell-Pfad, kein generischer Tool-Passthrough,
+Approval-/Audit-Hop für jede Mutation, Audit-Correlation-ID
+sobald Spec existiert, lokal-first, default-off; kein Bypass via
+ABrain-`action_intents` oder Desktop-Interaction; AdminBot ↔
+OceanData bleibt eigener ADR. Implementation aufgeschoben:
+**Status weiterhin not implemented** — kein Code, kein IPC, kein
+Adapter, kein Provider-Kind. Begleitend aktualisiert:
+[`docs/contracts/ECOSYSTEM_INTEGRATION_CONTRACTS.md`](./contracts/ECOSYSTEM_INTEGRATION_CONTRACTS.md)
+Pair 3 (jetzt mit ADR-0005-Verweis) und §6 *Explicit gaps*
+(Lücke ist jetzt nur noch Implementation-Gap).
+
+**Folgearbeiten aus PR 45 (alle Docs/ADR-only oder hinter
+expliziem Opt-in, kein zwingender Code-PR in der nahen Reihe):**
+
+- **FA-1.** `docs/contracts/ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md`
+  — Capability Contract pro zugelassener Capability (Stufe 0
+  read-only zuerst). Docs-only.
+- **FA-2.** Audit Correlation ID Spec (cross-repo, aus PR 44 §12).
+  Voraussetzung für `correlation_id_required = true`.
+- **FA-3.** Capability Vocabulary (cross-repo, aus PR 44 §12).
+- **FA-4.** Spike-PR (Stufe 0 read-only) hinter Feature-Flag, erst
+  nach FA-1 + FA-2.
+- **FA-5.** Approval-Card-Erweiterung für AdminBot-Capabilities.
+- **FA-6.** Mutating spike (Stufe 1 dry-run) hinter Feature-Flag,
+  erst nach FA-4 + FA-5.
+
 **Nicht-Ziele:**
 
 - Keine Policy-Engine im „grand design"-Sinn.
@@ -289,6 +319,10 @@ Abschnitt „Coverage für reale Interaction-Actions (PR 32)".
   ([`docs/security/AUDIT_TRAIL.md`](./security/AUDIT_TRAIL.md)).
 - **Keine feinere Risk-Klassifikation** als heute (`low` /
   `medium` / `high`) vor einer eigenen Policy-Runde.
+- **Kein direkter AdminBot-Codepfad** durch PR 45. ADR-0005 ist
+  Docs-only; der Implementation-Gap bleibt bewusst offen, bis
+  FA-1 (Capability Contract) und FA-2 (Audit Correlation ID Spec)
+  geschrieben sind.
 
 **Tests / Verifikation:**
 
