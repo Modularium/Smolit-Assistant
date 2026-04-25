@@ -21,13 +21,19 @@ Zielbild konsequent in Future Work / Non-goals isoliert)**,
 **PR 44 (2026-04-25) — Ecosystem Integration Contracts Matrix**
 ([`docs/contracts/ECOSYSTEM_INTEGRATION_CONTRACTS.md`](./contracts/ECOSYSTEM_INTEGRATION_CONTRACTS.md),
 Docs-only, indexiert ABrain / AdminBot / OceanData / smolitux-ui
-ohne diese Repos anzufassen) und **PR 49 (2026-04-25) — Roadmap
+ohne diese Repos anzufassen) **PR 49 (2026-04-25) — Roadmap
 Sync after Contracts PR 43–48** ([`docs/reviews/PR49_ROADMAP_SYNC_AFTER_CONTRACTS.md`](./reviews/PR49_ROADMAP_SYNC_AFTER_CONTRACTS.md);
 Reality-Check, der die tatsächliche Sequenz PR 43–48 dokumentiert,
 Roadmap §6.3-Header von „drei" auf „vier" Folge-PRs korrigiert,
 OPEN_WORK Workstream I PR-48-Eintrag auf PR 51 verschiebt und die
 neue konservative PR-50–55-Sequenz setzt; Runtime-Baseline
-unverändert) sind gelandet.
+unverändert) und **PR 50 (2026-04-25) — v0.2 Release Gate Review**
+([`docs/reviews/PR50_V0_2_RELEASE_GATE_REVIEW.md`](./reviews/PR50_V0_2_RELEASE_GATE_REVIEW.md);
+Bewertung *conditionally ready for v0.2 candidate* nach vier
+Verifikations-Punkten — GitHub-CI grün auf main, README/SETUP-
+Befehle stimmen, keine Runtime-Drift, Branch-Protection
+konfiguriert oder dokumentiert; lokal `cargo test` 398 passed +
+fünf CI-Smokes PASS; **kein Tag in PR 50**) sind gelandet.
 
 **Folgearbeiten aus PR 44 (alle Docs/ADR-only, kein Code, in-scope
 für dieses Repo):**
