@@ -36,3 +36,12 @@ jeweilige Architekturdatei unter [`docs/`](../), nicht in einen ADR.
 | [ADR-0002](./ADR-0002-accessibility-rpc-readonly.md) | Accessibility RPC Spike — Read-only AT-SPI | Accepted | 2026-04-24 |
 | [ADR-0003](./ADR-0003-abrain-native-integration.md) | ABrain Native Integration Path | Proposed | 2026-04-24 |
 | [ADR-0004](./ADR-0004-oceandata-data-layer-integration.md) | OceanData Data-Layer Integration Path | Proposed | 2026-04-24 |
+
+## Cross-Repo Contracts Index
+
+Eine zentrale Matrix aller Cross-Repo-Integrationsgrenzen mit
+Verweisen auf die kanonischen Verträge in den Nachbar-Repos
+(ABrain, Smolit_AdminBot, OceanData, smolitux-ui) liegt unter
+[`docs/contracts/ECOSYSTEM_INTEGRATION_CONTRACTS.md`](../contracts/ECOSYSTEM_INTEGRATION_CONTRACTS.md).
+Die ADRs in diesem Verzeichnis bleiben die entscheidende Quelle;
+der Contracts-Index spiegelt und verlinkt nur.

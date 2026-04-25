@@ -310,6 +310,7 @@ Siehe [`ROADMAP.md §7 „Explicitly Deferred"`](ROADMAP.md).
 | **Audit Trail** (in-memory, Scope) | [`docs/security/AUDIT_TRAIL.md`](docs/security/AUDIT_TRAIL.md) |
 | **Window / Overlay / Always-on-top** (Linux-Plattform-Realität) | [`docs/linux_window_overlay_architecture.md`](docs/linux_window_overlay_architecture.md), [`docs/linux_always_on_top_decision.md`](docs/linux_always_on_top_decision.md) |
 | **Architectural Decision Records** | [`docs/adr/`](docs/adr/) — ADR-0001 Smolitux Design Contract |
+| **Cross-Repo Contracts Index** | [`docs/contracts/`](docs/contracts/) — [Ecosystem Integration Contracts Matrix](docs/contracts/ECOSYSTEM_INTEGRATION_CONTRACTS.md) |
 | **Reviews / Reality-Checks** | [`docs/reviews/`](docs/reviews/) |
 | **Offene Arbeiten / Workstreams** | [`docs/OPEN_WORK.md`](docs/OPEN_WORK.md) |
 | **Einheitliches Vokabular** | [`docs/GLOSSARY.md`](docs/GLOSSARY.md) |
