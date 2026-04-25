@@ -326,6 +326,62 @@ und für den Overlay-Pfad (siehe
 **Nicht dasselbe wie:** „Smolitux-UI in Godot" — es gibt keinen
 React-Godot-Brücken-Layer.
 
+## Capability Contract
+
+Ein **Capability Contract** ist eine Cross-Repo-Vereinbarung, die
+beschreibt, welche benannten Capabilities (z. B. `status_read`,
+`service_status`, `action_intent`, `context_summary`) eine
+Komponente vorschlagen, entscheiden oder ausführen darf — und welche
+nicht. Capability Contracts ersetzen *generisches Tool-Surface* durch
+*whitelistete, typisierte Aktionen*; sie sind die Grundlage dafür,
+dass z. B. ABrain `action_intents` als Vorschläge senden, aber nicht
+direkt ausführen darf.
+
+In Smolit-Assistant wird Capability-Vokabular heute lokal pro
+Workstream geführt (Approval-`category`, Provider-Kind,
+Interaction-Action). Eine cross-repo Capability-Vokabular-Definition
+ist Folgearbeit aus PR 44 (siehe
+[`docs/contracts/ECOSYSTEM_INTEGRATION_CONTRACTS.md` §6](./contracts/ECOSYSTEM_INTEGRATION_CONTRACTS.md)).
+
+**Abgrenzung:** Ein Capability Contract bestimmt *was darf*, nicht
+*wie ausgeführt wird*. Die Ausführung läuft weiter durch Approval/
+Policy/Audit; Capability ist die Eintrittskarte, nicht die Aktion
+selbst.
+
+## Audit Correlation ID
+
+Eine **Audit Correlation ID** verkettet einen Aktions-Lifecycle über
+Repo-Grenzen hinweg, damit ein Reviewer einen Request von der UI bis
+zur ausgeführten Aktion rückverfolgen kann (z. B. UI-Klick → Smolit-
+Assistant Audit → ABrain-Adapter → AdminBot-Tool-Call). Smolit-
+Assistant Audit (PR 19, PR 32), ABrain-Adapter und AdminBot-IPC
+tragen heute je eigene Correlation-Felder; ein **gemeinsamer Spec
+existiert noch nicht**.
+
+Die Einführung ist Folgearbeit aus PR 44 (siehe
+[`docs/contracts/ECOSYSTEM_INTEGRATION_CONTRACTS.md` §6](./contracts/ECOSYSTEM_INTEGRATION_CONTRACTS.md)).
+Solange der gemeinsame Spec fehlt, dürfen Cross-Repo-Aktionen
+keinen Audit-Bypass erzeugen — d. h. jede Action, die durch
+Smolit-Assistant läuft, gehört in den lokalen Audit-Ring-Buffer
+(Lifecycle siehe [`docs/security/AUDIT_TRAIL.md`](./security/AUDIT_TRAIL.md)).
+
+## Safety Boundary Contract
+
+Ein **Safety Boundary Contract** beschreibt eine vertrauens­
+relevante Grenze zwischen zwei Komponenten: wer entscheidet, wer
+ausführt, welche Capabilities passieren dürfen, welche nicht, und
+wie Approval/Audit/Policy auf der Grenze einrasten. AdminBot
+(`docs/integrations/AGENT_SECURITY_BOUNDARY.md` im AdminBot-Repo)
+ist ein Beispiel: AdminBot bleibt der Executor mit lokaler
+Vertrauensgrenze, Agent / Brain darf nur typisiert anfragen.
+
+In Smolit-Assistant existiert heute **kein** Safety Boundary
+Contract zu AdminBot — by design, weil es keinen direkten
+Smolit-Assistant ↔ AdminBot-Pfad gibt (siehe
+[`docs/contracts/ECOSYSTEM_INTEGRATION_CONTRACTS.md` §6](./contracts/ECOSYSTEM_INTEGRATION_CONTRACTS.md)).
+Falls ein solcher Pfad je entstehen sollte, ist ein dedizierter
+ADR die Eintrittsbedingung — kein Codepfad davor.
+
 ## Cross-runtime UI Consistency
 
 Das Ziel, dass eine Smolitux-Web-App und ein Godot-nativer Client

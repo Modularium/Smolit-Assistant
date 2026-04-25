@@ -15,10 +15,34 @@ Zustand nach der PR-21–30-Stabilisierungsserie). Sammelblick:
 ## A — Docs & Architecture Hygiene
 
 **Status:** aktiv. PR 20 (Docs Reality Check), PR 24 (Smolitux Design
-Contract ADR) und **PR 28 (2026-04-24) — `presence_desktop_interaction.md`
+Contract ADR), **PR 28 (2026-04-24) — `presence_desktop_interaction.md`
 auf Ist-Zustand getrimmt (1096 → 491 Zeilen, 12-Abschnitt-Struktur,
-Zielbild konsequent in Future Work / Non-goals isoliert)** sind
-gelandet. Siehe
+Zielbild konsequent in Future Work / Non-goals isoliert)** und
+**PR 44 (2026-04-25) — Ecosystem Integration Contracts Matrix**
+([`docs/contracts/ECOSYSTEM_INTEGRATION_CONTRACTS.md`](./contracts/ECOSYSTEM_INTEGRATION_CONTRACTS.md),
+Docs-only, indexiert ABrain / AdminBot / OceanData / smolitux-ui
+ohne diese Repos anzufassen) sind gelandet.
+
+**Folgearbeiten aus PR 44 (alle Docs/ADR-only, kein Code, in-scope
+für dieses Repo):**
+
+- Smolit-Assistant ↔ AdminBot Safety Boundary ADR (schließt die
+  *missing by design*-Lücke aus
+  [`docs/contracts/ECOSYSTEM_INTEGRATION_CONTRACTS.md` §6](./contracts/ECOSYSTEM_INTEGRATION_CONTRACTS.md)).
+- Audit Correlation ID Spec (cross-repo Korrelation zwischen
+  Smolit-Assistant Audit, ABrain-Adapter und AdminBot-Aktionen).
+- Capability Vocabulary (gemeinsames Vokabular für Capability-
+  Klassen, das die Cross-Repo-Verträge konsumieren).
+- ABrain ↔ OceanData Handoff Review (Konsistenz zwischen
+  ADR-0003 / ADR-0004 und der bestehenden OceanData-seitigen
+  Vertragslinie — kein neuer Vertrag in ABrain).
+
+Ausdrücklich **out-of-scope** für dieses Repo: Edits an
+ABrain / Smolit_AdminBot / OceanData / smolitux-ui. Ein Spiegel-
+Vertrag in ABrain für ABrain ↔ OceanData liegt im ABrain-Repo,
+nicht hier.
+
+Hintergrund: Siehe
 [`PR20_DOCS_REALITY_CHECK.md`](./reviews/PR20_DOCS_REALITY_CHECK.md)
 und [`PR28_PRESENCE_DESKTOP_INTERACTION_TRIM.md`](./reviews/PR28_PRESENCE_DESKTOP_INTERACTION_TRIM.md).
 **Warum wichtig:** Docs waren gegenüber dem Code gedriftet; zwei
