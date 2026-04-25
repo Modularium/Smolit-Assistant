@@ -2,9 +2,8 @@
 
 [![CI](https://github.com/Modularium/Smolit-Assistant/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Modularium/Smolit-Assistant/actions/workflows/ci.yml)
 
-Lokal-first, Godot-nativer Desktop-Assistant mit Rust-Core und
-WebSocket-IPC. **Sichtbar, kontrolliert, ehrlich** — kein
-Autonomie-Maximierer.
+Lokal-first, Godot-nativer Desktop-Assistant mit Rust-Core und WebSocket-IPC. 
+**Sichtbar, kontrolliert, ehrlich**
 
 ## 1. Kurzbeschreibung
 
