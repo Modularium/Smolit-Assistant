@@ -420,9 +420,15 @@ direkt ausführen darf.
 
 In Smolit-Assistant wird Capability-Vokabular heute lokal pro
 Workstream geführt (Approval-`category`, Provider-Kind,
-Interaction-Action). Eine cross-repo Capability-Vokabular-Definition
-ist Folgearbeit aus PR 44 (siehe
-[`docs/contracts/ECOSYSTEM_INTEGRATION_CONTRACTS.md` §6](./contracts/ECOSYSTEM_INTEGRATION_CONTRACTS.md)).
+Interaction-Action). Die cross-repo Capability-Vokabular-
+Definition liegt seit PR 46 als Draft / Proposed unter
+[`docs/contracts/CAPABILITY_VOCABULARY.md`](./contracts/CAPABILITY_VOCABULARY.md)
+(Naming-Regeln, sechs Kategorien `interaction.*` / `admin.*` /
+`data.*` / `assistant.*` / `provider.*` / `audit.*`, Mappings auf
+bestehende Code-Identitäten und auf zukünftige AdminBot-/OceanData-
+Surfaces). Es ist **kein Runtime-Registry** — keine Code-Konstanten,
+keine String-Whitelist im Core; eine Implementation entsteht erst
+in eigenen Folge-PRs (siehe CAPABILITY_VOCABULARY §12).
 
 **Abgrenzung:** Ein Capability Contract bestimmt *was darf*, nicht
 *wie ausgeführt wird*. Die Ausführung läuft weiter durch Approval/
@@ -439,12 +445,17 @@ Assistant Audit (PR 19, PR 32), ABrain-Adapter und AdminBot-IPC
 tragen heute je eigene Correlation-Felder; ein **gemeinsamer Spec
 existiert noch nicht**.
 
-Die Einführung ist Folgearbeit aus PR 44 (siehe
-[`docs/contracts/ECOSYSTEM_INTEGRATION_CONTRACTS.md` §6](./contracts/ECOSYSTEM_INTEGRATION_CONTRACTS.md)).
-Solange der gemeinsame Spec fehlt, dürfen Cross-Repo-Aktionen
-keinen Audit-Bypass erzeugen — d. h. jede Action, die durch
-Smolit-Assistant läuft, gehört in den lokalen Audit-Ring-Buffer
-(Lifecycle siehe [`docs/security/AUDIT_TRAIL.md`](./security/AUDIT_TRAIL.md)).
+Der gemeinsame Spec liegt seit PR 46 als Draft / Proposed unter
+[`docs/contracts/AUDIT_CORRELATION_ID_SPEC.md`](./contracts/AUDIT_CORRELATION_ID_SPEC.md)
+(Format `corr_<ulid-or-uuid-v7>`, lowercase, ≤ 80 Zeichen;
+Propagationspunkte; cross-repo Erwartungen; Privacy-Regeln;
+sieben benannte Failure-Modes). **Implementation bleibt offen:**
+weder `AuditEvent` noch Action-Events tragen heute ein
+`correlation_id`-Feld. Solange das Feld nicht im Code lebt, dürfen
+Cross-Repo-Aktionen keinen Audit-Bypass erzeugen — jede Action,
+die durch Smolit-Assistant läuft, gehört in den lokalen
+Audit-Ring-Buffer (Lifecycle siehe
+[`docs/security/AUDIT_TRAIL.md`](./security/AUDIT_TRAIL.md)).
 
 ## Safety Boundary Contract
 

@@ -411,12 +411,21 @@ explizitem Opt-in:
   Das Capability-Contract-Dokument auf Basis von §6. Pro Capability
   ein Eintrag, beginnend mit Stufe 0 (read-only). Docs-only, kein
   Code.
-- **FA-2 — Audit Correlation ID Spec.** Cross-repo Spec
-  (Smolit-Assistant Audit ↔ ABrain-Adapter ↔ AdminBot-IPC); aus
-  PR 44 §12 vorgemerkt. Voraussetzung für `correlation_id_required = true`.
-- **FA-3 — Capability Vocabulary.** Gemeinsames Vokabular
-  (`status_read`, `service_status`, `service_restart`,
-  `action_intent`, `context_summary`, …); aus PR 44 §12.
+- **FA-2 — Audit Correlation ID Spec.** Draft / Proposed seit
+  PR 46:
+  [`docs/contracts/AUDIT_CORRELATION_ID_SPEC.md`](../contracts/AUDIT_CORRELATION_ID_SPEC.md).
+  Voraussetzung für `correlation_id_required = true` aus §6 ist
+  damit *dokumentarisch* erfüllt; die *Implementation* (Feld in
+  `AuditEvent`, Cross-Repo-Wire, fail-closed-Verhalten) bleibt
+  aufgeschoben hinter eigenen Folge-PRs (siehe FA-Liste in
+  AUDIT_CORRELATION_ID_SPEC §12).
+- **FA-3 — Capability Vocabulary.** Draft / Proposed seit
+  PR 46:
+  [`docs/contracts/CAPABILITY_VOCABULARY.md`](../contracts/CAPABILITY_VOCABULARY.md).
+  Definiert `capability_id`-Naming-Regeln, Kategorien, Risk-Levels
+  und Mappings; keine Runtime-Registry. Die Code-Konstanten
+  entstehen erst in eigenen Folge-PRs (siehe FA-Liste in
+  CAPABILITY_VOCABULARY §12).
 - **FA-4 — Spike-PR (Stufe 0 read-only) hinter Feature-Flag.**
   Erste Code-Berührung; default-off, capability-whitelisted, audit-
   verdrahtet, ohne Mutation. Nur nach FA-1 + FA-2.
