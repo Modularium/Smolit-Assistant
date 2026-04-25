@@ -406,6 +406,58 @@ Docker-Images, Code-Signing, Auto-Publish, Secret-/Cloud-Provider-
 Roundtrip-Tests. Die Entscheidung steht in ROADMAP.md § PR 38; eine
 spätere Release-Line braucht einen eigenen ADR, bevor Code landet.
 
+### 7.1 CI Hardening (PR 42)
+
+PR 42 fügt zwei kleine, konservative Härtungs-Schritte zur CI-
+Foundation hinzu — ohne das Feld „Release Engineering" zu eröffnen.
+
+**SHA512-Verifikation des Godot-Binaries.** `ci.yml` pinnt neben
+`GODOT_VERSION` zusätzlich den erwarteten `GODOT_SHA512`-Hash und
+prüft ihn nach dem Download:
+
+```bash
+echo "${GODOT_SHA512}  ${GODOT_ZIP}" | sha512sum -c -
+```
+
+Quelle des Hashs ist die upstream-publizierte
+`SHA512-SUMS.txt` am Godot-Release-Tag. Warum SHA512 und nicht
+SHA256: die Godot-Release-Seite veröffentlicht ausschließlich
+SHA512; eine selbst abgeleitete SHA256 wäre „dynamic hash
+derivation" und damit schwächer als der upstream-signierte Hash.
+Ein manipulierter Download oder ein unerwarteter Versions-Drift
+bricht CI sofort fehl (`sha512sum -c` exit 1), bevor Godot
+überhaupt gestartet wird.
+
+**Binary-Cache via `actions/cache@v4`.** Einfacher Single-Key-
+Cache unter `godot-${GODOT_VERSION}`, damit der Download nicht
+pro Run wiederholt wird (spart typisch 30–60 s pro Lauf). Keine
+Matrix, kein Multi-Version-Scheme. Wichtig: der SHA512-Check läuft
+**nur im Download-Pfad** (bei Cache-Miss); ein gecachtes Binary
+bleibt unverändert zwischen Runs, und die Cache-Invalidierung
+hängt strikt an `GODOT_VERSION`. Falls eine Cache-Kompromittierung
+Sorge wird, lässt sich der Cache über GitHub-UI → Actions Caches
+manuell leeren.
+
+**Was dieser Schritt nicht tut (bewusst aus):**
+
+- Kein Release-System, kein `git tag`-Flow, kein GitHub Release.
+- Kein Packaging-Format (`.deb` / AppImage / Flatpak / Snap).
+- Kein Dockerfile, kein Container-Image.
+- Keine Signing-Chain, kein `gpg` / `cosign`.
+- Keine Dependabot-Integration, kein Auto-Update.
+- Keine Cross-Linux-Matrix (Arch/Fedora/NixOS) — FA nach
+  Packaging-ADR (PR 48).
+- Kein Rust-Toolchain-Pinning via `rust-toolchain.toml`.
+
+Diese Linie ist konservativ: CI soll verifizieren, was es heute
+tut, **nicht** ein halb-gebautes Release-Engineering werden. Der
+Schritt in Richtung Release lebt in PR 48 (Packaging Decision ADR).
+
+**Branch-Protection-Empfehlungen** für `main` liegen unter
+[`docs/ci/BRANCH_PROTECTION.md`](./ci/BRANCH_PROTECTION.md). Die
+Datei ist Doku für GitHub-Settings, keine Automation; die Regel
+wird manuell über die GitHub-UI gesetzt.
+
 ## 8. Nicht im Scope dieses Setup-Guides
 
 - **Release-Pipeline / Artefakte** (`.deb`, `.rpm`, Flatpak, Snap,

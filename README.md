@@ -225,11 +225,26 @@ spiegelt den Kern dieser Verifikation: `cargo test` plus die fünf
 kuratierten UI-Smokes (`settings-shell-smoke`,
 `avatar-render-polish-smoke`, `workflow-visibility-smoke`,
 `approval-card-smoke`, `audit-panel-smoke`) auf `ubuntu-latest` mit
-Godot 4.6 headless. Beide Jobs laufen in isolierten `HOME` /
+Godot 4.6 headless. Beide Jobs laufen in isolierten
 `XDG_CONFIG_HOME` / `XDG_CACHE_HOME`-Ordnern, damit lokale
 `~/.config/smolit-assistant/`-Dev-Artefakte die Tests nicht
-verfälschen. Für einen lokalen Parity-Lauf:
-[`scripts/ci_verify.sh`](scripts/ci_verify.sh).
+verfälschen.
+
+Seit PR 42 läuft das Godot-Binary unter einem zwei-stufigen
+Härtungs-Setup:
+
+- **Gepinnte Version** (`GODOT_VERSION=4.6-stable`) plus
+  **SHA512-Verifikation** gegen die upstream-publizierte
+  `SHA512-SUMS.txt` — unverändertes Binary aus dem Godot-Release
+  landet 1:1 im Cache; ein manipulierter Download bricht CI sofort.
+- **`actions/cache@v4`** cached das entpackte Binary unter dem Key
+  `godot-${GODOT_VERSION}`, damit der Download pro Runner nur
+  einmal nötig ist.
+
+Für einen lokalen Parity-Lauf:
+[`scripts/ci_verify.sh`](scripts/ci_verify.sh). Empfohlene
+Branch-Protection-Einstellungen für `main` liegen unter
+[`docs/ci/BRANCH_PROTECTION.md`](docs/ci/BRANCH_PROTECTION.md).
 
 ## 10. Project Roadmap
 

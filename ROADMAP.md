@@ -146,6 +146,15 @@ Detaillierte Begriffswelt: siehe
   Probe + Discovery laufen ehrlich als „unavailable / uncertain"
   bis der AT-SPI-RPC-Spike umgesetzt ist.
 
+### CI
+
+- GitHub-Actions-Workflow ([`ci.yml`](./.github/workflows/ci.yml))
+  mit `core-test` + `ui-smoke` (PR 38). CI uses pinned + verified
+  Godot binary (PR 42): `GODOT_VERSION` + `GODOT_SHA512` hart im
+  Workflow, `sha512sum -c` verifiziert den Download, Binary wird
+  via `actions/cache@v4` unter `godot-${GODOT_VERSION}` gecached.
+  Branch-Protection-Empfehlungen: [`docs/ci/BRANCH_PROTECTION.md`](./docs/ci/BRANCH_PROTECTION.md).
+
 ---
 
 ## 4. Completed Milestones
@@ -234,6 +243,9 @@ Single-Source für offene Punkte:
   [`ci.yml`](./.github/workflows/ci.yml)): Job `core-test`
   (`cargo test`) plus Job `ui-smoke` (Godot 4.6 headless, fünf
   Smokes), beide mit XDG-Isolation gegen stray Dev-Artefakte.
+  PR 42 gelandet: SHA512-Verifikation + Binary-Cache für das
+  Godot-Binary, plus Branch-Protection-Empfehlungen in
+  [`docs/ci/BRANCH_PROTECTION.md`](./docs/ci/BRANCH_PROTECTION.md).
   Nächster Kandidat (Future Work, nicht priorisiert):
   Packaging-Entscheidungs-ADR (`.deb` vs. AppImage vs. Flatpak,
   Signing-Chain) — rein ADR, keine Implementation in der nahen
@@ -288,6 +300,7 @@ PR 31 selbst ist dieser Roadmap-Checkpoint (Docs-only).
 | 38 | I | **Release/CI Foundation** (2026-04-24, gelandet): GitHub-Actions-Workflow [`ci.yml`](./.github/workflows/ci.yml) mit zwei Jobs — `core-test` (`cargo test --manifest-path core/Cargo.toml --locked` auf `ubuntu-latest`, Rust stable) und `ui-smoke` (Godot 4.6 headless, pinned via `GODOT_VERSION`, fünf Smokes: `settings-shell-smoke`, `avatar-render-polish-smoke`, `workflow-visibility-smoke`, `approval-card-smoke`, `audit-panel-smoke`). Beide Jobs laufen mit `HOME` / `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` unterhalb `runner.temp` — damit sind stray `~/.config/smolit-assistant/`-Dev-Artefakte strukturell ausgeschlossen. Lokaler Parity-Helper: [`scripts/ci_verify.sh`](./scripts/ci_verify.sh). **Kein** Packaging-Format, **keine** Signing-Stufe, **kein** Artifact-Upload, **kein** Release-Tagging, **kein** Docker-Image, **keine** Secrets, **keine** Provider-Endpunkte, **keine** echten TTS/STT-Binaries. |
 | 39 | H | **ABrain Native Integration ADR** (2026-04-24, gelandet, **Docs/ADR-only**, Status **Proposed**): [`ADR-0003`](./docs/adr/ADR-0003-abrain-native-integration.md) fixiert den Rahmen vor Code. Native-Pfad kommt als **zusätzlicher** Text-Provider-Kind (Arbeitsname `abrain_native`, Default-Chain bleibt `["abrain"]`), nicht als Ersatz; typed request/response; lokal-first (Unix-Socket / Loopback); jede ABrain-induzierte Action läuft durch Approval/Policy/Audit (PR 25 / PR 19 / PR 32); **kein** AdminBot-/Shell-/Desktop-Bypass, **kein** Streaming, **keine** Tool-Call-Execution in der ersten Version, **kein** Cloud-Default, **keine** Änderung an `ABRAIN_CMD`. Status bleibt Proposed, bis ABrain-Seite einen Gegenvorschlag publiziert hat. |
 | 40 | K | **OceanData Data-Layer Integration ADR** (2026-04-24, gelandet, **Docs/ADR-only**, Status **Proposed**): [`ADR-0004`](./docs/adr/ADR-0004-oceandata-data-layer-integration.md) formt aus der bisherigen rein-negativen Abgrenzung einen aktiven Designrahmen. OceanData ist **Data-/Kontext-Provider** (nicht Text-LLM); erste Integration ist **read-only** (`query_context` / `list_available_contexts` / `fetch_context_summary`), lokal-first (Unix-Socket / Loopback), **kein** Cloud-Default, **kein** UI-Komponentenimport, **kein** Token-/Design-System-Bezug, **kein** Tool-/Desktop-/AdminBot-Bypass. Jede daraus abgeleitete Action läuft durch Approval/Policy/Audit (PR 25 / PR 19 / PR 32). ABrain bekommt **keinen** unrestrictierten OceanData-Zugriff — nur indirekt, als redacted Summary über den Core. Privacy-/Redaction-Layer ist bindende Voraussetzung vor externer Weitergabe. **Keine** Code-Änderung, **keine** IPC-Commands, **keine** Persistenz, **keine** Auth-Implementation. Nachbar-ADRs: ADR-0001 (Smolitux Design Contract), ADR-0003 (ABrain Native). |
+| 42 | I | **CI Hardening — checksum + branch protection docs** (2026-04-25, gelandet): `.github/workflows/ci.yml` pinnt `GODOT_SHA512` aus der upstream-publizierten `SHA512-SUMS.txt` und verifiziert den Godot-Download per `sha512sum -c` fail-fast; parallel cached `actions/cache@v4` das Binary unter `godot-${GODOT_VERSION}` (Single-Key, kein Multi-Version-Scheme). Neue Branch-Protection-Doku [`docs/ci/BRANCH_PROTECTION.md`](./docs/ci/BRANCH_PROTECTION.md) listet Required checks `core-test` + `ui-smoke`, Required review 1, dismiss stale approvals, linear history empfohlen, **keine** Auto-merge, **keine** Required deployments, **keine** Merge-Queue. **Kein** Release-System, **kein** Packaging, **kein** Docker, **kein** Signing, **kein** Dependabot, **keine** Matrix, **kein** Rust-Toolchain-Pinning. |
 
 ---
 
