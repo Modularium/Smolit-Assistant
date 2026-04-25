@@ -287,7 +287,12 @@ Bewusst **nicht** heute:
 - **AT-SPI-RPC, Tree-Walking, App-spezifische Adapter** — der
   Accessibility-Spike bleibt Environment-basiert + Hint-Echo.
 - **OCR, Vision, Pixel-Matching** — keine Bibliothek gebunden.
-- **AdminBot-Integration / Shell-Zugriff** — nicht im Plan.
+- **AdminBot-Integration / Shell-Zugriff** — nicht implementiert.
+  Designrahmen für eine eventuelle spätere Integration in
+  [`docs/adr/ADR-0005-adminbot-safety-boundary.md`](docs/adr/ADR-0005-adminbot-safety-boundary.md)
+  (Proposed, Docs/ADR-only): read-only / status-first, capability-
+  whitelisted, kein Shell-Pfad, kein generischer Tool-Passthrough,
+  Approval-/Audit-Hop für jede Mutation, lokal-first, default-off.
 - **Stage-C-Avatar-User-Uploads** —
   [`docs/avatar_stage_c_research.md`](docs/avatar_stage_c_research.md)
   bleibt Research-Gate.

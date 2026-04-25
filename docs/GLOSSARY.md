@@ -326,6 +326,87 @@ und für den Overlay-Pfad (siehe
 **Nicht dasselbe wie:** „Smolitux-UI in Godot" — es gibt keinen
 React-Godot-Brücken-Layer.
 
+## AdminBot
+
+Der **Admin-/System-/Ops-Aktionslayer** im Smolitux-/EcoSphere-
+Network-Ökosystem. Externes Repo:
+[Modularium/Smolit_AdminBot](https://github.com/Modularium/Smolit_AdminBot).
+Nativer Linux-Daemon in Rust mit deterministischer Action Registry
+(`system.status`, `system.health`, `service.status`,
+`service.restart`, …), Unix-Socket-IPC, polkit-/systemd-D-Bus-Bindung
+und harter Policy-Grenze.
+
+**AdminBot ist ausdrücklich nicht:**
+
+- Brain / Reasoning / Orchestration. Das ist ABrain.
+- UI-Library / Design-System. Das ist smolitux-ui.
+- Datenplattform. Das ist OceanData.
+- Generische Shell, kein `exec`, kein `sudo`-Wrapper, kein
+  Plugin-System im Core.
+
+**Verhältnis zu Smolit-Assistant:** kein direkter Pfad heute. Der
+Designrahmen für eine eventuelle spätere Integration liegt in
+[`ADR-0005`](./adr/ADR-0005-adminbot-safety-boundary.md)
+(Proposed): read-only / status-first, capability-whitelisted, kein
+Shell-Pfad, kein generischer Tool-Passthrough, Approval-/Audit-Hop
+für jede Mutation, lokal-first, default-off. ABrain ↔ AdminBot
+existiert kanonisch außerhalb dieses Repos.
+
+Siehe auch
+[`docs/contracts/ECOSYSTEM_INTEGRATION_CONTRACTS.md` Pair 3](./contracts/ECOSYSTEM_INTEGRATION_CONTRACTS.md).
+
+## Admin Action
+
+Eine **mutierende oder privilegierte Operation auf dem lokalen
+System**, wie sie AdminBot ausführen würde — z. B. Service-Restart,
+Disk-Usage-Read, System-Health-Read. Im Smolit-Assistant-Kontext
+nur indirekt relevant: Smolit-Assistant **führt heute keine
+Admin-Actions aus**. Falls je ein Smolit-Assistant ↔ AdminBot Pfad
+entsteht, bindet [`ADR-0005`](./adr/ADR-0005-adminbot-safety-boundary.md)
+jede Admin-Action an Capability Contract + Approval/Audit-Hop +
+Audit Correlation ID.
+
+**Abgrenzung:**
+
+- **Admin-Action ≠ Interaction-Action.** Interaction-Actions
+  (`open_application`, `focus_window`) operieren im User-Kontext
+  via Desktop-Backends; Admin-Actions verlangen system­bezogene
+  Privilegien.
+- **Admin-Action ≠ ABrain-`action_intent`.** Ein Action-Intent ist
+  ein Vorschlag eines Brains; eine Admin-Action ist eine konkrete
+  AdminBot-Capability mit Capability-ID.
+
+## Dry-run
+
+Ein **Ausführungsmodus, der die geplante Mutation beschreibt, ohne
+sie durchzuführen**. AdminBot-Capabilities mit
+`dry_run_supported = true` (siehe ADR-0005 §6) liefern eine
+strukturierte Vorschau (was würde passieren, mit welchen Effekten,
+welchen Zielen) und kehren ohne Seiteneffekt zurück.
+
+In ADR-0005 ist Dry-run **Pflicht-Vorstufe für jede mutierende
+Capability**: vor Stufe 2 (Mutation) muss Stufe 1 (Dry-run) Erfolg
+haben — und dieselbe Approval-Linie wie eine echte Mutation
+(Approval-Default = true), weil bereits eine Mutationsabsicht
+existiert.
+
+**Abgrenzung:** Dry-run ≠ Describe-only. Dry-run *simuliert die
+spezifische Mutation* mit den vom Caller angegebenen Argumenten;
+Describe-only beantwortet nur „was *könnte* diese Capability tun".
+
+## Describe-only
+
+Ein **rein deklarativer Modus**, der die Capability-Beschreibung
+zurückgibt: Name, Argument-Schema, Risk-Level, Approval-/Audit-
+Anforderungen, Failure-Modes — ohne Ziel-Argumente, ohne
+Mutation, ohne Dry-run. In ADR-0005 ist Describe-only Teil von
+Stufe 0 (Status / Read-only) und kann ohne Approval laufen, muss
+aber im Audit-Ring-Buffer sichtbar sein.
+
+**Abgrenzung:** Describe-only ist **nicht** das Lesen von
+System-Status (`system.status`, `system.health`) — auch das ist
+Stufe 0, aber es liefert *Daten* und nicht *Capability-Metadaten*.
+
 ## Capability Contract
 
 Ein **Capability Contract** ist eine Cross-Repo-Vereinbarung, die
@@ -375,12 +456,14 @@ wie Approval/Audit/Policy auf der Grenze einrasten. AdminBot
 ist ein Beispiel: AdminBot bleibt der Executor mit lokaler
 Vertrauensgrenze, Agent / Brain darf nur typisiert anfragen.
 
-In Smolit-Assistant existiert heute **kein** Safety Boundary
-Contract zu AdminBot — by design, weil es keinen direkten
-Smolit-Assistant ↔ AdminBot-Pfad gibt (siehe
-[`docs/contracts/ECOSYSTEM_INTEGRATION_CONTRACTS.md` §6](./contracts/ECOSYSTEM_INTEGRATION_CONTRACTS.md)).
-Falls ein solcher Pfad je entstehen sollte, ist ein dedizierter
-ADR die Eintrittsbedingung — kein Codepfad davor.
+In Smolit-Assistant fixiert
+[`ADR-0005`](./adr/ADR-0005-adminbot-safety-boundary.md) (Proposed,
+PR 45) den Safety-Boundary-Rahmen für einen hypothetischen späteren
+Smolit-Assistant ↔ AdminBot-Pfad — *bevor* irgendein Codepfad
+entsteht. Es existiert heute weiterhin keine direkte Verdrahtung;
+der Implementation-Gap bleibt bewusst offen, bis FA-1 (Capability
+Contract `docs/contracts/ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md`,
+Future Work) und FA-2 (Audit Correlation ID Spec) geschrieben sind.
 
 ## Cross-runtime UI Consistency
 

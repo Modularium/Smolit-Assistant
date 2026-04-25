@@ -53,10 +53,14 @@ Dokumente in [`docs/adr/`](../adr/) **entscheiden**; Dokumente in
 diesem Verzeichnis **indexieren und spiegeln**. Konkret:
 
 - ADRs treffen die Entscheidung pro Workstream
-  (z. B. ADR-0003 ABrain Native Integration Path).
+  (z. B. ADR-0003 ABrain Native Integration Path,
+  [`ADR-0005`](../adr/ADR-0005-adminbot-safety-boundary.md)
+  AdminBot Safety Boundary).
 - `docs/contracts/` referenziert diese ADRs zusammen mit dem
   Spiegel-Dokument der Gegenseite (z. B. ABrain
-  `docs/contracts/SMOLIT_ASSISTANT_NATIVE_API.md`).
+  `docs/contracts/SMOLIT_ASSISTANT_NATIVE_API.md`) und benennt
+  Future-Work-Verträge (z. B.
+  `ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md` als FA-1 aus ADR-0005).
 - Wenn ein Konflikt entsteht zwischen einem Eintrag hier und einem
   ADR, **gewinnt der ADR**. Dieses Verzeichnis fasst zusammen,
   ersetzt aber keine ADR-Entscheidung.
