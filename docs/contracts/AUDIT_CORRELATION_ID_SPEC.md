@@ -1,11 +1,13 @@
 # Audit Correlation ID Spec
 
-- **Status:** Draft / Proposed (Docs/Contract-only — keine Code-
-  Implementation in PR 46).
-- **Date:** 2026-04-25.
-- **Scope:** Cross-Repo. Beschreibt das zukünftige Verhalten einer
-  gemeinsamen `correlation_id` zwischen Smolit-Assistant,
-  ABrain, AdminBot und OceanData.
+- **Status:** Runtime FA-1 implemented in Smolit-Assistant (PR 54);
+  Cross-Repo-Propagation (FA-3 → FA-6) bleibt Docs/Future-Work.
+- **Date:** 2026-04-25 (Draft); 2026-04-26 (Runtime FA-1 partial spike).
+- **Scope:** Cross-Repo *Spec*; lokale Runtime-Implementation bleibt
+  bewusst auf Smolit-Assistant beschränkt. Smolit-Assistant erzeugt
+  und trägt `correlation_id` durch den lokalen Action-/Approval-/
+  Audit-Lifecycle. Kein AdminBot-Client, kein OceanData-Client, kein
+  ABrain-Native-Call und kein OpenTelemetry sind Teil dieser Spec.
 - **Workstream:** E (Approval / Policy / Tool-Gating) — Folgearbeit
   aus PR 44 §12 und PR 45 [`ADR-0005 §14 FA-2`](../adr/ADR-0005-adminbot-safety-boundary.md).
 - **Companion:** [`docs/contracts/CAPABILITY_VOCABULARY.md`](./CAPABILITY_VOCABULARY.md).
@@ -69,12 +71,34 @@ Stand 2026-04-25:
 | `approval_id` | [`core/src/approvals/request.rs`](../../core/src/approvals/request.rs) | String | lokal pro Approval |
 | `request_id` | ABrain Native Contract Draft (extern) | String | transport-/request-spezifisch in ABrain |
 | `task_id` | reserviert (siehe [`docs/api.md` §5](../api.md)) | optional | nicht implementiert |
-| `correlation_id` | — | — | **existiert heute nicht** |
+| `correlation_id` | [`core/src/audit/correlation.rs`](../../core/src/audit/correlation.rs), [`core/src/audit/event.rs`](../../core/src/audit/event.rs), [`core/src/actions/event.rs`](../../core/src/actions/event.rs), [`core/src/approvals/request.rs`](../../core/src/approvals/request.rs) | String, `corr_<hex>` | lokal pro Aktionspfad in **Smolit-Assistant** (PR 54). Cross-Repo-Propagation bleibt Future Work. |
 
-`correlation_id` ist heute **nicht** Teil des `AuditEvent`-Structs,
-**nicht** Teil eines Action-Events, **nicht** Teil des IPC-Wire-
-Formats. Diese Spec beschreibt das *zukünftige* Verhalten, nicht
-das aktuelle.
+PR 54 (Runtime FA-1) hat `correlation_id` als optionales, additives
+Feld in den lokalen Lifecycle eingehängt:
+
+- `AuditEvent.correlation_id: Option<String>` für Action-/Approval-
+  Lifecycle-Einträge.
+- `ActionPlannedPayload`, `ActionStartedPayload`, `ActionStepPayload`,
+  `ActionVerificationPayload`, `ActionCompletedPayload`,
+  `ActionFailedPayload`, `ActionCancelledPayload`,
+  `ActionProgressPayload` tragen jeweils ein optionales
+  `correlation_id`.
+- `ApprovalRequest` und `ApprovalResolvedPayload` tragen ein
+  optionales `correlation_id`.
+- Generator und Validator leben in
+  [`core/src/audit/correlation.rs`](../../core/src/audit/correlation.rs);
+  das Format hält §5 ein (Prefix, Charset, Länge), nutzt aber einen
+  lokalen `timestamp_ms+counter`-Hex-Body statt ULID/UUID-v7 — ULID/
+  UUID-v7 bleibt Future Work, sobald eine geeignete Dependency
+  einzieht.
+- Der Generator vergibt Kollisionsarmut über `timestamp_ms` und
+  einen prozessweiten `AtomicU64`-Counter; keine Persistenz, kein
+  Netzwerk, kein OpenTelemetry.
+
+Es gibt **kein** neues IPC-Command, **kein** neues Wire-Envelope und
+**keine** UI-Änderung. Ältere Clients ignorieren das Feld; ältere
+Emitter (z. B. Settings-Probes, `ping`, `get_status`,
+`audit_recent`-Read selbst) lassen es leer.
 
 ## 4. Correlation model
 
@@ -301,13 +325,15 @@ weitergegeben** werden, sobald die Implementation existiert:
 
 ## 11. Non-goals
 
-PR 46 ist **Docs/Contract-only**:
+PR 46 war **Docs/Contract-only**. PR 54 (Runtime FA-1 spike) bleibt
+ebenfalls eng gehalten — die folgenden Punkte sind weiterhin
+**außerhalb** des Scopes:
 
-- **Kein Code** — kein neues Feld in `AuditEvent`, kein neues Feld
-  in Action-Events, kein neues Feld im IPC-Wire-Format.
-- **Keine IPC-Schema-Änderung.**
-- **Keine Wire-Protokoll-Erweiterung** in
-  [`docs/api.md`](../api.md).
+- **Keine IPC-Schema-Änderung** — kein neues `IncomingMessage`, kein
+  neues `OutgoingMessage`. Nur additive `correlation_id`-Felder
+  innerhalb existierender Payloads.
+- **Keine neue UI** und kein neues IPC-Command für Korrelations-
+  Anzeige; PR 54 berührt smolitux-ui nicht.
 - **Keine Distributed-Tracing-Implementation** (kein
   OpenTelemetry, kein W3C Trace Context).
 - **Keine Audit-Persistenz** (Ring-Buffer bleibt in-memory).
@@ -316,24 +342,32 @@ PR 46 ist **Docs/Contract-only**:
 - **Kein Replay-Harness.**
 - **Keine Edits** in ABrain / Smolit_AdminBot / OceanData /
   smolitux-ui.
+- **Kein Cross-Repo-Wire**, kein ABrain-Native-Call, kein AdminBot-
+  Client, kein OceanData-Client.
 
 ## 12. Future work
 
 Reihenfolge nicht bindend; alle Schritte hinter eigenen PRs:
 
-- **FA-1.** `correlation_id`-Feld zu `AuditEvent` ergänzen (Code,
-  hinter Feature-Flag, default-off bis Tests grün).
-- **FA-2.** `correlation_id`-Feld zu Action-Events
-  (`action_planned`, `action_started`, …).
+- **FA-1.** *Erledigt in PR 54* — `correlation_id` lokal in
+  Smolit-Assistant auf `AuditEvent`, Action-Lifecycle-Payloads,
+  `ApprovalRequest` und `ApprovalResolvedPayload`. Keine Cross-Repo-
+  Wire, keine Persistenz, keine UI.
+- **FA-2.** Folge-Audit der Wire-Form (`docs/api.md`-Beispiele
+  inklusive `correlation_id` für aktive Action-Lifecycle-Frames).
 - **FA-3.** `correlation_id`-Mirror in ABrain Native Contract
   (lebt im ABrain-Repo).
 - **FA-4.** `correlation_id`-Pflicht für AdminBot-Mutationen
   (lebt in einem zukünftigen `ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md`,
   siehe ADR-0005 FA-1).
 - **FA-5.** Smoke-Tests, die die End-to-End-Korrelation für
-  `interaction_open_application` (lokal) und `abrain_native →
-  action_planned → approval → action_completed` (zukünftig)
-  prüfen.
+  `interaction_open_application` (lokal — bereits in PR 54 gedeckt)
+  und `abrain_native → action_planned → approval →
+  action_completed` (zukünftig) prüfen.
 - **FA-6.** Settings-Shell-Anzeige der `correlation_id` als
   Dev-/Debug-Hinweis (optional, hinter `accessibility_rpc`-artigem
   Feature-Flag).
+- **FA-7.** Generator-Upgrade auf ULID/UUID-v7, sobald eine
+  geeignete Dependency einzieht; bis dahin nutzt PR 54 einen
+  prozesslokalen `timestamp_ms+counter`-Hex-Generator, der
+  Spec §5 (Prefix, Charset, Länge) einhält.
