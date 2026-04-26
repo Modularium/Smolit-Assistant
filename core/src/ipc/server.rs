@@ -532,6 +532,11 @@ fn planned(
             description: None,
             target,
             mapping: None,
+            // PR 54 — `submit_text` ist heute (noch) kein
+            // Action-Lifecycle-Pfad mit Korrelation; das Feld bleibt
+            // additiv `None`, bis ein zukünftiger Native-Native-Call
+            // ihn füllt (Future-Work in der Spec).
+            correlation_id: None,
         },
     }
 }
@@ -541,6 +546,7 @@ fn started(action_id: &str) -> OutgoingMessage {
         payload: ActionStartedPayload {
             action_id: action_id.to_string(),
             phase: ActionPhase::Started,
+            correlation_id: None,
         },
     }
 }
@@ -551,6 +557,7 @@ fn step(action_id: &str, title: &str) -> OutgoingMessage {
             action_id: action_id.to_string(),
             title: title.to_string(),
             description: None,
+            correlation_id: None,
         },
     }
 }
@@ -561,6 +568,7 @@ fn completed(action_id: &str) -> OutgoingMessage {
             action_id: action_id.to_string(),
             status: ActionStatus::Completed,
             message: None,
+            correlation_id: None,
         },
     }
 }
@@ -572,6 +580,7 @@ fn failed(action_id: &str, message: &str) -> OutgoingMessage {
             status: ActionStatus::Failed,
             message: message.to_string(),
             error: None,
+            correlation_id: None,
         },
     }
 }
@@ -4680,5 +4689,345 @@ mod tests {
         let requested = recv_text(&mut ws).await;
         assert!(requested.contains(r#""type":"approval_requested""#));
         assert!(requested.contains(r#""risk":"medium""#));
+    }
+
+    // --- PR 54 — Audit Correlation ID Runtime Spike ---
+    //
+    // Locks the local correlation-id contract:
+    //   * jeder Action-/Approval-Lifecycle hat genau eine
+    //     `correlation_id`,
+    //   * sie zieht durch Approval-Klammer und Cancel-Pfade,
+    //   * Double-Approve erzeugt keine zweite ID,
+    //   * non-action Commands (`ping`, `get_status`,
+    //     `audit_recent`, `settings_probe_*`) brauchen keine
+    //     Korrelation tragen.
+    //
+    // Invariant der Tests: alle gefundenen `correlation_id`-Werte
+    // einer einzelnen Lifecycle-Trace müssen byte-identisch sein.
+
+    /// Extrahiert alle `correlation_id`-Werte aus einem JSON-Frame.
+    /// Nutzt einfache Substring-Suche, damit der Test ohne regex-
+    /// Dependency auskommt.
+    fn extract_correlation_ids(frame: &str) -> Vec<String> {
+        const PAT: &str = r#""correlation_id":""#;
+        let mut out = Vec::new();
+        let mut cursor = 0;
+        while let Some(rel) = frame[cursor..].find(PAT) {
+            let start = cursor + rel + PAT.len();
+            if let Some(end_rel) = frame[start..].find('"') {
+                out.push(frame[start..start + end_rel].to_string());
+                cursor = start + end_rel + 1;
+            } else {
+                break;
+            }
+        }
+        out
+    }
+
+    fn assert_all_equal_and_corr_prefixed(ids: &[String], context: &str) {
+        assert!(
+            !ids.is_empty(),
+            "expected at least one correlation_id in {context}",
+        );
+        let first = &ids[0];
+        assert!(
+            first.starts_with("corr_"),
+            "correlation_id `{first}` must start with `corr_` ({context})",
+        );
+        for id in ids {
+            assert_eq!(
+                id, first,
+                "all correlation_ids in {context} must match: {ids:?}",
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn plan_demo_action_audit_events_share_correlation_id() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"plan_demo_action","title":"Echo","kind":"demo_echo","requires_approval":false}"#.into(),
+        ))
+        .await
+        .unwrap();
+        // planned + started + step + completed.
+        for _ in 0..4 {
+            let _ = recv_text(&mut ws).await;
+        }
+
+        ws.send(Message::Text(r#"{"type":"audit_recent"}"#.into()))
+            .await
+            .unwrap();
+        let frame = recv_text(&mut ws).await;
+        let ids = extract_correlation_ids(&frame);
+        assert_all_equal_and_corr_prefixed(&ids, "plan_demo_action audit chain");
+        // ipc_command_received + action_planned + action_started +
+        // action_completed = 4 audit events with the same id.
+        assert_eq!(ids.len(), 4, "expected 4 correlated audit events: {frame}");
+    }
+
+    #[tokio::test]
+    async fn open_application_approved_chain_shares_correlation_id() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_open_application","application":"calendar"}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let planned = recv_text(&mut ws).await;
+        let requested = recv_text(&mut ws).await;
+        let approval_id = extract_approval_id(&requested);
+        let approve = format!(
+            r#"{{"type":"approval_response","approval_id":"{approval_id}","decision":"approved"}}"#
+        );
+        ws.send(Message::Text(approve)).await.unwrap();
+        // resolved / started / step / step / verification / completed.
+        let mut downstream = Vec::with_capacity(6);
+        for _ in 0..6 {
+            downstream.push(recv_text(&mut ws).await);
+        }
+
+        ws.send(Message::Text(r#"{"type":"audit_recent"}"#.into()))
+            .await
+            .unwrap();
+        let frame = recv_text(&mut ws).await;
+
+        // Wire-level: planned + approval_requested + every broadcast
+        // envelope share the same correlation_id.
+        let mut wire_ids = extract_correlation_ids(&planned);
+        wire_ids.extend(extract_correlation_ids(&requested));
+        for msg in &downstream {
+            wire_ids.extend(extract_correlation_ids(msg));
+        }
+        assert_all_equal_and_corr_prefixed(
+            &wire_ids,
+            "open_application wire chain (planned/requested/resolved/...)",
+        );
+
+        // Audit-level: every audit event in the chain shares the same id.
+        let audit_ids = extract_correlation_ids(&frame);
+        assert_all_equal_and_corr_prefixed(&audit_ids, "open_application audit chain");
+        assert_eq!(audit_ids[0], wire_ids[0], "wire and audit ids must match");
+    }
+
+    #[tokio::test]
+    async fn open_application_denied_chain_shares_correlation_id() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_open_application","application":"calendar"}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let _planned = recv_text(&mut ws).await;
+        let requested = recv_text(&mut ws).await;
+        let approval_id = extract_approval_id(&requested);
+        let deny = format!(
+            r#"{{"type":"approval_response","approval_id":"{approval_id}","decision":"denied"}}"#
+        );
+        ws.send(Message::Text(deny)).await.unwrap();
+        let _resolved = recv_text(&mut ws).await;
+        let _cancelled = recv_text(&mut ws).await;
+
+        ws.send(Message::Text(r#"{"type":"audit_recent"}"#.into()))
+            .await
+            .unwrap();
+        let frame = recv_text(&mut ws).await;
+        let ids = extract_correlation_ids(&frame);
+        assert_all_equal_and_corr_prefixed(&ids, "open_application denied chain");
+        // The cancel branch must keep the same id (no new id created
+        // for the deny audit event).
+        assert!(frame.contains(r#""kind":"action_cancelled""#));
+        assert!(frame.contains(r#""result":"denied""#));
+    }
+
+    #[tokio::test]
+    async fn open_application_timeout_chain_shares_correlation_id() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 1 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_open_application","application":"calendar"}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let _planned = recv_text(&mut ws).await;
+        let _requested = recv_text(&mut ws).await;
+        let _resolved = recv_text(&mut ws).await;
+        let _cancelled = recv_text(&mut ws).await;
+
+        ws.send(Message::Text(r#"{"type":"audit_recent"}"#.into()))
+            .await
+            .unwrap();
+        let frame = recv_text(&mut ws).await;
+        let ids = extract_correlation_ids(&frame);
+        assert_all_equal_and_corr_prefixed(&ids, "open_application timeout chain");
+        assert!(frame.contains(r#""result":"expired""#));
+        assert!(frame.contains(r#""source":"timeout""#));
+    }
+
+    #[tokio::test]
+    async fn double_approve_does_not_create_second_correlation_id() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"plan_demo_action","requires_approval":true}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let _planned = recv_text(&mut ws).await;
+        let requested = recv_text(&mut ws).await;
+        let approval_id = extract_approval_id(&requested);
+        let approve =
+            format!(r#"{{"type":"approval_approve","approval_id":"{approval_id}"}}"#);
+        ws.send(Message::Text(approve.clone())).await.unwrap();
+        let _resolved = recv_text(&mut ws).await;
+        let _started = recv_text(&mut ws).await;
+        let _step = recv_text(&mut ws).await;
+        let _completed = recv_text(&mut ws).await;
+        // Second approve: must produce ipc_command_rejected, NOT a
+        // fresh correlation_id.
+        ws.send(Message::Text(approve)).await.unwrap();
+        let _err = recv_text(&mut ws).await;
+
+        ws.send(Message::Text(r#"{"type":"audit_recent"}"#.into()))
+            .await
+            .unwrap();
+        let frame = recv_text(&mut ws).await;
+        let ids = extract_correlation_ids(&frame);
+        // Every correlated event in the audit must use the original id.
+        // The ipc_command_rejected audit entry intentionally has no
+        // correlation_id (it lives outside the original lifecycle), so
+        // we assert "exactly one distinct id" rather than "every audit
+        // entry carries it".
+        let distinct: std::collections::BTreeSet<&String> = ids.iter().collect();
+        assert_eq!(
+            distinct.len(),
+            1,
+            "double approve must not create a second correlation_id: {frame}",
+        );
+        assert!(frame.contains(r#""kind":"ipc_command_rejected""#));
+    }
+
+    #[tokio::test]
+    async fn audit_recent_includes_optional_correlation_id_for_action_events() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"plan_demo_action","title":"X","requires_approval":false}"#.into(),
+        ))
+        .await
+        .unwrap();
+        for _ in 0..4 {
+            let _ = recv_text(&mut ws).await;
+        }
+        ws.send(Message::Text(r#"{"type":"audit_recent"}"#.into()))
+            .await
+            .unwrap();
+        let frame = recv_text(&mut ws).await;
+        assert!(frame.contains(r#""correlation_id":"corr_"#));
+        // Wire shape stays additive — no `null` value leaks into JSON.
+        assert!(!frame.contains(r#""correlation_id":null"#));
+    }
+
+    #[tokio::test]
+    async fn non_action_commands_do_not_require_correlation_id() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(r#"{"type":"ping"}"#.into())).await.unwrap();
+        let pong = recv_text(&mut ws).await;
+        assert!(!pong.contains("correlation_id"));
+
+        ws.send(Message::Text(r#"{"type":"get_status"}"#.into()))
+            .await
+            .unwrap();
+        let status = recv_text(&mut ws).await;
+        assert!(!status.contains("correlation_id"));
+
+        ws.send(Message::Text(r#"{"type":"audit_recent"}"#.into()))
+            .await
+            .unwrap();
+        let frame = recv_text(&mut ws).await;
+        // Fresh server (no action ran): the audit list is empty, so the
+        // envelope itself must not carry a correlation_id either.
+        assert!(frame.contains(r#""events":[]"#));
+        assert!(!frame.contains("correlation_id"));
+    }
+
+    #[tokio::test]
+    async fn approval_request_carries_same_correlation_as_action() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"plan_demo_action","requires_approval":true}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let planned = recv_text(&mut ws).await;
+        let requested = recv_text(&mut ws).await;
+        let planned_ids = extract_correlation_ids(&planned);
+        let requested_ids = extract_correlation_ids(&requested);
+        assert_eq!(planned_ids.len(), 1, "action_planned must carry corr_id");
+        assert_eq!(requested_ids.len(), 1, "approval_requested must carry corr_id");
+        assert_eq!(planned_ids[0], requested_ids[0]);
+    }
+
+    #[tokio::test]
+    async fn action_completed_carries_same_correlation_as_action_started() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"plan_demo_action","requires_approval":false}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let _planned = recv_text(&mut ws).await;
+        let started = recv_text(&mut ws).await;
+        let _step = recv_text(&mut ws).await;
+        let completed = recv_text(&mut ws).await;
+        assert!(started.contains(r#""type":"action_started""#));
+        assert!(completed.contains(r#""type":"action_completed""#));
+        let started_ids = extract_correlation_ids(&started);
+        let completed_ids = extract_correlation_ids(&completed);
+        assert_eq!(started_ids.len(), 1);
+        assert_eq!(completed_ids.len(), 1);
+        assert_eq!(started_ids[0], completed_ids[0]);
     }
 }

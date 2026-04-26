@@ -11,9 +11,15 @@
 //! Siehe [`docs/security/AUDIT_TRAIL.md`](../../docs/security/AUDIT_TRAIL.md).
 #![allow(dead_code)]
 
+pub mod correlation;
 pub mod event;
 pub mod store;
 
+pub use correlation::generate_correlation_id;
+#[allow(unused_imports)]
+pub use correlation::{
+    CORRELATION_ID_PREFIX, MAX_CORRELATION_ID_LEN, MIN_CORRELATION_ID_LEN, sanitize_correlation_id,
+};
 pub use event::{
     AuditEvent, AuditFields, AuditKind, RESULT_CANCELLED, RESULT_COMPLETED, RESULT_DENIED,
     RESULT_EXPIRED, RESULT_REJECTED, SOURCE_CORE, SOURCE_UI,

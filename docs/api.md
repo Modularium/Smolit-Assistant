@@ -612,6 +612,34 @@ Ist-Zustand der tatsächlich emittierenden Pfade (Stand PR 14–19):
 `action_progress` ist im Enum reserviert, wird heute aber von
 **keinem** Emitter genutzt. UIs müssen die Variante tolerieren.
 
+#### Optional: `correlation_id` (PR 54)
+
+Seit PR 54 trägt jeder Action-/Approval-Lifecycle ein optionales,
+additives `correlation_id`-Feld. Es wird vom Core früh am Aktionspfad
+vergeben (z. B. in `plan_demo_action`, `interaction_open_application`,
+`interaction_focus_window`, `request_approval_demo`) und in jedem
+zugehörigen Outgoing-Payload mitgespiegelt:
+
+- `action_planned`, `action_started`, `action_step`,
+  `action_verification`, `action_completed`, `action_failed`,
+  `action_cancelled`, `action_progress`,
+- `approval_requested`, `approval_resolved`,
+- die zugehörigen `audit_recent`-Einträge (siehe 2.7).
+
+Eigenschaften:
+
+- **Additiv und optional.** Kein neues IPC-Command, kein neues
+  Outgoing-Envelope, keine Pflicht für Clients. Ältere UIs ignorieren
+  das Feld; ältere Emitter (z. B. Settings-Probes, `ping`,
+  `get_status`, `audit_recent` selbst) lassen es leer.
+- **Format.** `corr_<token>` mit Charset `[a-z0-9_]`, Länge ≤ 80
+  (Spec: [`docs/contracts/AUDIT_CORRELATION_ID_SPEC.md` §5](./contracts/AUDIT_CORRELATION_ID_SPEC.md)).
+- **Lokal.** Nur Smolit-Assistant erzeugt das Token; keine Cross-Repo-
+  Propagation in dieser PR (FA-3 → FA-6 bleiben Future Work).
+- **Stabil über den Lifecycle.** Approval-Klammer und Cancel-Pfade
+  behalten dieselbe `correlation_id`; ein Re-Approve erzeugt keine
+  zweite ID, sondern landet als `ipc_command_rejected` im Audit.
+
 #### Action Kinds (`action_kind`)
 
 `query` · `speech` · `ui` · `system` · `automation` · `unknown`.
@@ -1047,6 +1075,13 @@ sie eindeutig einem `action_id` zuordnen.
     `source: "user"|"timeout"|"system"|"ui"|"core"`,
     `summary: string` (hart auf 80 Zeichen gekürzt, Whitespace
     gestrippt). Felder ohne Wert werden nicht serialisiert.
+  - optional `correlation_id: "corr_<token>"` (PR 54 — Runtime FA-1
+    spike). Trägt den lokalen Lifecycle-Trace; siehe
+    [`docs/contracts/AUDIT_CORRELATION_ID_SPEC.md`](./contracts/AUDIT_CORRELATION_ID_SPEC.md)
+    §5. Audit-Einträge ohne Action-Kontext (z. B. ein
+    `audit_recent`-Read selbst, reine Settings-Probes oder
+    `ipc_command_rejected`-Refusals außerhalb eines Lifecycles)
+    lassen das Feld weg. Ältere UIs ignorieren es.
 
   Seit PR 32 (2026-04-24) erfasst der Ring-Buffer **zusätzlich zum
   `plan_demo_action`-Pfad** den echten

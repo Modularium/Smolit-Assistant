@@ -110,6 +110,36 @@ Ausgehend:
 werden nur serialisiert, wenn der Store sie nach Sanitisierung
 behalten hat.
 
+### Optional: `correlation_id` (PR 54)
+
+Seit PR 54 (Runtime FA-1 spike) trägt jeder AuditEvent, der zu einem
+Action-/Approval-Lifecycle gehört, ein optionales
+`correlation_id: "corr_<token>"`-Feld. Die ID wird vom Core früh am
+Aktionspfad vergeben (in `plan_demo_action`, `dispatch_interaction`,
+`request_approval_demo`) und durch alle Lifecycle-Schritte des
+gleichen Pfads gespiegelt — `IpcCommandReceived`, `ActionPlanned`,
+`ApprovalRequested`, `ApprovalResolved`, `ActionStarted`,
+`ActionCompleted`, `ActionCancelled`, `ActionFailed`.
+
+Garantien:
+
+- **Additiv und optional.** Kein neuer IPC-Command, kein neues
+  Outgoing-Envelope, keine Persistenz. Der Ring-Buffer bleibt
+  in-memory.
+- **Lokal.** Die ID verlässt den Prozess nicht; keine Cross-Repo-
+  Propagation, kein Distributed Tracing.
+- **Sanitisiert.** Format-Validator ist
+  `crate::audit::sanitize_correlation_id`; ungültige Eingaben
+  fallen zu `None`.
+- **Keine Userdaten.** Body-Inhalt ist ein lokal generiertes
+  `timestamp_ms+counter`-Hex-Token — keine Pfade, Hostnamen,
+  Secrets, Kommando-Strings (siehe Spec §5/§9).
+
+Audit-Einträge ohne Action-Kontext (z. B. ein `audit_recent`-Read
+selbst, reine Settings-Probes oder ein
+`ipc_command_rejected`-Refusal außerhalb eines Lifecycles) lassen
+das Feld weg.
+
 ## UI (PR 19)
 
 Ein kleines `AuditPanel` (`ui/scripts/audit/audit_panel.gd` +

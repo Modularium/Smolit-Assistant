@@ -173,6 +173,14 @@ pub struct AuditEvent {
     pub source: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
+    /// PR 54 — additives, optionales Korrelations-Token. Trägt eine
+    /// `corr_…`-Identität durch den lokalen Action-/Approval-Lifecycle
+    /// (Spec [`docs/contracts/AUDIT_CORRELATION_ID_SPEC.md`](../../../docs/contracts/AUDIT_CORRELATION_ID_SPEC.md)).
+    /// Bestehende Reader, die das Feld nicht kennen, ignorieren es;
+    /// AuditEvents ohne Action-Kontext (z. B. `audit_recent`-Reads,
+    /// reine Settings-Probes, ping/get_status) lassen es leer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
 }
 
 /// Felder-Bundle für einen neuen Audit-Eintrag. Wird vom Store
@@ -186,6 +194,7 @@ pub struct AuditFields {
     pub result: Option<String>,
     pub source: Option<String>,
     pub summary: Option<String>,
+    pub correlation_id: Option<String>,
 }
 
 impl AuditFields {
@@ -223,6 +232,22 @@ impl AuditFields {
         self
     }
 
+    /// PR 54 — additiver Builder für eine optionale `correlation_id`.
+    /// Validierung läuft in [`Self::sanitized`] über
+    /// [`crate::audit::sanitize_correlation_id`].
+    pub fn with_correlation_id(mut self, id: impl Into<String>) -> Self {
+        self.correlation_id = Some(id.into());
+        self
+    }
+
+    /// PR 54 — Convenience für `Option<&str>` / `Option<String>`,
+    /// damit Aufrufer nicht extra ein `if let Some(..)` schreiben
+    /// müssen, wenn der Lifecycle nur manchmal eine Korrelation hat.
+    pub fn with_correlation_id_opt<S: Into<String>>(mut self, id: Option<S>) -> Self {
+        self.correlation_id = id.map(Into::into);
+        self
+    }
+
     /// Sanitisiert die Felder. Leere Zeichenketten und unbekannte
     /// Vokabeln werden zu `None` — wir speichern lieber nichts als
     /// kaputten Kontext.
@@ -234,6 +259,7 @@ impl AuditFields {
             result: sanitize_result(self.result),
             source: sanitize_source(self.source),
             summary: sanitize_summary(self.summary),
+            correlation_id: super::correlation::sanitize_correlation_id(self.correlation_id),
         }
     }
 }

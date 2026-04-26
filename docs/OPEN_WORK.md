@@ -331,6 +331,29 @@ sind aktualisiert: die *dokumentarische* Lücke ist geschlossen,
 der *Implementation*-Gap bleibt offen — keine Runtime-Registry,
 kein `correlation_id`-Feld im Code, keine String-Konstanten.
 
+**Erledigt in PR 54 (2026-04-26, Runtime FA-1 spike):**
+Lokale Umsetzung der Audit Correlation ID Spec FA-1 in
+Smolit-Assistant. `AuditEvent`, alle Action-Lifecycle-Payloads
+(`ActionPlanned`, `ActionStarted`, `ActionStep`,
+`ActionVerification`, `ActionCompleted`, `ActionFailed`,
+`ActionCancelled`, `ActionProgress`), `ApprovalRequest` und
+`ApprovalResolvedPayload` tragen ein optionales
+`correlation_id: Option<String>`. Generator + Validator wohnen in
+[`core/src/audit/correlation.rs`](../../core/src/audit/correlation.rs);
+das Format hält Spec §5 ein (Prefix `corr_`, Charset `[a-z0-9_]`,
+Länge ≤ 80). `App::plan_demo_action`, `App::dispatch_interaction`
+und `App::request_approval_demo` vergeben die ID am frühesten Punkt
+und tragen sie durch IPC-Command-Receive →
+ActionPlanned → (ApprovalRequested → ApprovalResolved) →
+ActionStarted → ActionStep → ActionCompleted bzw. ActionCancelled.
+Double-Approve erzeugt keine zweite ID. Keine neuen IPC-Commands,
+kein neues Outgoing-Envelope, keine UI, keine Persistenz. Tests
+locken die Invariante (siehe
+[`PR54_CORRELATION_ID_RUNTIME.md`](./reviews/PR54_CORRELATION_ID_RUNTIME.md)).
+Folgearbeit: Cross-Repo-Propagation zu ABrain (echo), AdminBot
+(Pflicht für Mutation), OceanData (akzeptieren) — bleiben Spec
+FA-3 → FA-6.
+
 **Erledigt in PR 47 (2026-04-25, Docs/Contract-only):**
 [`docs/contracts/ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md`](./contracts/ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md)
 schließt ADR-0005 FA-1 auf Doku-Ebene. Vier Initial-Klassen
@@ -359,8 +382,14 @@ Reihe):**
   eigene Folge-PR-Reihe (siehe ADMINBOT_SAFETY_BOUNDARY_CONTRACT
   §17 AC-1…AC-7).
 - **FA-2.** ~~Audit Correlation ID Spec~~ — **erledigt in PR 46**.
-  *Implementation* (Feld in `AuditEvent`, Cross-Repo-Wire,
-  fail-closed-Verhalten) bleibt eigene Folge-PR-Reihe.
+  *Implementation* lokal in Smolit-Assistant ist **erledigt in
+  PR 54** (Runtime FA-1 spike): optionales `correlation_id` auf
+  `AuditEvent`, Action-Lifecycle-Payloads, `ApprovalRequest` und
+  `ApprovalResolvedPayload`; Generator/Validator in
+  [`core/src/audit/correlation.rs`](../../core/src/audit/correlation.rs).
+  Cross-Repo-Wire (ABrain-Echo, AdminBot-Pflicht, OceanData-
+  Akzeptanz) und fail-closed-Verhalten bleiben eigene Folge-PRs
+  (Spec FA-3 → FA-6).
 - **FA-3.** ~~Capability Vocabulary~~ — **erledigt in PR 46**.
   *Implementation* (Code-Konstanten, Validation-Tests, UI-Display-
   Names) bleibt eigene Folge-PR-Reihe.
