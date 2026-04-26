@@ -5,8 +5,14 @@ Ausführlicher Begleiter zum Quick-Start im
 Tester:innen auf einem Linux-Dev-Host (Ubuntu 24.04 / GNOME/Wayland
 primary; X11 für `focus_window`-Opt-in unterstützt).
 
-**Kein Packaging**, **keine CI-Pipeline**, **keine Install-Skripte** —
-das sind eigene Folge-PRs (Workstream I).
+**Keine binären Packages** (AppImage / `.deb` / Flatpak / Snap /
+Docker), **keine Install-Skripte**. v0.2.0 trägt keine
+Binär-Anhänge; Source-/Dev-Run ist der offizielle Install-Pfad.
+Die Packaging-Strategie ist als Proposed-ADR fixiert in
+[`docs/adr/ADR-0007-packaging-decision.md`](./adr/ADR-0007-packaging-decision.md);
+Implementation ist Future Work (Workstream I, Sequenz P1 → P6).
+GitHub-Actions-CI läuft (`core-test` + `ui-smoke`) und baut
+**keine** Artefakte.
 
 ## 1. Voraussetzungen im Detail
 

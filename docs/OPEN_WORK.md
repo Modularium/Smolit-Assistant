@@ -648,22 +648,60 @@ eine GitHub-Actions-Entscheidung; Packaging bleibt weiter aufgeschoben.
   Docker, **kein** Release-Tag, **kein** Dependabot, **keine**
   Matrix, **kein** Rust-Toolchain-Pinning.
 
-**Nächster kleinster PR (Future Work, nicht priorisiert):**
+**Erledigt:**
 
-- **PR 52 — Release Packaging Decision ADR** *(Vorschlag, Docs/
-  ADR-only)*. Welche Distributionen zuerst (Ubuntu 24.04 gesetzt;
-  Fedora / Arch / NixOS offen), welches Format (`.deb` vs.
-  AppImage vs. Flatpak), wie Signing-Chain funktioniert. **Rein
-  ADR, keine Implementation**, vor Code. *Hinweis:* PR-Nummer
-  zweifach verschoben — ehemals PR 48 (vor PR 49 Sync), dann
-  PR 51 (nach PR 49 Sync), nun PR 52 (PR 51 ist v0.2 Gate Fix
-  geworden — siehe
-  [`docs/reviews/PR51_V0_2_GATE_FIX.md`](./reviews/PR51_V0_2_GATE_FIX.md)).
-  Der Packaging-ADR rückt erst nach geschlossenem v0.2-Gate.
-- **CI-Folgearbeit (ohne Priorität):** optionale Cross-Linux-Matrix
-  (Ubuntu 24.04 + Arch-Container) sobald Packaging-ADR landet,
-  Rust-toolchain-Pinning via `rust-toolchain.toml` wenn Edition-/
-  MSRV-Stabilität zum Thema wird.
+- **PR 52 I-Packaging-Decision-ADR** *(2026-04-26, gelandet,
+  Docs/ADR-only, Status **Proposed**)*.
+  [`ADR-0007`](./adr/ADR-0007-packaging-decision.md) fixiert die
+  gestufte Linux-Desktop-zuerst-Packaging-Strategie vor Code.
+  **Phase 1:** Source/Dev bleibt offiziell unterstützt; AppImage
+  ist erster Binär-Kandidat (nach reproduzierbarem Local-Build-
+  Helper). **Phase 2:** `.deb` für Ubuntu/Debian erst nach
+  AppImage-Prototyp. **Phase 3:** Flatpak-Evaluation hinter
+  Permission-/Portal-ADR. Bewusst **nicht zuerst:** Snap, Docker
+  als Desktop-Distribution, `.rpm`, Windows/macOS. Sequenz P0–P6
+  mit Eintrittskriterien und Nicht-Zielen pro Phase. Pflichten:
+  SHA512-Checksums ab P2, Signing erst ab P5, kein Auto-Update
+  vor Signing-ADR, Loopback-IPC unverändert, Config user-scoped,
+  Secrets 0600, keine root/sudo-Erwartung, keine Modell-Downloads,
+  Wayland-/X11-Grenzen in Release-Notes. **Keine** Packaging-
+  Implementation, **keine** Export-Presets, **kein** AppImage/
+  `.deb`/Flatpak gebaut, **kein** Dockerfile, **kein** Signing,
+  **kein** Installer, **kein** Auto-Updater, **kein** Version-Bump,
+  **kein** neuer Release, **keine** Provider-/IPC-/UI-/Core-
+  Änderung. Begleitend: ADR-Index aktualisiert, ROADMAP §6.4 +
+  §6.5 spiegeln den geschlossenen v0.2-Gate; v0.2.0 ist als
+  Release ohne binäre Anhänge publiziert.
+
+**v0.2.0 Status (2026-04-26):** Tag `v0.2.0` auf `main`,
+[GitHub-Release](https://github.com/Modularium/Smolit-Assistant/releases/tag/v0.2.0)
+publiziert (keine binären Anhänge). Source-/Dev-Run aus README §5
++ `docs/SETUP.md` bleibt offizieller Install-Pfad.
+
+**Folgearbeiten aus PR 52 (alle nicht priorisiert, keine Termine):**
+
+- **FA-1 — Reproducible local build script (P1).** Helper, der
+  `cargo build --release` + Godot-Export + Bundle-Layout
+  deterministisch produziert. Eigener PR, eigene Verifikation.
+- **FA-2 — Godot Export Presets (P1-Voraussetzung).** Eigener PR
+  vor jedem Binär-Format.
+- **FA-3 — AppImage Prototype + Checksum (P2).** Erst nach FA-1.
+- **FA-4 — `.deb` Prototype (P3).** Erst nach P2.
+- **FA-5 — Flatpak Permission Review ADR (P4).** Eigener Folge-
+  ADR (ADR-0008+) vor Manifest-Code.
+- **FA-6 — Signing & Update Policy ADR (P5).** Eigener Folge-ADR
+  bevor wir „stable binary distribution" behaupten.
+- **FA-7 — Multi-distro CI Matrix (P6).** Erst nach P5.
+- **FA-8 — Release Notes Template** mit Wayland-/X11-/`focus_window`-
+  Realität.
+- **FA-9 — Re-Evaluation Snap / Docker** *(optional)* falls
+  externe Anforderung explizit auftaucht.
+
+**CI-Folgearbeit (ohne Priorität, unabhängig vom Packaging):**
+optionale Cross-Linux-Matrix (Ubuntu 24.04 + Arch-Container)
+sobald P2/P3 reale Artefakte produziert; Rust-toolchain-Pinning
+via `rust-toolchain.toml` wenn Edition-/MSRV-Stabilität zum
+Thema wird.
 
 **Nicht-Ziele (unverändert):**
 
