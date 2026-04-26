@@ -223,6 +223,7 @@ die Settings-Shell
 | `SMOLIT_INTERACTION_ALLOW_TYPE_TEXT` | `false` | Kein Backend. Flag-Flip hat **keine** Wirkung. |
 | `SMOLIT_INTERACTION_ALLOW_SHORTCUTS` | `false` | Kein Backend. |
 | `SMOLIT_APPROVAL_TIMEOUT_SECONDS` | `20` | Approval-Wartezeit bis `timed_out`. |
+| `SMOLIT_ACCESSIBILITY_RPC_ENABLED` | `false` | **Experimental, read-only** AT-SPI registry FA-1 (PR 53, [`ADR-0002`](./adr/ADR-0002-accessibility-rpc-readonly.md)). Default-off. Aktivierung braucht zusätzlich den Cargo-Build-Feature-Flag `accessibility_rpc` (`cargo build --features accessibility_rpc`); ohne den Feature-Flag bleibt der Pfad `unavailable` mit Reason `accessibility_rpc_feature_disabled`. Mit Feature+Env, aber ohne realen Registry-Client (FA-1 partial): `accessibility_rpc_backend_not_implemented`. **Kein** Klick / Tippen / Shortcut / Fokuswechsel / Tree-Walk; **kein** Approval-Bypass. |
 
 ### 3.5 UI / Overlay / Dev
 

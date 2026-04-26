@@ -3,6 +3,14 @@ name = "smolit-assistant-core"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+# Default build keeps the read-only env-based accessibility probe; no AT-SPI
+# RPC client is compiled in. Opt-in via `--features accessibility_rpc`.
+# FA-1 partial spike (PR 53) only wires the trait + verified-only-from-
+# registry path — no real `atspi`/`zbus` client yet, see ADR-0002.
+default = []
+accessibility_rpc = []
+
 [dependencies]
 tokio = { version = "1", features = ["io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 serde = { version = "1", features = ["derive"] }

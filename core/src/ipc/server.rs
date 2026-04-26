@@ -802,6 +802,7 @@ mod tests {
             },
             interaction,
             approval,
+            accessibility: crate::config::AccessibilityConfig::default(),
             text_provider: crate::config::TextProviderConfig {
                 chain: vec!["abrain".into()],
                 llamafile: crate::config::LlamafileConfig::default(),
@@ -1106,6 +1107,7 @@ mod tests {
                 focus_window_cmd_template: Some("/bin/true".into()),
             },
             approval: default_approval_config(),
+            accessibility: crate::config::AccessibilityConfig::default(),
             text_provider: crate::config::TextProviderConfig {
                 chain: vec!["abrain".into()],
                 llamafile: crate::config::LlamafileConfig::default(),
@@ -1170,6 +1172,7 @@ mod tests {
                 focus_window_cmd_template: Some("/bin/true".into()),
             },
             approval: default_approval_config(),
+            accessibility: crate::config::AccessibilityConfig::default(),
             text_provider: crate::config::TextProviderConfig {
                 chain: vec!["abrain".into()],
                 llamafile: crate::config::LlamafileConfig::default(),
@@ -1232,6 +1235,7 @@ mod tests {
                 focus_window_cmd_template: Some("/bin/true".into()),
             },
             approval: default_approval_config(),
+            accessibility: crate::config::AccessibilityConfig::default(),
             text_provider: crate::config::TextProviderConfig {
                 chain: vec!["llamafile_local".into(), "abrain".into()],
                 llamafile: crate::config::LlamafileConfig {
@@ -1326,6 +1330,7 @@ mod tests {
                 focus_window_cmd_template: Some("/bin/true".into()),
             },
             approval: default_approval_config(),
+            accessibility: crate::config::AccessibilityConfig::default(),
             text_provider: crate::config::TextProviderConfig {
                 chain: vec!["llamafile_local".into(), "abrain".into()],
                 llamafile: crate::config::LlamafileConfig {
@@ -1757,6 +1762,7 @@ mod tests {
                 focus_window_cmd_template: Some("/bin/true".into()),
             },
             approval: default_approval_config(),
+            accessibility: crate::config::AccessibilityConfig::default(),
             text_provider: crate::config::TextProviderConfig {
                 chain: vec!["local_http".into(), "abrain".into()],
                 llamafile: crate::config::LlamafileConfig::default(),
@@ -1806,6 +1812,7 @@ mod tests {
                 focus_window_cmd_template: Some("/bin/true".into()),
             },
             approval: default_approval_config(),
+            accessibility: crate::config::AccessibilityConfig::default(),
             text_provider: crate::config::TextProviderConfig {
                 chain: vec!["cloud_http".into(), "abrain".into()],
                 llamafile: crate::config::LlamafileConfig::default(),

@@ -444,14 +444,48 @@ Entscheidung vor Backend-Arbeit.
   echten Registry-Call stammen, heutige Hint-Echos bleiben
   `discovered`. Kein Code in diesem PR.
 
+**Erledigt (Code-Spike, partial):**
+
+- **PR 53 F-Accessibility-RPC-FA-1-Spike** *(2026-04-26, gelandet,
+  default-off, **partial spike**)*. Cargo-Feature
+  `accessibility_rpc` + Runtime-Env
+  `SMOLIT_ACCESSIBILITY_RPC_ENABLED=1` + mockable
+  `AccessibilityRegistryClient`-Trait + neuer Datentyp
+  `RegistryRootChild` + Fehlerklassen `AccessibilityRpcError` in
+  [`core/src/interaction/accessibility.rs`](../core/src/interaction/accessibility.rs).
+  Verified-only-from-registry-Konstruktor
+  (`RegistryRootChild::into_verified_item`) ist der **einzige**
+  Pfad, der `confidence: verified` produziert; Password / Invisible
+  / Unnamed Rows werden vor dem Wire gefiltert. Production hat
+  **keinen** echten `atspi`/`zbus`-Client gewired — der Gate-Pfad
+  (Config + Feature + Client) fällt honest auf
+  `Unavailable { reason: "accessibility_rpc_backend_not_implemented" }`
+  zurück. 10 neue Invarianten-Tests im Default-Build (alle ohne
+  echte AT-SPI-Session) plus ein feature-gated End-to-End-Test mit
+  Mock-Client. **Keine** neuen IPC-Commands, **keine** UI-Änderung,
+  **keine** neuen Cargo-Dependencies, **kein** `DoAction`, **kein**
+  Klick / Tippen / Shortcut, **kein** Tree-Walk > Tiefe 1.
+  Details:
+  [`docs/reviews/PR53_ACCESSIBILITY_RPC_FA1.md`](./reviews/PR53_ACCESSIBILITY_RPC_FA1.md).
+
 **Nächster kleinster PR (Future Work, nicht priorisiert):**
 
-- **FA-1 — accessibility_rpc-Feature-Spike.** Setzt ADR-0002 D1–D5
-  um: `atspi`+`zbus` hinter Feature-Flag, Registry-Root-Children-
-  Read, Failure-Mode-Mapping aus ADR-0002. Eigener PR mit eigenen
-  Tests und Packaging-Note (Flatpak: `--talk-name=org.a11y.Bus`).
-- **FA-2/FA-3/FA-4 — eigene ADRs vor Code** für Name-Match-Pfad,
-  Toolkit-Gaps und Wayland-Portal-Fokus.
+- **FA-1-Folge — Real registry client.** Eigener PR, der einen
+  produktiven `AccessibilityRegistryClient` mit `atspi` + `zbus`
+  liefert. Vorbedingung: Permission-Review für Flatpak
+  (`--talk-name=org.a11y.Bus`) plus Real-Host-AT-SPI-Messung. Erst
+  damit kann der Production-Pfad statt
+  `accessibility_rpc_backend_not_implemented` echte
+  `Verified`-Items emittieren.
+- **UI-Readout** für `confidence: verified` vs. `discovered`
+  *(falls* die UI vor dem realen Client schon eine Differenzierung
+  zeigen soll). Nicht erforderlich für FA-1, weil der Default-Build
+  weiterhin nur `discovered` produziert.
+- **Permission-Docs** für Flatpak / Snap / `.deb` (siehe
+  [ADR-0007 §11](./adr/ADR-0007-packaging-decision.md)).
+- **FA-2/FA-3/FA-4 — eigene ADRs vor Code** für Name-Match-Pfad
+  (`inspect_target(hint)` → Registry + Name-Filter), Toolkit-Gaps
+  und Wayland-Portal-Fokus.
 
 `focus_window` bleibt mit PR 23 abgeschlossen; `type_text` /
 `send_shortcut` bekommen auch hier **keinen** Backend-Pfad.
