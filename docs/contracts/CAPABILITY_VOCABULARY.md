@@ -1,11 +1,16 @@
 # Capability Vocabulary
 
-- **Status:** Draft / Proposed (Docs/Contract-only — keine Code-
-  Implementation in PR 46).
-- **Date:** 2026-04-25.
-- **Scope:** Cross-Repo. Beschreibt das gemeinsame Vokabular für
-  Capability-Klassen zwischen Smolit-Assistant, ABrain, AdminBot
-  und OceanData.
+- **Status:** Runtime FA-1 implemented in Smolit-Assistant (PR 55).
+  Cross-Repo-Bindung (FA-3 → FA-6) bleibt Docs/Future-Work.
+- **Date:** 2026-04-25 (Draft); 2026-04-26 (Runtime FA-1 spike).
+- **Scope:** Cross-Repo *Spec*; lokale Runtime-Implementation bleibt
+  bewusst auf Smolit-Assistant beschränkt. Smolit-Assistant kennt
+  jetzt eine kleine Konstanten-/Mapping-Schicht
+  ([`core/src/capabilities.rs`](../../core/src/capabilities.rs))
+  und trägt optional `capability_id` durch
+  Audit/Approval-Lifecycle. Es gibt **keine** dynamische Registry,
+  **keine** Policy Engine, **keine** AdminBot/OceanData/ABrain-
+  Integration.
 - **Workstream:** E (Approval / Policy / Tool-Gating) — Folgearbeit
   aus PR 44 §12 und PR 45
   [`ADR-0005 §14 FA-3`](../adr/ADR-0005-adminbot-safety-boundary.md).
@@ -278,15 +283,28 @@ kanonisch ihre eigenen `purpose`-/`AccessDecision`-Vokabularien
 
 ## 11. Non-goals
 
-- **Kein Code.** Keine Konstanten in `core/src/`.
-- **Keine Runtime-Registry.** Diese Datei beschreibt Sprache, nicht
-  Datenstruktur.
+PR 46 war Docs/Contract-only. PR 55 (Runtime FA-1 spike) bleibt
+ebenfalls eng gehalten — die folgenden Punkte sind weiterhin
+**außerhalb** des Scopes:
+
+- **Keine dynamische Registry.** Die Konstanten in
+  [`core/src/capabilities.rs`](../../core/src/capabilities.rs) sind
+  rein statisch; es gibt keine Lade-/Schreibe-Datei, kein Plug-in,
+  keine Runtime-Erweiterung.
+- **Keine Policy Engine.** Die Helper `requires_approval_by_default`
+  / `audit_required_by_default` / `correlation_required_by_default`
+  sind **descriptive metadata**. Die Approval-Linie bleibt Policy v0
+  (PR 25); die Helper verändern keine Entscheidung.
 - **Keine AdminBot-Capability-Registry-Änderung.**
 - **Keine Provider-Whitelist-Erweiterung** (siehe
   [`docs/provider_fallback_and_settings_architecture.md`](../provider_fallback_and_settings_architecture.md)).
-- **Keine Policy-Engine** im „grand design"-Sinn.
 - **Kein UI-Label-Replacement** — eine Approval-Card zeigt
   weiterhin `operator_visible_summary`, nicht den `capability_id`.
+- **Kein neues IPC-Command, kein neues Outgoing-Envelope** nur für
+  Capability. PR 55 fügt rein additive Felder zu bestehenden
+  Payloads (`AuditEvent`, `ApprovalRequest`) hinzu.
+- **Keine Cross-Repo-Wire** — kein ABrain-Echo, kein
+  AdminBot-Pflicht-Pfad, kein OceanData-Akzeptanz.
 - **Keine Edits** an ABrain / Smolit_AdminBot / OceanData /
   smolitux-ui.
 - **Keine Token-Implementation** auf der smolitux-ui-Seite.
@@ -295,20 +313,32 @@ kanonisch ihre eigenen `purpose`-/`AccessDecision`-Vokabularien
 
 Reihenfolge nicht bindend; alle Schritte hinter eigenen PRs:
 
-- **FA-1.** Code-Konstanten in `core/src/` für Capability-IDs der
-  heute live Capabilities (`interaction.*`, `assistant.*`,
-  `provider.*`, `audit.*`). Reine String-Konstanten, keine
-  Registry.
-- **FA-2.** Validation-Tests gegen die Naming-Regeln aus §3.
+- **FA-1.** *Erledigt in PR 55* — Code-Konstanten +
+  Mapping-Helfer in
+  [`core/src/capabilities.rs`](../../core/src/capabilities.rs);
+  optionales `capability_id`-Feld auf `AuditEvent`,
+  `AuditFields`, `ApprovalRequest`. `plan_demo_action`,
+  `dispatch_interaction` und `request_approval_demo` schreiben
+  die kanonische Capability in den Audit-/Approval-Lifecycle.
+  Admin- und Data-IDs sind als Dokumentations-Konstanten
+  vorhanden, aber `is_executable_today` liefert für sie `false`.
+- **FA-2.** *Erledigt in PR 55* — Validation-Tests gegen die
+  Naming-Regeln aus §3 (siehe
+  `capability_ids_match_naming_rules`,
+  `known_capability_ids_match_documented_values`,
+  `invalid_capability_id_is_not_accepted` in
+  [`core/src/capabilities.rs`](../../core/src/capabilities.rs)).
 - **FA-3.** AdminBot-Capability-Mapping in einem zukünftigen
   `docs/contracts/ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md`
   ([ADR-0005 §14 FA-1](../adr/ADR-0005-adminbot-safety-boundary.md)).
 - **FA-4.** Policy-Regeln, die `capability_id` als
   Eingabe nehmen (z. B. „blocke `provider.text.generate` mit
-  `cloud_http`-Provider, wenn Privacy-Mode aktiv").
+  `cloud_http`-Provider, wenn Privacy-Mode aktiv"). PR 55 stellt
+  die Code-Konstanten bereit; eine Policy-Engine wäre eigene
+  Folge-Arbeit.
 - **FA-5.** UI-Display-Names — Approval-Card-Texte pro
   Capability-ID, lokalisiert.
-- **FA-6.** Audit-Sanitization-Erweiterung: `capability_id` darf
-  in Audit-Summaries durchgereicht werden (im Gegensatz zu rohen
-  Argumenten — siehe
-  [`docs/security/AUDIT_TRAIL.md`](../security/AUDIT_TRAIL.md)).
+- **FA-6.** Audit-Sanitization-Erweiterung: `capability_id` ist in
+  PR 55 schon im AuditEvent zugelassen; eine spätere Variante
+  könnte den kanonischen Capability-Namen auch in `summary` führen
+  — heute bewusst nicht.

@@ -100,6 +100,16 @@ Es gibt **kein** neues IPC-Command, **kein** neues Wire-Envelope und
 Emitter (z. B. Settings-Probes, `ping`, `get_status`,
 `audit_recent`-Read selbst) lassen es leer.
 
+PR 55 (Runtime FA-1 für [`CAPABILITY_VOCABULARY.md`](./CAPABILITY_VOCABULARY.md))
+ergänzt einen zweiten optionalen Marker: AuditEvents im lokalen
+Action-Lifecycle tragen ab jetzt `correlation_id` und `capability_id`
+**gemeinsam**. Die `capability_id` kommt aus den kuratierten
+Konstanten in
+[`core/src/capabilities.rs`](../../core/src/capabilities.rs); sie ist
+descriptive metadata und ändert keine Korrelations- oder
+Approval-Entscheidung. Cross-Repo-Propagation der `capability_id`
+bleibt ebenfalls Future Work.
+
 ## 4. Correlation model
 
 ```

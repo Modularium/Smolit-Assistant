@@ -140,6 +140,48 @@ selbst, reine Settings-Probes oder ein
 `ipc_command_rejected`-Refusal außerhalb eines Lifecycles) lassen
 das Feld weg.
 
+### Optional: `capability_id` (PR 55)
+
+Seit PR 55 (Runtime FA-1 für
+[`CAPABILITY_VOCABULARY.md`](../contracts/CAPABILITY_VOCABULARY.md))
+trägt jeder AuditEvent eines lokalen Action-Lifecycles zusätzlich
+ein optionales `capability_id`-Feld. Es benennt die kanonische
+Capability laut Vocabulary §5; Werte stammen ausschließlich aus
+[`crate::capabilities::KNOWN_CAPABILITY_IDS`].
+
+Garantien:
+
+- **Whitelist-only.** `AuditFields::sanitized()` ruft
+  `crate::capabilities::sanitize_capability_id` — User-Strings
+  ohne Vocab-Eintrag werden zu `None` geklemmt und nie
+  geschrieben. Keine User-Eingabe landet als Capability im
+  Audit-Store.
+- **Descriptive metadata.** Das Feld ist *kein* Eingabewert für
+  eine Permission-Entscheidung. Approval / Risk / Audit-Required
+  bleiben in Policy v0 + bestehender Approval-Linie.
+- **Stabil über den Lifecycle.** Eine Action behält ihre
+  Capability-ID über IpcCommandReceived → ActionPlanned →
+  (ApprovalRequested → ApprovalResolved) → ActionStarted/Step/
+  Completed bzw. ActionCancelled. Re-Approve / Cancel / Timeout
+  erzeugen keinen neuen Wert.
+- **Anti-Rekursion.** `audit_recent` selbst löst keinen
+  Audit-Eintrag aus; folglich erscheint `audit.read_recent` nicht
+  als Audit-Capability.
+
+Heute geschriebene Werte:
+
+- `interaction.open_application` für `interaction_open_application`
+- `interaction.focus_window` für `interaction_focus_window`
+- `assistant.demo.echo` / `assistant.demo.wait` /
+  `assistant.plan_demo_action` für die `plan_demo_action`-Pfade
+  (kind-abhängig)
+- `assistant.plan_demo_action` für `request_approval_demo`
+
+Admin- und Data-Capabilities sind im Vokabular geführt, aber
+[`crate::capabilities::is_executable_today`] liefert für sie
+`false` — sie können nicht ausgeführt und folglich auch nicht in
+einen lebenden Audit-Lifecycle geschrieben werden.
+
 ## UI (PR 19)
 
 Ein kleines `AuditPanel` (`ui/scripts/audit/audit_panel.gd` +

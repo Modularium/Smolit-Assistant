@@ -1010,6 +1010,10 @@ impl App {
             selected_target: None,
             risk: sanitized_risk,
             correlation_id: Some(correlation_id.clone()),
+            // PR 55 — der Demo-Approval-Pfad ist genau der
+            // Planner-Lifecycle ohne Mock-Executor; die Capability
+            // bleibt `assistant.plan_demo_action`.
+            capability_id: Some(crate::capabilities::ASSISTANT_PLAN_DEMO_ACTION.to_string()),
         };
         let rx = self.pending_approvals.register(&approval_id);
 
@@ -1108,6 +1112,12 @@ impl App {
         // Completed bzw. ActionCancelled. Sie verlässt den Prozess
         // nicht und wird nirgends persistiert.
         let correlation_id = crate::audit::generate_correlation_id();
+        // PR 55 — die Capability bleibt über den ganzen Planner-
+        // Lifecycle stabil und folgt dem Demo-Kind:
+        //   demo_echo → assistant.demo.echo
+        //   demo_wait → assistant.demo.wait
+        //   noop / unknown → assistant.plan_demo_action
+        let capability_id = crate::capabilities::capability_id_for_plan(&plan.kind);
         let mut out: Vec<OutgoingMessage> = Vec::new();
 
         // PR 19 — Audit: der IPC-Command ist angekommen. Summary ist
@@ -1120,7 +1130,8 @@ impl App {
                 .with_risk(&plan.risk)
                 .with_source(crate::audit::SOURCE_UI)
                 .with_summary(format!("plan_demo_action kind={}", plan.kind))
-                .with_correlation_id(&correlation_id),
+                .with_correlation_id(&correlation_id)
+                .with_capability_id(capability_id),
         );
 
         // `action_planned` trägt den demo-kuratierten Titel. `target`
@@ -1143,7 +1154,8 @@ impl App {
                 .with_risk(&plan.risk)
                 .with_source(crate::audit::SOURCE_CORE)
                 .with_summary(&plan.title)
-                .with_correlation_id(&correlation_id),
+                .with_correlation_id(&correlation_id)
+                .with_capability_id(capability_id),
         );
 
         if requires_approval {
@@ -1161,6 +1173,7 @@ impl App {
                 selected_target: None,
                 risk: plan.risk.clone(),
                 correlation_id: Some(correlation_id.clone()),
+                capability_id: Some(capability_id.to_string()),
             };
             let rx = self.pending_approvals.register(&approval_id);
             out.push(OutgoingMessage::ApprovalRequested { payload: request });
@@ -1172,7 +1185,8 @@ impl App {
                     .with_risk(&plan.risk)
                     .with_source(crate::audit::SOURCE_CORE)
                     .with_summary(&plan.title)
-                    .with_correlation_id(&correlation_id),
+                    .with_correlation_id(&correlation_id)
+                    .with_capability_id(capability_id),
             );
 
             let app = Arc::clone(self);
@@ -1239,6 +1253,10 @@ impl App {
                 correlation_id: Some(correlation_id.clone()),
             },
         });
+        // PR 55 — Capability bleibt über die ganze Approval-Klammer
+        // stabil; Re-Resolves auf demselben Plan erzeugen keine neue
+        // Capability.
+        let capability_id = crate::capabilities::capability_id_for_plan(&plan.kind);
         // PR 19 — Audit: die Resolution markiert das Ende der
         // Approval-Klammer. `result` trägt die Decision, `source` die
         // Herkunft.
@@ -1251,7 +1269,8 @@ impl App {
                 .with_result(decision.as_str())
                 .with_source(&source)
                 .with_summary(&plan.title)
-                .with_correlation_id(&correlation_id),
+                .with_correlation_id(&correlation_id)
+                .with_capability_id(capability_id),
         );
 
         match decision {
@@ -1320,6 +1339,7 @@ impl App {
         source: &str,
         correlation_id: &str,
     ) {
+        let capability_id = crate::capabilities::capability_id_for_plan(&plan.kind);
         self.audit.record(
             crate::audit::AuditKind::ActionCancelled,
             crate::audit::AuditFields::new()
@@ -1328,7 +1348,8 @@ impl App {
                 .with_result(result)
                 .with_source(source)
                 .with_summary(&plan.title)
-                .with_correlation_id(correlation_id),
+                .with_correlation_id(correlation_id)
+                .with_capability_id(capability_id),
         );
     }
 
@@ -1345,6 +1366,7 @@ impl App {
             return;
         }
         plan.set_status(crate::actions::DemoPlanStatus::Running);
+        let capability_id = crate::capabilities::capability_id_for_plan(&plan.kind);
         self.broadcast(OutgoingMessage::ActionStarted {
             payload: crate::actions::ActionStartedPayload {
                 action_id: plan.action_id.clone(),
@@ -1359,7 +1381,8 @@ impl App {
                 .with_risk(&plan.risk)
                 .with_source(crate::audit::SOURCE_CORE)
                 .with_summary(&plan.title)
-                .with_correlation_id(&correlation_id),
+                .with_correlation_id(&correlation_id)
+                .with_capability_id(capability_id),
         );
         self.broadcast(OutgoingMessage::ActionStep {
             payload: crate::actions::ActionStepPayload {
@@ -1392,7 +1415,8 @@ impl App {
                 .with_result(crate::audit::RESULT_COMPLETED)
                 .with_source(crate::audit::SOURCE_CORE)
                 .with_summary(&plan.title)
-                .with_correlation_id(&correlation_id),
+                .with_correlation_id(&correlation_id)
+                .with_capability_id(capability_id),
         );
     }
 
@@ -1426,6 +1450,11 @@ impl App {
                 fresh
             }
         };
+        // PR 55 — Capability bleibt über den ganzen
+        // Interaction-Lifecycle stabil und folgt dem InteractionKind.
+        // `Noop` / `Unknown` haben keine Capability — der Audit-Pfad
+        // läuft dann ohne `capability_id`.
+        let capability_id = crate::capabilities::capability_id_for_interaction(action.kind());
 
         // PR 32 — Audit: IPC-Command-Received for real interaction
         // actions. Summary carries only the interaction kind name
@@ -1443,7 +1472,8 @@ impl App {
                     action.kind().as_str(),
                     action.title,
                 ))
-                .with_correlation_id(&correlation_id),
+                .with_correlation_id(&correlation_id)
+                .with_capability_id_opt(capability_id),
         );
 
         out.push(self.interaction.plan_event(&action));
@@ -1456,7 +1486,8 @@ impl App {
                 .with_action_id(&action.action_id)
                 .with_source(SOURCE_CORE)
                 .with_summary(&action.title)
-                .with_correlation_id(&correlation_id),
+                .with_correlation_id(&correlation_id)
+                .with_capability_id_opt(capability_id),
         );
 
         if let Err(err) = self.interaction.policy().allows(action.kind()) {
@@ -1477,7 +1508,8 @@ impl App {
                     .with_result(RESULT_FAILED)
                     .with_source(SOURCE_CORE)
                     .with_summary(&action.title)
-                    .with_correlation_id(&correlation_id),
+                    .with_correlation_id(&correlation_id)
+                    .with_capability_id_opt(capability_id),
             );
             return out;
         }
@@ -1510,6 +1542,7 @@ impl App {
             // eigene Policy-Linie (außerhalb PR 17).
             risk: RISK_MEDIUM.to_string(),
             correlation_id: Some(correlation_id.clone()),
+            capability_id: capability_id.map(str::to_string),
         };
         let rx = self.pending_approvals.register(&approval_id);
         out.push(OutgoingMessage::ApprovalRequested { payload: request });
@@ -1525,7 +1558,8 @@ impl App {
                 .with_risk(RISK_MEDIUM)
                 .with_source(SOURCE_CORE)
                 .with_summary(&action.title)
-                .with_correlation_id(&correlation_id),
+                .with_correlation_id(&correlation_id)
+                .with_capability_id_opt(capability_id),
         );
 
         let app = Arc::clone(self);
@@ -1552,6 +1586,8 @@ impl App {
         // ist ein Audit-Hinweis, kein Hard-Fail im lokalen Spike.
         let correlation_id = action.correlation_id.clone();
         let correlation_id_ref = correlation_id.as_deref();
+        // PR 55 — Capability bleibt über Approval/Cancel-Branch stabil.
+        let capability_id = crate::capabilities::capability_id_for_interaction(action.kind());
         let (decision, source) = match timeout(Duration::from_secs(timeout_seconds), rx).await {
             Ok(Ok(decision)) => (decision, SOURCE_USER.to_string()),
             Ok(Err(_)) => {
@@ -1605,7 +1641,8 @@ impl App {
                 .with_result(resolved_result)
                 .with_source(&source)
                 .with_summary(&action.title)
-                .with_correlation_id_opt(correlation_id_ref),
+                .with_correlation_id_opt(correlation_id_ref)
+                .with_capability_id_opt(capability_id),
         );
 
         match decision {
@@ -1653,7 +1690,8 @@ impl App {
                         .with_result(cancel_result)
                         .with_source(&source)
                         .with_summary(&action.title)
-                        .with_correlation_id_opt(correlation_id_ref),
+                        .with_correlation_id_opt(correlation_id_ref)
+                        .with_capability_id_opt(capability_id),
                 );
             }
         }
@@ -1683,6 +1721,8 @@ impl App {
         messages: &[OutgoingMessage],
     ) {
         let correlation = action.correlation_id.as_deref();
+        // PR 55 — Capability bleibt über alle Lifecycle-Frames stabil.
+        let capability_id = crate::capabilities::capability_id_for_interaction(action.kind());
         for msg in messages {
             match msg {
                 OutgoingMessage::ActionStarted { .. } => {
@@ -1692,7 +1732,8 @@ impl App {
                             .with_action_id(&action.action_id)
                             .with_source(SOURCE_CORE)
                             .with_summary(&action.title)
-                            .with_correlation_id_opt(correlation),
+                            .with_correlation_id_opt(correlation)
+                            .with_capability_id_opt(capability_id),
                     );
                 }
                 OutgoingMessage::ActionCompleted { payload } => {
@@ -1708,7 +1749,8 @@ impl App {
                             .with_result(result)
                             .with_source(SOURCE_CORE)
                             .with_summary(&action.title)
-                            .with_correlation_id_opt(correlation),
+                            .with_correlation_id_opt(correlation)
+                            .with_capability_id_opt(capability_id),
                     );
                 }
                 OutgoingMessage::ActionFailed { .. } => {
@@ -1719,7 +1761,8 @@ impl App {
                             .with_result(RESULT_FAILED)
                             .with_source(SOURCE_CORE)
                             .with_summary(&action.title)
-                            .with_correlation_id_opt(correlation),
+                            .with_correlation_id_opt(correlation)
+                            .with_capability_id_opt(capability_id),
                     );
                 }
                 OutgoingMessage::ActionCancelled { .. } => {
@@ -1730,7 +1773,8 @@ impl App {
                             .with_result(RESULT_CANCELLED)
                             .with_source(SOURCE_CORE)
                             .with_summary(&action.title)
-                            .with_correlation_id_opt(correlation),
+                            .with_correlation_id_opt(correlation)
+                            .with_capability_id_opt(capability_id),
                     );
                 }
                 _ => {}

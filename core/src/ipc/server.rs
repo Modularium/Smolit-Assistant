@@ -5030,4 +5030,237 @@ mod tests {
         assert_eq!(completed_ids.len(), 1);
         assert_eq!(started_ids[0], completed_ids[0]);
     }
+
+    // --- PR 55 — Capability Constants Runtime Spike ---
+    //
+    // Lockt das in PR 55 eingeführte `capability_id`-Wiring:
+    //   * `plan_demo_action`-Lifecycle trägt eine Capability-ID,
+    //     die zum gewählten Demo-Kind passt.
+    //   * `interaction_open_application`-Lifecycle trägt
+    //     `interaction.open_application` über alle Audit-Frames.
+    //   * Cancel-Branches behalten dieselbe Capability-ID.
+    //   * `audit_recent` selbst trägt **kein** `capability_id` —
+    //     non-Action-Reads sind nicht klassifiziert.
+    //   * Ungültige Capability-IDs werden in der Audit-Sanitization
+    //     verworfen.
+    //   * Unsupported Interactions (`type_text` / `send_shortcut`)
+    //     bleiben unsupported — Mapping ohne Aktivierung.
+
+    fn extract_capability_ids(frame: &str) -> Vec<String> {
+        const PAT: &str = r#""capability_id":""#;
+        let mut out = Vec::new();
+        let mut cursor = 0;
+        while let Some(rel) = frame[cursor..].find(PAT) {
+            let start = cursor + rel + PAT.len();
+            if let Some(end_rel) = frame[start..].find('"') {
+                out.push(frame[start..start + end_rel].to_string());
+                cursor = start + end_rel + 1;
+            } else {
+                break;
+            }
+        }
+        out
+    }
+
+    #[tokio::test]
+    async fn plan_demo_action_audit_events_include_capability_id() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"plan_demo_action","title":"Echo","kind":"demo_echo","requires_approval":false}"#.into(),
+        ))
+        .await
+        .unwrap();
+        // Drain inline + executor frames.
+        for _ in 0..4 {
+            let _ = recv_text(&mut ws).await;
+        }
+
+        ws.send(Message::Text(r#"{"type":"audit_recent"}"#.into()))
+            .await
+            .unwrap();
+        let frame = recv_text(&mut ws).await;
+        let ids = extract_capability_ids(&frame);
+        assert!(
+            !ids.is_empty(),
+            "audit chain must carry capability_id values: {frame}",
+        );
+        for id in &ids {
+            assert_eq!(
+                id, "assistant.demo.echo",
+                "demo_echo plan must map to assistant.demo.echo: {frame}",
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn open_application_approved_chain_includes_capability_id() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_open_application","application":"calendar"}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let _planned = recv_text(&mut ws).await;
+        let requested = recv_text(&mut ws).await;
+        // Wire-level: ApprovalRequested trägt die Capability ebenfalls.
+        let wire_ids = extract_capability_ids(&requested);
+        assert!(
+            wire_ids
+                .iter()
+                .all(|id| id == "interaction.open_application"),
+            "approval_requested wire must carry interaction.open_application: {requested}",
+        );
+
+        let approval_id = extract_approval_id(&requested);
+        let approve = format!(
+            r#"{{"type":"approval_response","approval_id":"{approval_id}","decision":"approved"}}"#
+        );
+        ws.send(Message::Text(approve)).await.unwrap();
+        for _ in 0..6 {
+            let _ = recv_text(&mut ws).await;
+        }
+
+        ws.send(Message::Text(r#"{"type":"audit_recent"}"#.into()))
+            .await
+            .unwrap();
+        let frame = recv_text(&mut ws).await;
+        let ids = extract_capability_ids(&frame);
+        assert!(
+            !ids.is_empty(),
+            "open_application audit chain must carry capability_id: {frame}",
+        );
+        for id in &ids {
+            assert_eq!(
+                id, "interaction.open_application",
+                "every audit event must map to interaction.open_application: {frame}",
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn open_application_denied_chain_keeps_capability_id() {
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_open_application","application":"calendar"}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let _planned = recv_text(&mut ws).await;
+        let requested = recv_text(&mut ws).await;
+        let approval_id = extract_approval_id(&requested);
+        let deny = format!(
+            r#"{{"type":"approval_response","approval_id":"{approval_id}","decision":"denied"}}"#
+        );
+        ws.send(Message::Text(deny)).await.unwrap();
+        let _resolved = recv_text(&mut ws).await;
+        let _cancelled = recv_text(&mut ws).await;
+
+        ws.send(Message::Text(r#"{"type":"audit_recent"}"#.into()))
+            .await
+            .unwrap();
+        let frame = recv_text(&mut ws).await;
+        let ids = extract_capability_ids(&frame);
+        assert!(!ids.is_empty(), "denied chain must keep capability_id: {frame}");
+        for id in &ids {
+            assert_eq!(
+                id, "interaction.open_application",
+                "cancel branch must keep the same capability_id: {frame}",
+            );
+        }
+        // The ActionCancelled audit entry must still carry the
+        // capability — not silently dropped on the deny path.
+        assert!(frame.contains(r#""kind":"action_cancelled""#));
+    }
+
+    #[tokio::test]
+    async fn capability_id_is_additive_in_audit_recent_serialization() {
+        // Fresh server: a `ping` followed by an `audit_recent` against
+        // an empty store must NOT contain the new field — additive
+        // means "only when set".
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(r#"{"type":"ping"}"#.into())).await.unwrap();
+        let pong = recv_text(&mut ws).await;
+        assert!(!pong.contains("capability_id"));
+
+        ws.send(Message::Text(r#"{"type":"audit_recent"}"#.into()))
+            .await
+            .unwrap();
+        let frame = recv_text(&mut ws).await;
+        // `audit_recent` selbst löst keinen Audit-Eintrag aus
+        // (Anti-Rekursion); das Envelope darf folglich weder
+        // `capability_id` noch `null`-Marker enthalten.
+        assert!(frame.contains(r#""events":[]"#));
+        assert!(!frame.contains("capability_id"));
+    }
+
+    #[tokio::test]
+    async fn invalid_capability_id_is_not_accepted_into_audit_fields() {
+        // Unit-Level-Sanity: Audit-Fields mit User-konstruiertem
+        // Capability-Wert ("interaction.format_disk") werden in der
+        // Sanitization fallen gelassen.
+        use crate::audit::{AuditFields, AuditKind, AuditStore};
+        let store = AuditStore::with_capacity(2);
+        let event = store.record(
+            AuditKind::ActionPlanned,
+            AuditFields::new()
+                .with_action_id("act_test")
+                .with_capability_id("interaction.format_disk"),
+        );
+        assert!(
+            event.capability_id.is_none(),
+            "unknown capability id must be dropped, got {:?}",
+            event.capability_id,
+        );
+    }
+
+    #[tokio::test]
+    async fn unsupported_interactions_are_mapped_but_not_enabled() {
+        // Mapping-Helper liefert eine Capability für TypeText /
+        // SendShortcut, aber die Konstanten gelten nicht als
+        // "executable today" — die Smolit-Assistant-Build hat kein
+        // Backend für sie. Diese Tests verteidigen die
+        // "mapped but not enabled"-Aussage gegen Drift.
+        use crate::capabilities::{
+            INTERACTION_SEND_SHORTCUT, INTERACTION_TYPE_TEXT, capability_id_for_interaction,
+            is_executable_today,
+        };
+        use crate::interaction::InteractionKind;
+
+        assert_eq!(
+            capability_id_for_interaction(InteractionKind::TypeText),
+            Some(INTERACTION_TYPE_TEXT),
+        );
+        assert_eq!(
+            capability_id_for_interaction(InteractionKind::SendShortcut),
+            Some(INTERACTION_SEND_SHORTCUT),
+        );
+        assert!(
+            !is_executable_today(INTERACTION_TYPE_TEXT),
+            "type_text must remain unsupported in this build",
+        );
+        assert!(
+            !is_executable_today(INTERACTION_SEND_SHORTCUT),
+            "send_shortcut must remain unsupported in this build",
+        );
+    }
 }

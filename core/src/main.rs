@@ -3,6 +3,7 @@ mod app;
 mod approvals;
 mod audio;
 mod audit;
+mod capabilities;
 mod config;
 mod event_loop;
 mod interaction;
