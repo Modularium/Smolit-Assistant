@@ -329,43 +329,51 @@ Konservative Reihenfolge — Docs/ADR vor Code; Begründung in
 | PR | Workstream | Gegenstand |
 | -- | ---------- | ---------- |
 | 50 | A | **v0.2 Release Gate Review** (2026-04-25, gelandet, **Docs-only**): Reality-Check unter [`docs/reviews/PR50_V0_2_RELEASE_GATE_REVIEW.md`](./docs/reviews/PR50_V0_2_RELEASE_GATE_REVIEW.md). Bewertung: **conditionally ready for v0.2 candidate** nach vier Verifikations-/Konfigurations-Punkten (GitHub-CI grün auf main, README/SETUP-Befehle korrekt, ROADMAP/OPEN_WORK keine Runtime-Drift, Branch-Protection konfiguriert oder dokumentiert). Lokal: `cargo test` 398 passed; alle fünf CI-Smokes (`settings-shell-smoke`, `avatar-render-polish-smoke`, `workflow-visibility-smoke`, `approval-card-smoke`, `audit-panel-smoke`) PASS. PR 43–48 haben Runtime-State **nicht** verändert; alle ADR/Contract-Drafts sind als Future gerahmt. **Kein** Tag, **kein** Version-Bump, **kein** Packaging in diesem PR — PR 50 ist ein Gate, kein Release. |
-| 51 | I | **Packaging Decision ADR** (Vorschlag, Docs/ADR-only): `.deb` vs. AppImage vs. Flatpak, Signing-Chain, Auto-Update-Linie. ADR vor Code. **Keine** Implementation. |
-| 52 | F | **Accessibility RPC FA-1 Spike** (Vorschlag, Code-Spike, default-off): Erster Code-Eintritt für [`ADR-0002`](./docs/adr/ADR-0002-accessibility-rpc-readonly.md) FA-1 — read-only `GetChildren` auf Registry-Root hinter `accessibility_rpc`-Feature-Flag. **Kein** `DoAction`, **keine** Input-Injection, **kein** Tree-Walk über eine Tiefe hinaus, **kein** Approval-Bypass. |
-| 53 | E | **Correlation ID Runtime Spike** (Vorschlag, Code-Spike, default-off): `correlation_id`-Feld in `AuditEvent` hinter Feature-Flag, additiv. Implementation-Eintritt für [AUDIT_CORRELATION_ID_SPEC §12 FA-1](./docs/contracts/AUDIT_CORRELATION_ID_SPEC.md). **Keine** Wire-Pflicht, **kein** Cross-Repo-Echo, **kein** fail-closed-Verhalten in v1. |
-| 54 | E | **Capability Constants Runtime Spike** (Vorschlag, Code-Spike, additiv): `pub const`-String-Konstanten für die heute live Capabilities (`interaction.*` / `assistant.*` / `provider.*` / `audit.*`) plus Validation-Tests. **Keine** Runtime-Registry-Datenstruktur, **keine** Policy-Engine. Implementation-Eintritt für [CAPABILITY_VOCABULARY §12 FA-1](./docs/contracts/CAPABILITY_VOCABULARY.md). |
-| 55 | K | **OceanData Privacy / Redaction ADR** (Vorschlag, Docs/ADR-only): Eintrittsbedingung für `redaction = external_safe` aus [ADR-0006 §10](./docs/adr/ADR-0006-oceandata-context-provider-spi.md) + [ADR-0004 FA-5](./docs/adr/ADR-0004-oceandata-data-layer-integration.md). **Keine** Implementation, **kein** Provider-Kind, **kein** IPC. |
+| 51 | I | **v0.2 Gate Fix: CI Workflow + SETUP Smoke Drift + XDG-Isolation** (2026-04-26, gelandet, **Docs/CI-Fix-only**): [`docs/reviews/PR51_V0_2_GATE_FIX.md`](./docs/reviews/PR51_V0_2_GATE_FIX.md). Behebt drei reale Gate-Blocker, die der PR-50-Check zutage gefördert hat. (1) `.github/workflows/ci.yml` Zeile 98: `${{ env.GODOT_VERSION }}` im job-level `name:` ist laut GitHub-Actions-Context-Availability-Regeln ungültig — Job-Name ist auf `Godot 4.6-stable headless` hardcoded; alle anderen `env.GODOT_VERSION`-Verwendungen (step-level `name:`, `with.key`, Shell-Steps) bleiben dynamisch. (2) `docs/SETUP.md §2.4` zitierte den seit PR 33 entfernten Smoke-Case `workflow-state-smoke`; ersetzt durch `workflow-visibility-smoke` mit explizitem Verweis auf PR 33. (3) Plain `cargo test --manifest-path core/Cargo.toml` kann lokale Persistenz unter `~/.config/smolit-assistant/text_chain.json` lesen und reproduziert ohne Isolation 396 / 2 fail; mit `scripts/ci_verify.sh core` (XDG-isoliert) sind 398 Tests grün. README + SETUP empfehlen jetzt `scripts/ci_verify.sh core` als kanonischen Gate-Befehl, plain `cargo test` bleibt als schnellere Dev-Iteration mit Drift-Hinweis dokumentiert. `scripts/ci_verify.sh` und der `Configure XDG isolation`-Step im CI-`core-test`-Job exportieren zusätzlich `XDG_DATA_HOME` für künftige Persistenz-Locations; `HOME` bleibt unverändert (rustup/cargo-Toolchain). **Keine** Runtime-Code-Änderung, **kein** neues Feature, **kein** Provider-Kind, **kein** IPC, **kein** Release-Tag, **kein** Version-Bump, **keine** ABrain/AdminBot/OceanData/smolitux-ui-Änderung. Verbleibend bis v0.2-Tag: GitHub-CI grün auf main nach Merge, Branch-Protection konfiguriert, Operator-Approval. |
+| 52 | I | **Packaging Decision ADR** (Vorschlag, Docs/ADR-only): `.deb` vs. AppImage vs. Flatpak, Signing-Chain, Auto-Update-Linie. ADR vor Code. **Keine** Implementation. *(Zweifach verschoben — ehemals PR 48 vor PR 49 Sync, dann PR 51 nach PR 49 Sync, nun PR 52 weil PR 51 die Gate-Fix-Position eingenommen hat; siehe PR 51 Review §6.)* |
+| 53 | F | **Accessibility RPC FA-1 Spike** (Vorschlag, Code-Spike, default-off): Erster Code-Eintritt für [`ADR-0002`](./docs/adr/ADR-0002-accessibility-rpc-readonly.md) FA-1 — read-only `GetChildren` auf Registry-Root hinter `accessibility_rpc`-Feature-Flag. **Kein** `DoAction`, **keine** Input-Injection, **kein** Tree-Walk über eine Tiefe hinaus, **kein** Approval-Bypass. |
+| 54 | E | **Correlation ID Runtime Spike** (Vorschlag, Code-Spike, default-off): `correlation_id`-Feld in `AuditEvent` hinter Feature-Flag, additiv. Implementation-Eintritt für [AUDIT_CORRELATION_ID_SPEC §12 FA-1](./docs/contracts/AUDIT_CORRELATION_ID_SPEC.md). **Keine** Wire-Pflicht, **kein** Cross-Repo-Echo, **kein** fail-closed-Verhalten in v1. |
+| 55 | E | **Capability Constants Runtime Spike** (Vorschlag, Code-Spike, additiv): `pub const`-String-Konstanten für die heute live Capabilities (`interaction.*` / `assistant.*` / `provider.*` / `audit.*`) plus Validation-Tests. **Keine** Runtime-Registry-Datenstruktur, **keine** Policy-Engine. Implementation-Eintritt für [CAPABILITY_VOCABULARY §12 FA-1](./docs/contracts/CAPABILITY_VOCABULARY.md). |
+| 56 | K | **OceanData Privacy / Redaction ADR** (Vorschlag, Docs/ADR-only): Eintrittsbedingung für `redaction = external_safe` aus [ADR-0006 §10](./docs/adr/ADR-0006-oceandata-context-provider-spi.md) + [ADR-0004 FA-5](./docs/adr/ADR-0004-oceandata-data-layer-integration.md). **Keine** Implementation, **kein** Provider-Kind, **kein** IPC. |
 
 ### 6.5 v0.2 Release Gate
 
-> **Status (2026-04-25):** *Conditionally ready for v0.2 candidate.*
-> Vollständiges Reality-Check-Review unter
-> [`docs/reviews/PR50_V0_2_RELEASE_GATE_REVIEW.md`](./docs/reviews/PR50_V0_2_RELEASE_GATE_REVIEW.md).
-
-**Gate-Bedingungen** (alle vor einem v0.2-Tag prüfen, in PR 50
-nicht selbst erledigt — PR 50 ist Gate, kein Release):
-
-1. Letzte CI-Aktion auf `main` ist grün (`core-test` + `ui-smoke`).
-2. README + SETUP Smoke-Befehle stimmen mit dem Repo überein
-   (heute der Fall).
-3. ROADMAP / OPEN_WORK haben keine Runtime-Drift gegen ADRs /
-   Contracts (heute der Fall nach PR 49).
-4. Branch-Protection ist gemäß
-   [`docs/ci/BRANCH_PROTECTION.md`](./docs/ci/BRANCH_PROTECTION.md)
-   konfiguriert oder als manueller Pre-Tag-Schritt dokumentiert.
-
-**Blocker für v0.2** sind ausschließlich die vier Punkte oben.
-**Nicht-Blocker:** ABrain Native Integration, AdminBot
-Integration, OceanData Integration, `correlation_id`/
-`capability_id`-Runtime, Accessibility RPC FA-1, Packaging,
-Persistent Audit, Token-Implementation, Wayland-Always-on-top,
-`type_text`/`send_shortcut`-Backends. Code-Spikes (PR 52 / 53 /
-54) entstehen **nach** dem v0.2-Tag, nicht davor.
-
-**Kein Tag wird in PR 50 gesetzt.** Ein zukünftiger
-Release-PR setzt den Tag, sobald die vier Bedingungen erfüllt
-sind und ein expliziter Operator-Approval erfolgt. Bis dahin gilt:
-kein Version-Bump im Code, kein `Cargo.toml`-Versionssprung, kein
-GitHub-Release, kein Packaging-Format.
+> **Status (2026-04-26):** *Gate fix in progress; not yet ready
+> for v0.2 candidate.* PR 50 hatte „conditionally ready"
+> empfohlen; der reale Gate-Check zog drei Blocker, die in PR 51
+> gefixt sind (CI-Workflow YAML-Validität, SETUP-Smoke-Drift,
+> plain `cargo test` Host-Config-Drift). Vor einem `v0.2`-Tag
+> müssen folgende Punkte zusätzlich grün sein:
+>
+> 1. **GitHub Actions auf `main` grün** nach Merge von PR 51
+>    (PR 51 fixt die zuvor invalide YAML; ein erfolgreicher
+>    `core-test` + `ui-smoke` Run kann erst nach Push beobachtet
+>    werden).
+> 2. **Branch-Protection für `main`** gemäß
+>    [`docs/ci/BRANCH_PROTECTION.md`](./docs/ci/BRANCH_PROTECTION.md)
+>    konfiguriert (Required checks `core-test` + `ui-smoke`,
+>    Required review 1, dismiss stale approvals, linear history).
+> 3. **Operator-Approval für den Tag selbst** — kein Auto-Tag.
+>
+> **Kanonischer Gate-Befehl lokal:** `scripts/ci_verify.sh core`
+> (XDG-isoliert, 398 Tests). **Kanonischer Smoke-Befehl:**
+> `scripts/ci_verify.sh smokes`. Plain `cargo test` ist für
+> schnelle Dev-Iteration okay, aber **nicht** für Gate-Checks —
+> persistierte Settings unter `~/.config/smolit-assistant/`
+> können IPC-Tests verfälschen (siehe PR 51 §2.3).
+>
+> **Nicht-Blocker für v0.2:** ABrain Native Integration, AdminBot
+> Integration, OceanData Integration, `correlation_id` /
+> `capability_id`-Runtime, Accessibility RPC FA-1, Packaging,
+> Persistent Audit, Token-Implementation, Wayland-AOT,
+> `type_text` / `send_shortcut`-Backends. Code-Spikes (PR 53 /
+> 54 / 55) entstehen **nach** dem v0.2-Tag, nicht davor.
+>
+> **Kein Tag wird in PR 51 gesetzt.** Ein zukünftiger Release-PR
+> setzt den Tag, sobald die drei Bedingungen oben erfüllt sind
+> und ein expliziter Operator-Approval erfolgt. Bis dahin gilt:
+> kein Version-Bump im Code, kein `Cargo.toml`-Versionssprung,
+> kein GitHub-Release, kein Packaging-Format.
 
 ---
 

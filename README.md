@@ -110,8 +110,13 @@ cd Smolit-Assistant
 cp .env.example .env
 # optional: Werte anpassen (siehe §6)
 
-# Core testen + bauen
-cargo test --manifest-path core/Cargo.toml
+# Core testen (CI-paritätisch isoliert, empfohlen für Gate / Release)
+scripts/ci_verify.sh core
+# Schnellere Dev-Iteration ohne Isolation:
+#   cargo test --manifest-path core/Cargo.toml
+# Hinweis: plain `cargo test` kann lokale Persistenz unter
+# ~/.config/smolit-assistant/ lesen und zwei IPC-Tests verfälschen
+# (siehe docs/SETUP.md §2.1). Vor einem Release immer ci_verify.sh.
 cargo build --manifest-path core/Cargo.toml
 
 # Core starten (IPC auf 127.0.0.1:8787)

@@ -63,9 +63,25 @@ cd Smolit-Assistant
 # Env-Minimal-Set
 cp .env.example .env
 
-# Core-Tests (sollten 382 bestehen)
+# Core-Tests (CI-paritätisch isoliert — empfohlen für Gate / Release)
+scripts/ci_verify.sh core
+```
+
+Ein voller Lauf prüft Toolchain + Tests + XDG-Isolation in einem
+Schritt; lokal werden 398 Tests grün erwartet. Für schnelle
+Entwicklungs-Iteration reicht weiterhin
+
+```bash
 cargo test --manifest-path core/Cargo.toml
 ```
+
+— allerdings kann *plain* `cargo test` lokale Persistenz unter
+`~/.config/smolit-assistant/` (z. B. `text_chain.json`) lesen und
+einzelne IPC-Tests verfälschen. Vor einem Release / Gate-Check
+deshalb immer `scripts/ci_verify.sh core` (oder einen
+äquivalenten `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` /
+`XDG_DATA_HOME`-Override) verwenden. `HOME` bleibt bewusst
+unverändert, damit rustup/cargo ihre Toolchain finden.
 
 Ein passing `cargo test` bestätigt, dass
 
@@ -117,13 +133,23 @@ Reproduzierbare Headless-Smokes:
 ```bash
 scripts/run_overlay_verification.sh settings-shell-smoke
 scripts/run_overlay_verification.sh speech-sync-smoke
-scripts/run_overlay_verification.sh workflow-state-smoke
+scripts/run_overlay_verification.sh workflow-visibility-smoke
 scripts/run_overlay_verification.sh resolver-smoke
 ```
 
-Alle vier sollten mit `PASS` enden. Weitere Cases (Overlay,
-Click-through, AOT-X11, Runtime-Report) sind im `--help`-Output
-gelistet.
+Alle vier sollten mit `PASS` enden. Hinweis: `workflow-state-smoke`
+ist mit dem alten Drei-Knoten-Workflow-Overlay (PR 33, Option C —
+Entfernen) entfallen; die einzige aktuelle Workflow-UI ist
+`workflow-visibility-smoke`. Weitere Cases (Overlay, Click-through,
+AOT-X11, Runtime-Report) sind im `--help`-Output gelistet.
+
+CI-paritätischer Komplett-Lauf (Toolchain + 5 CI-Smokes mit
+XDG-Isolation):
+
+```bash
+scripts/ci_verify.sh smokes   # nur Smokes
+scripts/ci_verify.sh          # cargo + Smokes
+```
 
 ## 3. Environment-Variablen nach Gruppen
 

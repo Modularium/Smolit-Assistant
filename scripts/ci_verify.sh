@@ -43,17 +43,23 @@ cd "${REPO_ROOT}"
 # `dtolnay/rust-toolchain@stable` in `$HOME/.cargo` installiert wird)
 # die Toolchain verlieren lassen.
 #
-# Was wir wirklich isolieren müssen: die XDG-Config- und Cache-Pfade,
-# weil Smolit-Core Konfiguration unter `$XDG_CONFIG_HOME/smolit-assistant/`
-# (bzw. `$HOME/.config/smolit-assistant/`) liest. Das Setzen von
+# Was wir wirklich isolieren müssen: die XDG-Config-, Cache- und
+# Data-Pfade, weil Smolit-Core Konfiguration unter
+# `$XDG_CONFIG_HOME/smolit-assistant/` (bzw.
+# `$HOME/.config/smolit-assistant/`) liest. Das Setzen von
 # `XDG_CONFIG_HOME` zwingt diesen Lookup auf einen leeren Ordner —
 # lokale Dev-Artefakte (`text_chain.json`, `secrets.json`) können so
-# nicht mehr hineinbluten.
+# nicht mehr hineinbluten. `XDG_DATA_HOME` wird mitisoliert, damit
+# zukünftige Persistenz-Pfade (z. B. künftige Audit-/User-Daten
+# unter `$XDG_DATA_HOME/smolit-assistant/`) automatisch in derselben
+# Isolations-Domäne landen — der Gate-Check bleibt reproduzierbar,
+# auch wenn neue Code-Pfade eine `XDG_DATA_HOME`-Location einführen.
 
 ISOLATE_DIR="$(mktemp -d -t smolit-ci-XXXXXX)"
 export XDG_CONFIG_HOME="${ISOLATE_DIR}/config"
 export XDG_CACHE_HOME="${ISOLATE_DIR}/cache"
-mkdir -p "${XDG_CONFIG_HOME}" "${XDG_CACHE_HOME}"
+export XDG_DATA_HOME="${ISOLATE_DIR}/data"
+mkdir -p "${XDG_CONFIG_HOME}" "${XDG_CACHE_HOME}" "${XDG_DATA_HOME}"
 
 cleanup() {
     rm -rf "${ISOLATE_DIR}"
@@ -63,6 +69,7 @@ trap cleanup EXIT
 echo "→ XDG isolation:"
 echo "    XDG_CONFIG_HOME = ${XDG_CONFIG_HOME}"
 echo "    XDG_CACHE_HOME  = ${XDG_CACHE_HOME}"
+echo "    XDG_DATA_HOME   = ${XDG_DATA_HOME}"
 echo "  (HOME stays ${HOME} — rustup/cargo need it; config lookups"
 echo "   for smolit-assistant follow XDG_CONFIG_HOME first.)"
 echo

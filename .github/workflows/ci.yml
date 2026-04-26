@@ -85,17 +85,27 @@ jobs:
         # reichen deshalb, um Stray-Config auszuschließen.
         run: |
           mkdir -p "${RUNNER_TEMP}/smolit-config" \
-                   "${RUNNER_TEMP}/smolit-cache"
+                   "${RUNNER_TEMP}/smolit-cache" \
+                   "${RUNNER_TEMP}/smolit-data"
           {
             echo "XDG_CONFIG_HOME=${RUNNER_TEMP}/smolit-config"
             echo "XDG_CACHE_HOME=${RUNNER_TEMP}/smolit-cache"
+            echo "XDG_DATA_HOME=${RUNNER_TEMP}/smolit-data"
           } >> "$GITHUB_ENV"
 
       - name: cargo test
         run: cargo test --manifest-path core/Cargo.toml --locked
 
   ui-smoke:
-    name: UI smokes (Godot ${{ env.GODOT_VERSION }} headless)
+    # GitHub Actions does NOT expose the `env` context inside the
+    # job-level `name:` field (see GitHub's "Context availability"
+    # docs — `jobs.<job_id>.name` only sees `github`, `inputs`,
+    # `vars`, `needs`, `strategy`, `matrix`). Step-level `name:`
+    # and `with.key` below still resolve `${{ env.GODOT_VERSION }}`
+    # correctly. To keep the workflow valid, the version is
+    # hard-coded here only — bump together with the
+    # `GODOT_VERSION` env constant above.
+    name: UI smokes (Godot 4.6-stable headless)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
