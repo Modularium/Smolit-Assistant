@@ -38,6 +38,7 @@ jeweilige Architekturdatei unter [`docs/`](../), nicht in einen ADR.
 | [ADR-0004](./ADR-0004-oceandata-data-layer-integration.md) | OceanData Data-Layer Integration Path | Proposed | 2026-04-24 |
 | [ADR-0005](./ADR-0005-adminbot-safety-boundary.md) | AdminBot Safety Boundary for Smolit-Assistant | Proposed | 2026-04-25 |
 | [ADR-0006](./ADR-0006-oceandata-context-provider-spi.md) | OceanData Context Provider SPI | Proposed | 2026-04-25 |
+| [ADR-0007](./ADR-0007-packaging-decision.md) | Packaging Strategy for Smolit-Assistant | Proposed | 2026-04-26 |
 
 ## Cross-Repo Contracts Index
 

@@ -300,8 +300,15 @@ Bewusst **nicht** heute:
 - **Stage-C-Avatar-User-Uploads** —
   [`docs/avatar_stage_c_research.md`](docs/avatar_stage_c_research.md)
   bleibt Research-Gate.
-- **Packaging / CI-Pipeline** (deb/rpm/flatpak, GitHub Actions) —
-  aufgeschoben, kein Blocker für MVP-Tests.
+- **Packaging-Binaries** (AppImage / `.deb` / Flatpak / Snap /
+  Docker als Desktop-Distribution) — aufgeschoben. v0.2.0 trägt
+  **keine binären Release-Artefakte**; der Source-/Dev-Run aus §5
+  bleibt der offizielle Install-Pfad. Strategie ist als
+  Proposed-ADR in
+  [`docs/adr/ADR-0007-packaging-decision.md`](docs/adr/ADR-0007-packaging-decision.md)
+  fixiert (Linux-Desktop-zuerst, AppImage vor `.deb` vor Flatpak,
+  kein Snap, kein Docker als Desktop-Distribution, Signing erst
+  nach P5).
 - **OceanData-Integration**, **smolitux-ui-Import**, **Smolitux-
   Token-Implementation**.
 

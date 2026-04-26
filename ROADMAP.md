@@ -1,9 +1,9 @@
 # Smolit AI Assistant — Developer Roadmap
 
-> Stand: 2026-04-24 (nach PR 31 Roadmap Checkpoint). Diese Datei ist
-> eine **Roadmap**, kein PR-Changelog. Detailhistorie pro PR lebt in
-> [`docs/reviews/`](./docs/reviews/) — insbesondere der Sammelblick
-> auf die PR-21–30-Serie liegt in
+> Stand: 2026-04-26 (nach v0.2.0-Release und PR 52 Packaging
+> Decision ADR). Diese Datei ist eine **Roadmap**, kein PR-Changelog.
+> Detailhistorie pro PR lebt in [`docs/reviews/`](./docs/reviews/) —
+> insbesondere der Sammelblick auf die PR-21–30-Serie liegt in
 > [`docs/reviews/PR31_ROADMAP_CHECKPOINT.md`](./docs/reviews/PR31_ROADMAP_CHECKPOINT.md).
 
 ---
@@ -246,11 +246,18 @@ Single-Source für offene Punkte:
   PR 42 gelandet: SHA512-Verifikation + Binary-Cache für das
   Godot-Binary, plus Branch-Protection-Empfehlungen in
   [`docs/ci/BRANCH_PROTECTION.md`](./docs/ci/BRANCH_PROTECTION.md).
-  Nächster Kandidat (Future Work, nicht priorisiert):
-  Packaging-Entscheidungs-ADR (`.deb` vs. AppImage vs. Flatpak,
-  Signing-Chain) — rein ADR, keine Implementation in der nahen
-  Reihe. **Keine** Packaging-Formate, **keine** signierten Releases,
-  **kein** Auto-Update in dieser Stufe.
+  PR 51 gelandet: v0.2 Gate Fix (CI-YAML-Validität,
+  SETUP-Smoke-Drift, XDG-Isolation als kanonischer Gate-Befehl).
+  **v0.2.0 ist released** (Tag auf `main`, GitHub-Release ohne
+  binäre Anhänge). PR 52 gelandet: Packaging Decision ADR
+  ([`ADR-0007`](./docs/adr/ADR-0007-packaging-decision.md),
+  Proposed) — gestufte Sequenz P0 (Source) → P1 (Local build
+  script) → P2 (AppImage) → P3 (`.deb`) → P4 (Flatpak) → P5
+  (Signing/Update) → P6 (Multi-distro). Nächster Kandidat
+  (Future Work, nicht priorisiert): FA-1 Reproducible local
+  build script + FA-2 Godot Export Presets als Eintritt in P1/P2.
+  **Keine** Packaging-Formate gebaut, **keine** signierten
+  Releases, **kein** Auto-Update in dieser Stufe.
 - **J. Smolitux Design Contract / Cross-Runtime UI Consistency** —
   ADR-0001 gelandet (PR 24), Avatar-Palette (PR 30) als lokaler
   Token-Andockpunkt, Smolitux Token Contract v0 gelandet (PR 35,
@@ -330,50 +337,41 @@ Konservative Reihenfolge — Docs/ADR vor Code; Begründung in
 | -- | ---------- | ---------- |
 | 50 | A | **v0.2 Release Gate Review** (2026-04-25, gelandet, **Docs-only**): Reality-Check unter [`docs/reviews/PR50_V0_2_RELEASE_GATE_REVIEW.md`](./docs/reviews/PR50_V0_2_RELEASE_GATE_REVIEW.md). Bewertung: **conditionally ready for v0.2 candidate** nach vier Verifikations-/Konfigurations-Punkten (GitHub-CI grün auf main, README/SETUP-Befehle korrekt, ROADMAP/OPEN_WORK keine Runtime-Drift, Branch-Protection konfiguriert oder dokumentiert). Lokal: `cargo test` 398 passed; alle fünf CI-Smokes (`settings-shell-smoke`, `avatar-render-polish-smoke`, `workflow-visibility-smoke`, `approval-card-smoke`, `audit-panel-smoke`) PASS. PR 43–48 haben Runtime-State **nicht** verändert; alle ADR/Contract-Drafts sind als Future gerahmt. **Kein** Tag, **kein** Version-Bump, **kein** Packaging in diesem PR — PR 50 ist ein Gate, kein Release. |
 | 51 | I | **v0.2 Gate Fix: CI Workflow + SETUP Smoke Drift + XDG-Isolation** (2026-04-26, gelandet, **Docs/CI-Fix-only**): [`docs/reviews/PR51_V0_2_GATE_FIX.md`](./docs/reviews/PR51_V0_2_GATE_FIX.md). Behebt drei reale Gate-Blocker, die der PR-50-Check zutage gefördert hat. (1) `.github/workflows/ci.yml` Zeile 98: `${{ env.GODOT_VERSION }}` im job-level `name:` ist laut GitHub-Actions-Context-Availability-Regeln ungültig — Job-Name ist auf `Godot 4.6-stable headless` hardcoded; alle anderen `env.GODOT_VERSION`-Verwendungen (step-level `name:`, `with.key`, Shell-Steps) bleiben dynamisch. (2) `docs/SETUP.md §2.4` zitierte den seit PR 33 entfernten Smoke-Case `workflow-state-smoke`; ersetzt durch `workflow-visibility-smoke` mit explizitem Verweis auf PR 33. (3) Plain `cargo test --manifest-path core/Cargo.toml` kann lokale Persistenz unter `~/.config/smolit-assistant/text_chain.json` lesen und reproduziert ohne Isolation 396 / 2 fail; mit `scripts/ci_verify.sh core` (XDG-isoliert) sind 398 Tests grün. README + SETUP empfehlen jetzt `scripts/ci_verify.sh core` als kanonischen Gate-Befehl, plain `cargo test` bleibt als schnellere Dev-Iteration mit Drift-Hinweis dokumentiert. `scripts/ci_verify.sh` und der `Configure XDG isolation`-Step im CI-`core-test`-Job exportieren zusätzlich `XDG_DATA_HOME` für künftige Persistenz-Locations; `HOME` bleibt unverändert (rustup/cargo-Toolchain). **Keine** Runtime-Code-Änderung, **kein** neues Feature, **kein** Provider-Kind, **kein** IPC, **kein** Release-Tag, **kein** Version-Bump, **keine** ABrain/AdminBot/OceanData/smolitux-ui-Änderung. Verbleibend bis v0.2-Tag: GitHub-CI grün auf main nach Merge, Branch-Protection konfiguriert, Operator-Approval. |
-| 52 | I | **Packaging Decision ADR** (Vorschlag, Docs/ADR-only): `.deb` vs. AppImage vs. Flatpak, Signing-Chain, Auto-Update-Linie. ADR vor Code. **Keine** Implementation. *(Zweifach verschoben — ehemals PR 48 vor PR 49 Sync, dann PR 51 nach PR 49 Sync, nun PR 52 weil PR 51 die Gate-Fix-Position eingenommen hat; siehe PR 51 Review §6.)* |
+| 52 | I | **Packaging Decision ADR** (2026-04-26, gelandet, **Docs/ADR-only**, Status **Proposed**): [`ADR-0007`](./docs/adr/ADR-0007-packaging-decision.md) fixiert die gestufte Linux-Desktop-zuerst-Packaging-Strategie vor Code. Phase 1 — Source/Dev bleibt offiziell unterstützt **plus** AppImage als erster Binär-Kandidat (nach reproduzierbarem Local-Build-Helper); Phase 2 — `.deb` für Ubuntu/Debian erst nach AppImage-Prototyp; Phase 3 — Flatpak-Evaluation hinter Permission-/Portal-ADR. **Bewusst nicht zuerst:** Snap, Docker als Desktop-Distribution, `.rpm`, Windows/macOS. Sequenz P0 (Source) → P1 (Local build script) → P2 (AppImage prototype) → P3 (`.deb` prototype) → P4 (Flatpak evaluation) → P5 (Signing/Update policy ADR) → P6 (Multi-distro matrix); jede Phase hat eigene Eintrittskriterien und Nicht-Ziele. Pflicht: SHA512-Checksums ab P2, Signing erst ab P5, kein Auto-Update vor Signing-ADR, Loopback-IPC-Default unverändert, Config user-scoped, Secrets 0600, keine root/sudo-Erwartung, keine Modell-Downloads, Wayland-/X11-Grenzen in Release-Notes. **Keine** Packaging-Implementation, **keine** Export-Presets, **kein** AppImage/`.deb`/Flatpak gebaut, **kein** Dockerfile, **kein** Signing, **kein** Installer, **kein** Auto-Updater, **kein** Version-Bump, **kein** neuer Release, **keine** Provider-/IPC-/UI-/Core-Änderung, **keine** ABrain/AdminBot/OceanData/smolitux-ui-Änderung. Details: [`docs/reviews/PR52_PACKAGING_DECISION_ADR.md`](./docs/reviews/PR52_PACKAGING_DECISION_ADR.md). |
 | 53 | F | **Accessibility RPC FA-1 Spike** (Vorschlag, Code-Spike, default-off): Erster Code-Eintritt für [`ADR-0002`](./docs/adr/ADR-0002-accessibility-rpc-readonly.md) FA-1 — read-only `GetChildren` auf Registry-Root hinter `accessibility_rpc`-Feature-Flag. **Kein** `DoAction`, **keine** Input-Injection, **kein** Tree-Walk über eine Tiefe hinaus, **kein** Approval-Bypass. |
 | 54 | E | **Correlation ID Runtime Spike** (Vorschlag, Code-Spike, default-off): `correlation_id`-Feld in `AuditEvent` hinter Feature-Flag, additiv. Implementation-Eintritt für [AUDIT_CORRELATION_ID_SPEC §12 FA-1](./docs/contracts/AUDIT_CORRELATION_ID_SPEC.md). **Keine** Wire-Pflicht, **kein** Cross-Repo-Echo, **kein** fail-closed-Verhalten in v1. |
 | 55 | E | **Capability Constants Runtime Spike** (Vorschlag, Code-Spike, additiv): `pub const`-String-Konstanten für die heute live Capabilities (`interaction.*` / `assistant.*` / `provider.*` / `audit.*`) plus Validation-Tests. **Keine** Runtime-Registry-Datenstruktur, **keine** Policy-Engine. Implementation-Eintritt für [CAPABILITY_VOCABULARY §12 FA-1](./docs/contracts/CAPABILITY_VOCABULARY.md). |
 | 56 | K | **OceanData Privacy / Redaction ADR** (Vorschlag, Docs/ADR-only): Eintrittsbedingung für `redaction = external_safe` aus [ADR-0006 §10](./docs/adr/ADR-0006-oceandata-context-provider-spi.md) + [ADR-0004 FA-5](./docs/adr/ADR-0004-oceandata-data-layer-integration.md). **Keine** Implementation, **kein** Provider-Kind, **kein** IPC. |
 
-### 6.5 v0.2 Release Gate
+### 6.5 v0.2 Release Gate — closed
 
-> **Status (2026-04-26):** *Gate fix in progress; not yet ready
-> for v0.2 candidate.* PR 50 hatte „conditionally ready"
-> empfohlen; der reale Gate-Check zog drei Blocker, die in PR 51
-> gefixt sind (CI-Workflow YAML-Validität, SETUP-Smoke-Drift,
-> plain `cargo test` Host-Config-Drift). Vor einem `v0.2`-Tag
-> müssen folgende Punkte zusätzlich grün sein:
+> **Status (2026-04-26):** *v0.2.0 released.* Tag `v0.2.0` ist auf
+> `main` gesetzt, das [GitHub-Release](https://github.com/Modularium/Smolit-Assistant/releases/tag/v0.2.0)
+> ist publiziert (ohne binäre Anhänge — siehe PR 52 / ADR-0007).
+> Die drei in PR 51 gelisteten Gate-Bedingungen sind erfüllt:
+> GitHub Actions ist auf `main` grün, Branch-Protection ist
+> konfiguriert, Operator-Approval ist erfolgt.
 >
-> 1. **GitHub Actions auf `main` grün** nach Merge von PR 51
->    (PR 51 fixt die zuvor invalide YAML; ein erfolgreicher
->    `core-test` + `ui-smoke` Run kann erst nach Push beobachtet
->    werden).
-> 2. **Branch-Protection für `main`** gemäß
->    [`docs/ci/BRANCH_PROTECTION.md`](./docs/ci/BRANCH_PROTECTION.md)
->    konfiguriert (Required checks `core-test` + `ui-smoke`,
->    Required review 1, dismiss stale approvals, linear history).
-> 3. **Operator-Approval für den Tag selbst** — kein Auto-Tag.
+> **Kanonischer Gate-Befehl lokal (auch post-Release):**
+> `scripts/ci_verify.sh core` (XDG-isoliert, 398 Tests).
+> **Kanonischer Smoke-Befehl:** `scripts/ci_verify.sh smokes`.
+> Plain `cargo test` bleibt für schnelle Dev-Iteration okay, aber
+> **nicht** für Gate-Checks — persistierte Settings unter
+> `~/.config/smolit-assistant/` können IPC-Tests verfälschen
+> (siehe PR 51 §2.3).
 >
-> **Kanonischer Gate-Befehl lokal:** `scripts/ci_verify.sh core`
-> (XDG-isoliert, 398 Tests). **Kanonischer Smoke-Befehl:**
-> `scripts/ci_verify.sh smokes`. Plain `cargo test` ist für
-> schnelle Dev-Iteration okay, aber **nicht** für Gate-Checks —
-> persistierte Settings unter `~/.config/smolit-assistant/`
-> können IPC-Tests verfälschen (siehe PR 51 §2.3).
+> **v0.2.0 trägt keine binären Release-Artefakte.** Der Source-/
+> Dev-Run aus README §5 + `docs/SETUP.md` bleibt der offizielle
+> Install-Pfad. Packaging ist ab PR 52 als ADR fixiert
+> ([`ADR-0007`](./docs/adr/ADR-0007-packaging-decision.md)),
+> Implementation ist Future Work.
 >
-> **Nicht-Blocker für v0.2:** ABrain Native Integration, AdminBot
-> Integration, OceanData Integration, `correlation_id` /
-> `capability_id`-Runtime, Accessibility RPC FA-1, Packaging,
-> Persistent Audit, Token-Implementation, Wayland-AOT,
-> `type_text` / `send_shortcut`-Backends. Code-Spikes (PR 53 /
-> 54 / 55) entstehen **nach** dem v0.2-Tag, nicht davor.
->
-> **Kein Tag wird in PR 51 gesetzt.** Ein zukünftiger Release-PR
-> setzt den Tag, sobald die drei Bedingungen oben erfüllt sind
-> und ein expliziter Operator-Approval erfolgt. Bis dahin gilt:
-> kein Version-Bump im Code, kein `Cargo.toml`-Versionssprung,
-> kein GitHub-Release, kein Packaging-Format.
+> **Post-v0.2 Sequenz:** PR 52 Packaging Decision ADR (gelandet,
+> 2026-04-26, Docs/ADR-only — definiert die Sequenz P0 → P6 vor
+> Code), gefolgt von PR 53 Accessibility RPC FA-1 Spike, PR 54
+> Correlation ID Runtime Spike, PR 55 Capability Constants Runtime
+> Spike, PR 56 OceanData Privacy/Redaction ADR. Reihenfolge bleibt
+> *nicht bindend*; jeder Schritt eigener Folge-PR.
 
 ---
 
