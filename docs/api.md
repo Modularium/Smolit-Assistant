@@ -1154,14 +1154,29 @@ Ausdrücklicher Scope:
 
 > **PR 37 — Decision only:** Der Rahmen für einen späteren RPC-Pfad
 > ist seit 2026-04-24 in [`ADR-0002`](./adr/ADR-0002-accessibility-rpc-readonly.md)
-> entschieden (Docs/ADR-only, keine Code-Implementation): read-only
-> `GetChildren` am Registry-Root, `atspi`+`zbus` hinter einem
-> `accessibility_rpc`-Feature-Flag (default-off), keine Input-
-> Injection, kein `DoAction`, kein Baum-Walk über eine Tiefe hinaus,
-> keine Passwort-/Secret-Felder, kein Approval-Bypass. Das
-> Wire-Schema in diesem Abschnitt bleibt unverändert; der RPC-Pfad
-> füllt bestehende Felder. `confidence: verified` bleibt exklusiv
-> für Items mit Registry-Evidenz.
+> entschieden: read-only `GetChildren` am Registry-Root,
+> `atspi`+`zbus` hinter einem `accessibility_rpc`-Feature-Flag
+> (default-off), keine Input-Injection, kein `DoAction`, kein
+> Baum-Walk über eine Tiefe hinaus, keine Passwort-/Secret-Felder,
+> kein Approval-Bypass.
+>
+> **PR 53 (2026-04-26) — FA-1 partial spike:** Cargo-Feature
+> `accessibility_rpc` (default-off) + Runtime-Env
+> `SMOLIT_ACCESSIBILITY_RPC_ENABLED=1` + mockable
+> `AccessibilityRegistryClient`-Trait sind im Repo. **Wire-Schema in
+> diesem Abschnitt bleibt unverändert** — keine neuen IPC-Commands,
+> keine neuen Outgoing-Envelopes, keine neuen Felder. Der RPC-Pfad
+> füllt bestehende `AccessibilityItem`-Felder; eine zusätzliche
+> stable Source-Konstante `accessibility_registry_root` ist
+> reserviert (additiv zu `accessibility_hint_echo`). Production hat
+> noch keinen echten `atspi`/`zbus`-Client gewired und fällt mit
+> Feature+Env honest auf
+> `{"status":"unavailable","reason":"accessibility_rpc_backend_not_implemented"}`
+> zurück. **`confidence: verified`** wird ausschließlich vom
+> verified-only-from-registry-Konstruktor in
+> `core/src/interaction/accessibility.rs` produziert; jeder andere
+> Pfad (Hint-Echo, Fallback, Probe-Stage-Failure) bleibt
+> `discovered` oder `unavailable`/`uncertain`/`failed`.
 
 #### Eingehend
 

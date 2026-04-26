@@ -359,14 +359,24 @@ Design-Entscheidung (ADR, ggf. Policy-Update) vor dem Code.
   kompatibler Primitive, Timing, Mehrmonitor-Semantik.
 - **AT-SPI-Registry-Zugriff (zbus/atspi).** Erst damit kann die
   `items`-Liste des Discovery-Pfads inhaltlich gefüllt werden und
-  `confidence: "verified"` einen Sinn bekommen. Eigener Spike,
-  separater Scope — Rahmen ist seit PR 37 in
+  `confidence: "verified"` einen Sinn bekommen. Rahmen ist seit
+  PR 37 in
   [`ADR-0002`](./adr/ADR-0002-accessibility-rpc-readonly.md)
   entschieden: read-only `GetChildren` auf Registry-Root,
-  `atspi`+`zbus` hinter `accessibility_rpc`-Feature-Flag (default-off),
-  kein Input-Injection-Pfad, kein Baum-Walk über eine Tiefe hinaus,
-  keine Passwort-/Secret-Felder, kein Approval-Bypass. Die
-  Implementation selbst ist FA-1-Future-Work.
+  `atspi`+`zbus` hinter `accessibility_rpc`-Feature-Flag
+  (default-off), kein Input-Injection-Pfad, kein Baum-Walk über
+  eine Tiefe hinaus, keine Passwort-/Secret-Felder, kein
+  Approval-Bypass. **PR 53 (2026-04-26) hat FA-1 als *partial spike*
+  gelandet:** Cargo-Feature + Runtime-Env
+  `SMOLIT_ACCESSIBILITY_RPC_ENABLED=1` + mockable
+  `AccessibilityRegistryClient`-Trait + verified-only-from-registry-
+  Konstruktor sind im Repo. Default-Build verhält sich
+  bit-für-bit wie pre-PR-53. Production hat *keinen* echten
+  `atspi`/`zbus`-Client gewired und fällt bei Feature+Env auf
+  `Unavailable { reason: "accessibility_rpc_backend_not_implemented" }`
+  zurück — der reale Registry-Client ist eigener Folge-PR mit
+  Permission-Review. `confidence: verified` bleibt damit weiterhin
+  exklusiv für Items mit echter Registry-Evidenz.
 - **Wayland-Fokus-Pfad.** Braucht ein Compositor-natives Protokoll
   (Portal / wlroots-spezifischer Pfad) oder eine explizite
   Aufgabe-Trennung. Offen, blockiert durch fehlendes generisches

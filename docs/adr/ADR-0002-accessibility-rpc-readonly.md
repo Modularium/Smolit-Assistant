@@ -1,7 +1,9 @@
 # ADR-0002: Accessibility RPC Spike — Read-only AT-SPI
 
-- **Status:** Accepted (Decision only — keine Code-Implementation).
-- **Date:** 2026-04-24
+- **Status:** Accepted (Decision; FA-1 als *partial spike* gelandet
+  in PR 53, 2026-04-26 — siehe [§Future work](#future-work) und
+  [`docs/reviews/PR53_ACCESSIBILITY_RPC_FA1.md`](../reviews/PR53_ACCESSIBILITY_RPC_FA1.md)).
+- **Date:** 2026-04-24 (FA-1 update: 2026-04-26)
 - **Deciders:** Smolit-Assistant Maintainer
 - **Scope:** Core (`core/src/interaction/accessibility.rs` und
   zukünftige AT-SPI-RPC-Ergänzung). Nicht Teil dieses ADR: UI,
@@ -280,8 +282,24 @@ haben, der erst nach Aktivierung Top-Level-Elemente exportiert.
 Folge-Schritte, die **nicht** Teil dieses ADR sind, aber auf seiner
 Linie sitzen:
 
-- **FA-1.** Spike-Implementation des `accessibility_rpc`-Features
-  hinter dem Feature-Flag (separater PR, eigene Tests).
+- **FA-1 — partial spike landed (PR 53, 2026-04-26).** Cargo
+  feature `accessibility_rpc` (default-off) plus runtime env
+  `SMOLIT_ACCESSIBILITY_RPC_ENABLED=1` plus a mockable
+  `AccessibilityRegistryClient` trait sit in
+  [`core/src/interaction/accessibility.rs`](../../core/src/interaction/accessibility.rs).
+  The verified-only-from-registry constructor
+  (`RegistryRootChild::into_verified_item`) is the **only** path
+  producing `confidence: verified`; password / invisible /
+  unnamed rows are filtered before reaching the wire. Production
+  has no live `atspi`/`zbus` client wired yet, so the gated path
+  honestly returns `Unavailable { reason:
+  "accessibility_rpc_backend_not_implemented" }` even with
+  feature + env on. The remaining work is to provide a real
+  registry client (separate PR with `atspi`+`zbus` deps and a
+  permission review). Tests cover the full guard surface on the
+  default feature set; a feature-gated end-to-end check exercises
+  the orchestrator with a mock client. Details:
+  [`docs/reviews/PR53_ACCESSIBILITY_RPC_FA1.md`](../reviews/PR53_ACCESSIBILITY_RPC_FA1.md).
 - **FA-2.** ADR für einen Name-Match-Pfad (`inspect_target(hint)` →
   Registry-`GetChildren` + Name-Filter + `verified`).
 - **FA-3.** ADR für Toolkit-spezifische Lücken (GTK-only, Qt-only,
