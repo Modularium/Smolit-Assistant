@@ -6,9 +6,15 @@
 > Nicht-Ziele, Tests / Verifikation. Ein-Datei-Format, damit Reviewer
 > den gesamten „State of Open Work" in einem Scroll erfassen.
 
-Stand: 2026-04-24 (nach PR 31 Roadmap Checkpoint — konsolidiert den
-Zustand nach der PR-21–30-Stabilisierungsserie). Sammelblick:
-[`docs/reviews/PR31_ROADMAP_CHECKPOINT.md`](./reviews/PR31_ROADMAP_CHECKPOINT.md).
+Stand: 2026-04-26 (nach PR 57 Roadmap Checkpoint — konsolidiert
+den Zustand nach dem Runtime-Safety-Stack PR 53–56:
+Accessibility RPC FA-1 partial, Correlation ID Runtime,
+Capability Constants Runtime, Capability Guard Runtime).
+Sammelblicke:
+[`docs/reviews/PR31_ROADMAP_CHECKPOINT.md`](./reviews/PR31_ROADMAP_CHECKPOINT.md)
+(PR-21–30-Serie) und
+[`docs/reviews/PR57_ROADMAP_CHECKPOINT_RUNTIME_SAFETY_STACK.md`](./reviews/PR57_ROADMAP_CHECKPOINT_RUNTIME_SAFETY_STACK.md)
+(PR-53–56-Stack).
 
 ---
 
@@ -420,13 +426,39 @@ Folgearbeit:
 
 - Privacy/provider-spezifischer Guard
   (z. B. `provider.text.generate` + `cloud_http` + Privacy-Mode)
-  wäre eigene PR — Vocabulary FA-4.
-- AdminBot status-read-only (`admin.status.read`) bleibt
-  ADR-0005-Stufe-0 hinter eigenem Feature-Flag.
+  wäre eigene PR — Vocabulary FA-4. **Erst mit konkretem
+  Use-Case starten**, sonst over-engineering.
+- Cross-Repo `correlation_id`-Propagation zu ABrain (echo),
+  AdminBot (Pflicht für Mutation), OceanData (akzeptieren) —
+  bleibt Spec FA-3 → FA-6
+  ([`AUDIT_CORRELATION_ID_SPEC.md` §12](./contracts/AUDIT_CORRELATION_ID_SPEC.md));
+  jede Bindung ist eigene PR.
+- Policy metadata usage (`requires_approval_by_default` /
+  `audit_required_by_default` / `correlation_required_by_default`
+  als Eingabe in eine Auswertungs-Engine) **nur nach expliziter
+  Design-Entscheidung**. PR 55/56 nutzt diese Helper bewusst nur
+  descriptive; ein Pfad in Richtung Policy Engine wäre eigener
+  ADR vor Code.
+- AdminBot status-read-only (`admin.status.read`,
+  ADR-0005-Stufe-0) hinter eigenem Feature-Flag — separate
+  FA, nicht durch PR 53–56 automatisch aktiviert.
 - OceanData Context-Capabilities (`data.context.query` etc.)
   bleiben hinter ADR-0006-Code-Spike.
 - Eine ausgewachsene Policy-Engine (Multi-Tenant, dynamische
   Regeln, OPA-artige Auswertung) ist explizit **nicht** geplant.
+
+**Erledigt in PR 57 (2026-04-26, Roadmap Checkpoint, Docs-only):**
+[`PR57_ROADMAP_CHECKPOINT_RUNTIME_SAFETY_STACK.md`](./reviews/PR57_ROADMAP_CHECKPOINT_RUNTIME_SAFETY_STACK.md)
+konsolidiert PR 53–56 als *Runtime Safety Stack*: was jetzt
+sicherer ist, was bewusst nicht implementiert wurde, welche
+nächsten Code-Kandidaten realistisch sind. Empfehlung für PR 58:
+**Packaging P1 Local Build Script** (Workstream I, ADR-0007 FA-1)
+— Risiko niedrig, blockiert nichts. Alternativen: Provider
+Privacy Guard (Vocabulary FA-4), ABrain Native FA-1 (Workstream
+H), Accessibility real AT-SPI client (Workstream F FA-1-Folge).
+Reihenfolge bleibt nicht bindend; jeder Kandidat ist eigene PR.
+**Keine** Code-/Tests-/CI-Änderung; ROADMAP §3 trägt jetzt einen
+*Runtime Safety Stack*-Block.
 
 **Erledigt in PR 47 (2026-04-25, Docs/Contract-only):**
 [`docs/contracts/ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md`](./contracts/ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md)
@@ -700,6 +732,15 @@ seitigen technischen Blocker.
   **Proposed**, bis ABrain-Seite einen Gegenvorschlag gegen §4+§7
   publiziert.
 
+**Hinweis nach PR 57 (Runtime-Safety-Stack-Checkpoint):** der
+in PR 53–56 entstandene `correlation_id` / `capability_id` /
+Capability-Guard-Stack ist **rein lokal** und aktiviert weder
+einen ABrain-Native-Pfad noch ein Cross-Repo-Wire automatisch.
+Die ABrain-Native-Achse bleibt **future** und wartet auf einen
+ABrain-seitigen Gegenvorschlag zu ADR-0003 §4 + §7. PR 57
+empfiehlt PR 58 = Packaging P1; ABrain Native FA-1 bleibt
+gleichberechtigte Alternative ohne Vorrang.
+
 **Nächster kleinster PR (Future Work, nicht priorisiert):**
 
 - **FA-1 — `abrain_native`-Provider-Spike.** Typed API-Client hinter
@@ -825,6 +866,16 @@ publiziert (keine binären Anhänge). Source-/Dev-Run aus README §5
 - **FA-1 — Reproducible local build script (P1).** Helper, der
   `cargo build --release` + Godot-Export + Bundle-Layout
   deterministisch produziert. Eigener PR, eigene Verifikation.
+  **PR 57 (Runtime-Safety-Stack-Checkpoint, 2026-04-26) empfiehlt
+  diesen Schritt als nächsten Default-Code-Kandidat (PR 58)** —
+  Risiko niedrig, kein Runtime-Code-Risiko, keine Sicherheits-/
+  Approval-/Audit-Berührung; lockt ADR-0007 in Code, ohne
+  Signing/Update zu öffnen. Begründung in
+  [`docs/reviews/PR57_ROADMAP_CHECKPOINT_RUNTIME_SAFETY_STACK.md` §9](./reviews/PR57_ROADMAP_CHECKPOINT_RUNTIME_SAFETY_STACK.md).
+  Reihenfolge bleibt nicht bindend — Provider Privacy Guard
+  (Workstream E, Vocabulary FA-4), ABrain Native FA-1 (H) und
+  Accessibility real AT-SPI client (F) sind defensible
+  Alternativen.
 - **FA-2 — Godot Export Presets (P1-Voraussetzung).** Eigener PR
   vor jedem Binär-Format.
 - **FA-3 — AppImage Prototype + Checksum (P2).** Erst nach FA-1.
