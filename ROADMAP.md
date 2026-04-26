@@ -1,11 +1,13 @@
 # Smolit AI Assistant — Developer Roadmap
 
 > Stand: 2026-04-26 (nach v0.2.0-Release, PR 52 Packaging Decision
-> ADR und PR 53 Accessibility RPC FA-1 partial spike). Diese Datei
-> ist eine **Roadmap**, kein PR-Changelog.
+> ADR, dem Runtime-Safety-Stack PR 53–56 und dem Roadmap-Checkpoint
+> PR 57). Diese Datei ist eine **Roadmap**, kein PR-Changelog.
 > Detailhistorie pro PR lebt in [`docs/reviews/`](./docs/reviews/) —
-> insbesondere der Sammelblick auf die PR-21–30-Serie liegt in
-> [`docs/reviews/PR31_ROADMAP_CHECKPOINT.md`](./docs/reviews/PR31_ROADMAP_CHECKPOINT.md).
+> der Sammelblick auf die PR-21–30-Serie liegt in
+> [`docs/reviews/PR31_ROADMAP_CHECKPOINT.md`](./docs/reviews/PR31_ROADMAP_CHECKPOINT.md);
+> der Sammelblick auf PR 53–56 liegt in
+> [`docs/reviews/PR57_ROADMAP_CHECKPOINT_RUNTIME_SAFETY_STACK.md`](./docs/reviews/PR57_ROADMAP_CHECKPOINT_RUNTIME_SAFETY_STACK.md).
 
 ---
 
@@ -132,6 +134,55 @@ Detaillierte Begriffswelt: siehe
   Approval-Requested/Resolved, Action-Started/Completed/Cancelled,
   IPC-Command-Rejected. Ein Core-Restart leert den Store.
 
+### Runtime Safety Stack (PR 53–56)
+
+- **Accessibility RPC FA-1 (partial)** *(PR 53, default-off)* —
+  Cargo-Feature `accessibility_rpc` + Runtime-Env
+  `SMOLIT_ACCESSIBILITY_RPC_ENABLED` + mockable
+  `AccessibilityRegistryClient`-Trait. Production hat **noch
+  keinen** echten `atspi`/`zbus`-Client gewired; der Pfad fällt
+  honest auf `accessibility_rpc_backend_not_implemented` zurück.
+  `confidence: verified` ist strukturell exklusiv für
+  Registry-Evidenz.
+- **`correlation_id` runtime (lokal)** *(PR 54, additiv)* —
+  optionales `correlation_id: Option<String>` auf `AuditEvent`,
+  allen Action-Lifecycle-Payloads und beiden Approval-Payloads;
+  `App::plan_demo_action`, `App::dispatch_interaction` und
+  `App::request_approval_demo` vergeben am Eingangstor und
+  tragen lokal durch IpcCommandReceived → ActionPlanned →
+  (ApprovalRequested → ApprovalResolved) → ActionStarted/Step/
+  Completed bzw. ActionCancelled. Generator/Sanitizer in
+  [`core/src/audit/correlation.rs`](./core/src/audit/correlation.rs).
+  **Kein** Cross-Repo-Echo, **kein** Distributed Tracing,
+  **keine** Persistenz.
+- **`capability_id` constants/metadata** *(PR 55, additiv)* —
+  18 statische Konstanten in
+  [`core/src/capabilities.rs`](./core/src/capabilities.rs) plus
+  Mapping-Helfer und descriptive Metadaten-Helfer
+  (`is_executable_today`, `risk_for_capability`, …). Optionales
+  `capability_id` auf `AuditEvent` und `ApprovalRequest`. Werte
+  ausschließlich aus `KNOWN_CAPABILITY_IDS` (Whitelist + Naming-
+  Regeln); Admin-/Data-IDs sind reine Dokumentations-Konstanten
+  (`is_executable_today` = `false`). **Keine** Policy Engine,
+  **keine** Runtime-Registry.
+- **Capability Guard (deny-only / fail-closed)** *(PR 56,
+  additiv)* — kleiner Match-Guard in
+  [`core/src/capability_guard.rs`](./core/src/capability_guard.rs)
+  über den PR-55-Konstanten. Verweigert unbekannte / future /
+  unsupported Capabilities **vor** dem bestehenden
+  Approval-/Policy-v0-Pfad mit fünf kuratierten Reasons
+  (`unknown_capability_id`, `capability_not_executable_today`,
+  `future_capability_not_implemented`,
+  `interaction_type_text_not_supported`,
+  `interaction_send_shortcut_not_supported`). Audit-Whitelist
+  trägt jetzt `RESULT_CAPABILITY_GUARD_DENIED`. Der Guard hebt
+  **keine** bestehende Sperre auf — er kann nur zusätzlich
+  verweigern. **Keine** neuen IPC-Commands, **keine**
+  UI-Änderung, **kein** Approval-Bypass.
+- **Test count nach dem Stack:** `scripts/ci_verify.sh core` →
+  469 passed (war 398 vor PR 53). Sammelblick:
+  [`docs/reviews/PR57_ROADMAP_CHECKPOINT_RUNTIME_SAFETY_STACK.md`](./docs/reviews/PR57_ROADMAP_CHECKPOINT_RUNTIME_SAFETY_STACK.md).
+
 ### Window / Overlay
 
 - Overlay-MVP (transparent + optional click-through) als opt-in,
@@ -217,9 +268,22 @@ Single-Source für offene Punkte:
   neues Status-Feld. Kein zwingender D-Kandidat mehr in der nahen
   Reihe.
 - **E. Approval / Policy / Tool-Gating** — Policy v0 (PR 25)
-  gelandet, Tripwire-Test fix. **Offene Lücke:** Audit-Ring-Buffer
-  deckt nur `plan_demo_action`; der reale
-  `open_application`-Lifecycle ist nicht auditiert. → PR 32.
+  gelandet, Tripwire-Test fix. PR 32 (Audit-Lifecycle für reale
+  Interaction-Actions), PR 45–47 (AdminBot Safety Boundary ADR
+  inkl. Capability Contract), PR 46 (Audit Correlation ID Spec +
+  Capability Vocabulary), **PR 54 (Correlation ID Runtime,
+  lokal)**, **PR 55 (Capability Constants Runtime, descriptive
+  metadata, keine Registry, keine Policy Engine)**, **PR 56
+  (Capability Guard Runtime, deny-only / fail-closed, keine
+  neuen Rechte)** alle gelandet. Sammelblick auf den
+  Runtime-Safety-Stack:
+  [`docs/reviews/PR57_ROADMAP_CHECKPOINT_RUNTIME_SAFETY_STACK.md`](./docs/reviews/PR57_ROADMAP_CHECKPOINT_RUNTIME_SAFETY_STACK.md).
+  **Bewusst nicht durch PR 54–56:** Cross-Repo-Wire (`correlation_id`
+  / `capability_id` zu ABrain / AdminBot / OceanData), echte
+  Policy Engine, OPA/Rego, AdminBot/OceanData/ABrain-Adapter.
+  Nächster Kandidat (Future Work, nicht priorisiert): Provider
+  Privacy Guard (Vocabulary FA-4) — bleibt eine eigene PR mit
+  konkretem Use-Case.
 - **F. Desktop Interaction Layer** — `focus_window` mit PR 23
   entschieden; Accessibility-RPC-Spike-Decision mit PR 37
   entschieden ([`ADR-0002`](./docs/adr/ADR-0002-accessibility-rpc-readonly.md),
@@ -229,9 +293,13 @@ Single-Source für offene Punkte:
   `AccessibilityRegistryClient`-Trait + verified-only-from-registry-
   Konstruktor; Production-Pfad fällt honest auf
   `accessibility_rpc_backend_not_implemented` zurück, weil noch kein
-  realer `atspi`/`zbus`-Client gewired ist. Nächster Kandidat
-  (Future Work, nicht priorisiert): echter Registry-Client hinter
-  Permission-Review (Flatpak `--talk-name=org.a11y.Bus`).
+  realer `atspi`/`zbus`-Client gewired ist. `type_text` /
+  `send_shortcut` bleiben unsupported; PR 56 verweigert sie
+  zusätzlich fail-closed im Capability-Guard (kein neues Backend).
+  Nächster Kandidat (Future Work, nicht priorisiert): echter
+  Registry-Client hinter Permission-Review (Flatpak
+  `--talk-name=org.a11y.Bus`); ohne Permission-Review keine
+  ehrliche Linie.
 - **G. Avatar Animation / Stage C Research** — PR 30 gelandet;
   Stage C bleibt Research-Gate. Nächster Kandidat wartet auf
   Token-Export auf der smolitux-ui-Seite (siehe J / PR 35).
@@ -260,11 +328,14 @@ Single-Source für offene Punkte:
   ([`ADR-0007`](./docs/adr/ADR-0007-packaging-decision.md),
   Proposed) — gestufte Sequenz P0 (Source) → P1 (Local build
   script) → P2 (AppImage) → P3 (`.deb`) → P4 (Flatpak) → P5
-  (Signing/Update) → P6 (Multi-distro). Nächster Kandidat
-  (Future Work, nicht priorisiert): FA-1 Reproducible local
-  build script + FA-2 Godot Export Presets als Eintritt in P1/P2.
-  **Keine** Packaging-Formate gebaut, **keine** signierten
-  Releases, **kein** Auto-Update in dieser Stufe.
+  (Signing/Update) → P6 (Multi-distro). **Empfohlener nächster
+  Code-Kandidat (PR 57 Checkpoint):** **FA-1 Reproducible local
+  build script (P1)** — Eintritt in die Packaging-Sequenz, ohne
+  AppImage/`.deb`/Flatpak zu bauen, ohne Signing-Stufe; Risiko
+  niedrig, blockiert nichts, lockt ADR-0007 in Code. FA-2 Godot
+  Export Presets ist Vorbedingung für P2. **Keine** Packaging-
+  Formate gebaut, **keine** signierten Releases, **kein**
+  Auto-Update in dieser Stufe.
 - **J. Smolitux Design Contract / Cross-Runtime UI Consistency** —
   ADR-0001 gelandet (PR 24), Avatar-Palette (PR 30) als lokaler
   Token-Andockpunkt, Smolitux Token Contract v0 gelandet (PR 35,
@@ -349,7 +420,9 @@ Konservative Reihenfolge — Docs/ADR vor Code; Begründung in
 | 54 | E | **Correlation ID Runtime Spike** (2026-04-26, gelandet, Code-Spike, additiv): erste lokale Umsetzung von [AUDIT_CORRELATION_ID_SPEC §12 FA-1](./docs/contracts/AUDIT_CORRELATION_ID_SPEC.md). Optionales `correlation_id: Option<String>` auf `AuditEvent`, allen Action-Lifecycle-Payloads (`ActionPlanned`, `ActionStarted`, `ActionStep`, `ActionVerification`, `ActionCompleted`, `ActionFailed`, `ActionCancelled`, `ActionProgress`), `ApprovalRequest` und `ApprovalResolvedPayload`. Generator/Validator in [`core/src/audit/correlation.rs`](./core/src/audit/correlation.rs); Format `corr_<timestamp_ms+counter-hex>` (Spec §5: Prefix `corr_`, Charset `[a-z0-9_]`, Länge ≤ 80; ULID/UUID-v7 bleibt Future Work, sobald eine geeignete Dependency einzieht). `App::plan_demo_action`, `App::dispatch_interaction` und `App::request_approval_demo` vergeben die ID am frühesten Punkt und tragen sie durch IPC-Command-Receive → ActionPlanned → (ApprovalRequested → ApprovalResolved) → ActionStarted/Step/Completed bzw. ActionCancelled. Double-Approve / Re-Resolve erzeugt keine zweite ID. Tests: 9 neue Lifecycle-Invarianten plus 7 Generator-Unit-Tests; `cargo test` 424 passed (war 408 vor PR 53, 415 vor PR 54). **Kein** neues IPC-Command, **kein** neues Outgoing-Envelope, **keine** UI-Änderung, **keine** Persistenz, **keine** Cross-Repo-Wire (kein ABrain-Echo, kein AdminBot-Pflicht-Pfad, kein OceanData-Akzeptanz-Pfad), **kein** OpenTelemetry, **kein** W3C traceparent, **kein** fail-closed-Verhalten. Details: [`docs/reviews/PR54_CORRELATION_ID_RUNTIME.md`](./docs/reviews/PR54_CORRELATION_ID_RUNTIME.md). |
 | 55 | E | **Capability Constants Runtime Spike** (2026-04-26, gelandet, Code-Spike, additiv): erste lokale Umsetzung von [CAPABILITY_VOCABULARY §12 FA-1/FA-2](./docs/contracts/CAPABILITY_VOCABULARY.md). Neues Modul [`core/src/capabilities.rs`](./core/src/capabilities.rs) führt 18 String-Konstanten (`interaction.*` / `assistant.*` / `admin.*` / `data.*` / `provider.*` / `audit.*`), eine `KNOWN_CAPABILITY_IDS`-Whitelist und Mapping-Helfer (`capability_id_for_interaction`, `capability_id_for_demo_kind`, `capability_id_for_plan`). Metadaten-Helfer (`risk_for_capability`, `requires_approval_by_default`, `audit_required_by_default`, `correlation_required_by_default`, `is_executable_today`, `is_known_capability_id`) spiegeln das Vocab-Soll **descriptiv** — sie sind keine Policy-Eingabe. Sanitization-Helper `sanitize_capability_id` läuft Whitelist + Naming-Regel-Check (§3 der Spec). `AuditEvent`, `AuditFields` und `ApprovalRequest` bekommen ein optionales `capability_id`-Feld; `App::plan_demo_action`, `App::dispatch_interaction` und `App::request_approval_demo` schreiben die kanonische Capability in den Audit-/Approval-Lifecycle alongside `correlation_id`. `cargo test` 443 passed (war 424 vor PR 54, 437 nach den Capabilities-Unit-Tests). **Keine** Policy Engine, **keine** dynamische Registry, **kein** Cross-Repo-Wire (kein ABrain-Echo, kein AdminBot-Pflicht-Pfad, kein OceanData-Akzeptanz), **kein** neues IPC-Command, **kein** neues Outgoing-Envelope, **keine** UI-Änderung, **keine** Persistenz, **kein** type_text/send_shortcut-Backend. Admin- und Data-Capabilities sind als Dokumentations-Konstanten enthalten, aber `is_executable_today` liefert für sie `false`. Action-Event-Payloads (`action_planned`, `action_started`, …) tragen weiterhin **kein** `capability_id` — additive Erweiterung wäre Spec FA-4 → FA-6. Details: [`docs/reviews/PR55_CAPABILITY_CONSTANTS_RUNTIME.md`](./docs/reviews/PR55_CAPABILITY_CONSTANTS_RUNTIME.md). |
 | 56 | E | **Capability Guard Runtime Spike** (2026-04-26, gelandet, Code-Spike, additiv): kleine, fail-closed Guard-Schicht über den in PR 55 eingeführten Capability-Konstanten. Neues Modul [`core/src/capability_guard.rs`](./core/src/capability_guard.rs) führt `CapabilityGuardDecision` (Allow / Deny mit kuratiertem `reason` + `recovery_hint`), `CapabilityGuardInput`, drei Entry-Helfer (`guard_capability`, `guard_interaction_kind`, `guard_demo_kind`) und fünf benannte Reasons (`unknown_capability_id`, `capability_not_executable_today`, `future_capability_not_implemented`, `interaction_type_text_not_supported`, `interaction_send_shortcut_not_supported`). Wiring in `App::dispatch_interaction` (vor `policy.allows`), `App::plan_demo_action` und `App::request_approval_demo`. Audit-Whitelist um `RESULT_CAPABILITY_GUARD_DENIED = "capability_guard_denied"` erweitert; ein Guard-Deny erscheint im Wire als `action_planned` → `action_started` → `action_failed { message: "capability_guard_denied: <reason>" }` und im Audit als Eintrag mit `result = "capability_guard_denied"` plus `summary`-Suffix `[guard:<reason>]`. Allow-Pfade verändern Wire/Audit-Form gegenüber PR 55 nicht. `cargo test` 469 passed (war 443 nach PR 55). **Keine** Policy Engine, **kein** OPA/Rego im Core, **keine** dynamische Capability-Registry, **kein** Cross-Repo-Wire, **kein** Auto-Approval, **kein** neues IPC-Command, **kein** neues Outgoing-Envelope, **keine** UI-Änderung, **kein** type_text/send_shortcut-Backend, **kein** Focus-Window-Verhaltenswechsel. Der Guard hebt **keine** bestehende Sperre auf — er kann nur zusätzlich verweigern. Details: [`docs/reviews/PR56_CAPABILITY_GUARD_RUNTIME.md`](./docs/reviews/PR56_CAPABILITY_GUARD_RUNTIME.md). Vorschlag für den nächsten Code-Kandidaten: Packaging P1 (Local build script), Provider Privacy Guard oder ABrain Native FA-1 — alle drei bleiben offen, ohne über-Priorisierung in dieser PR. |
-| 57 | K | **OceanData Privacy / Redaction ADR** (Vorschlag, Docs/ADR-only): Eintrittsbedingung für `redaction = external_safe` aus [ADR-0006 §10](./docs/adr/ADR-0006-oceandata-context-provider-spi.md) + [ADR-0004 FA-5](./docs/adr/ADR-0004-oceandata-data-layer-integration.md). **Keine** Implementation, **kein** Provider-Kind, **kein** IPC. |
+| 57 | A | **Roadmap Checkpoint after Runtime Safety Stack** (2026-04-26, gelandet, **Docs-only**): Sammelblick auf PR 53–56 (Accessibility RPC FA-1 partial, Correlation ID Runtime, Capability Constants Runtime, Capability Guard Runtime). Konsolidiert die neue Truth: Smolit kann heute `open_application` approval-gated ausführen; `focus_window` bleibt X11/template/double-opt-in; `type_text` / `send_shortcut` bleiben unsupported (jetzt zusätzlich vom Guard fail-closed verweigert); AdminBot/OceanData/ABrain-native bleiben nicht implementiert; Accessibility RPC ist partial/stubbed; `correlation_id` und `capability_id` sind **lokale** Trace-/Semantik-Metadaten ohne Cross-Repo-Wire; der Capability-Guard ist deny-only und ersetzt keine Policy Engine. ROADMAP §3 trägt jetzt einen *Runtime Safety Stack*-Block; OPEN_WORK Workstream E / F / I ist mit den PR-53–56-Resultaten und Folgearbeiten synchronisiert. **Empfehlung für PR 58 (nicht bindend):** Packaging P1 Local Build Script (Risiko niedrig, lockt ADR-0007 in Code). Alternativen: Provider Privacy Guard (Vocabulary FA-4), Accessibility real AT-SPI client (FA-1-Folge), ABrain Native FA-1 Provider Spike. **Keine** Code-/Tests-/CI-/Workflow-Änderung, **keine** neue Runtime-Config, **keine** Cross-Repo-Berührung. Details: [`docs/reviews/PR57_ROADMAP_CHECKPOINT_RUNTIME_SAFETY_STACK.md`](./docs/reviews/PR57_ROADMAP_CHECKPOINT_RUNTIME_SAFETY_STACK.md). |
+| 58 | I/E/F/K | **Vorschlag für nächste Stufe (nicht bindend):** Default-Kandidat ist Packaging P1 Local Build Script (Workstream I, ADR-0007 FA-1 + FA-2 als Vorbedingung für P2/P3). Alternativen: **(B)** Provider Privacy Guard (Workstream E, [CAPABILITY_VOCABULARY §12 FA-4](./docs/contracts/CAPABILITY_VOCABULARY.md)) — kleine fail-closed Erweiterung der PR-56-Linie; **(C)** ABrain Native FA-1 Provider-Spike (Workstream H, [`ADR-0003`](./docs/adr/ADR-0003-abrain-native-integration.md)); **(D)** Accessibility real AT-SPI Client (Workstream F, FA-1-Folge zu PR 53, vorher Permission-Review). Begründung der Empfehlung in [`docs/reviews/PR57_ROADMAP_CHECKPOINT_RUNTIME_SAFETY_STACK.md` §9](./docs/reviews/PR57_ROADMAP_CHECKPOINT_RUNTIME_SAFETY_STACK.md). Reihenfolge bleibt offen — keiner der Kandidaten blockiert die anderen. |
+| 59 | K | **OceanData Privacy / Redaction ADR** (Vorschlag, Docs/ADR-only): Eintrittsbedingung für `redaction = external_safe` aus [ADR-0006 §10](./docs/adr/ADR-0006-oceandata-context-provider-spi.md) + [ADR-0004 FA-5](./docs/adr/ADR-0004-oceandata-data-layer-integration.md). **Keine** Implementation, **kein** Provider-Kind, **kein** IPC. |
 
 ### 6.5 v0.2 Release Gate — closed
 
@@ -374,12 +447,17 @@ Konservative Reihenfolge — Docs/ADR vor Code; Begründung in
 > ([`ADR-0007`](./docs/adr/ADR-0007-packaging-decision.md)),
 > Implementation ist Future Work.
 >
-> **Post-v0.2 Sequenz:** PR 52 Packaging Decision ADR (gelandet,
-> 2026-04-26, Docs/ADR-only — definiert die Sequenz P0 → P6 vor
-> Code), gefolgt von PR 53 Accessibility RPC FA-1 Spike, PR 54
-> Correlation ID Runtime Spike, PR 55 Capability Constants Runtime
-> Spike, PR 56 OceanData Privacy/Redaction ADR. Reihenfolge bleibt
-> *nicht bindend*; jeder Schritt eigener Folge-PR.
+> **Post-v0.2 Sequenz (real gelandet):** PR 52 Packaging Decision
+> ADR (Docs/ADR-only — definiert die Sequenz P0 → P6 vor Code),
+> PR 53 Accessibility RPC FA-1 partial Spike, PR 54 Correlation
+> ID Runtime Spike, PR 55 Capability Constants Runtime Spike,
+> PR 56 Capability Guard Runtime Spike, PR 57 Roadmap Checkpoint
+> after Runtime Safety Stack (Docs-only). Sammelblick auf den
+> Stack:
+> [`docs/reviews/PR57_ROADMAP_CHECKPOINT_RUNTIME_SAFETY_STACK.md`](./docs/reviews/PR57_ROADMAP_CHECKPOINT_RUNTIME_SAFETY_STACK.md).
+> Reihenfolge bleibt *nicht bindend*; jeder Schritt eigener
+> Folge-PR. Empfohlener nächster Code-Kandidat (PR 58): Packaging
+> P1 Local Build Script (Workstream I, ADR-0007).
 
 ---
 
