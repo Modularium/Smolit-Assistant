@@ -46,12 +46,20 @@ pub struct ActionPlannedPayload {
     pub target: ActionTarget,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mapping: Option<ActionMapping>,
+    /// PR 54 — additives, optionales `correlation_id`-Token. Trägt die
+    /// Action-Identity durch Approval-/Audit-/Action-Lifecycle, ohne
+    /// die bestehende Wire-Form zu brechen. Ältere Clients ignorieren
+    /// das Feld.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionStartedPayload {
     pub action_id: String,
     pub phase: ActionPhase,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,6 +69,8 @@ pub struct ActionProgressPayload {
     pub progress: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,12 +79,16 @@ pub struct ActionStepPayload {
     pub title: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionVerificationPayload {
     pub action_id: String,
     pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -83,6 +97,8 @@ pub struct ActionCompletedPayload {
     pub status: ActionStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,6 +108,8 @@ pub struct ActionFailedPayload {
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -100,6 +118,8 @@ pub struct ActionCancelledPayload {
     pub status: ActionStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
 }
 
 #[cfg(test)]
@@ -115,6 +135,7 @@ mod tests {
             description: None,
             target: ActionTarget::unknown(),
             mapping: None,
+            correlation_id: None,
         };
         let json = serde_json::to_string(&payload).unwrap();
         assert_eq!(
@@ -130,6 +151,7 @@ mod tests {
             status: ActionStatus::Failed,
             message: "ABrain command failed".into(),
             error: None,
+            correlation_id: None,
         };
         let json = serde_json::to_string(&payload).unwrap();
         assert_eq!(

@@ -85,6 +85,13 @@ pub struct ApprovalRequest {
     /// `medium`; older receivers ignore the field.
     #[serde(default = "default_risk_medium")]
     pub risk: String,
+    /// PR 54 — additives, optionales `correlation_id`-Token. Spiegelt
+    /// die Action-Identity der umgebenden Approval-Klammer; siehe
+    /// [`docs/contracts/AUDIT_CORRELATION_ID_SPEC.md`](../../../docs/contracts/AUDIT_CORRELATION_ID_SPEC.md).
+    /// Ältere Emitter lassen das Feld `None`; ältere Receiver
+    /// ignorieren es.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
 }
 
 #[cfg(test)]
@@ -123,4 +130,10 @@ pub struct ApprovalResolvedPayload {
     /// cancel). Additive — older receivers simply ignore the field.
     #[serde(default = "default_source_user")]
     pub source: String,
+    /// PR 54 — additives, optionales `correlation_id`-Token. Spiegelt
+    /// die `correlation_id` der ursprünglichen `approval_requested`-
+    /// Klammer; der Core mappt Re-Resolves über die `approval_id` auf
+    /// dasselbe Token. Ältere Receiver ignorieren das Feld.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
 }

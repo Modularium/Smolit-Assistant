@@ -991,6 +991,11 @@ impl App {
         } else {
             summary
         };
+        // PR 54 — der Demo-Approval-Pfad ist ein Approval-only Lifecycle.
+        // Wir vergeben am Eingangstor eine `correlation_id`, damit
+        // Approval-Requested und Approval-Resolved im Audit-Store
+        // verkettet sind.
+        let correlation_id = crate::audit::generate_correlation_id();
         let request = ApprovalRequest {
             approval_id: approval_id.clone(),
             // Demo path has no backend action — the UI tolerates an
@@ -1004,14 +1009,21 @@ impl App {
             timeout_seconds,
             selected_target: None,
             risk: sanitized_risk,
+            correlation_id: Some(correlation_id.clone()),
         };
         let rx = self.pending_approvals.register(&approval_id);
 
         let app = Arc::clone(self);
         let approval_id_task = approval_id.clone();
+        let correlation_for_task = correlation_id.clone();
         tokio::spawn(async move {
-            app.await_and_resolve_demo(approval_id_task, rx, timeout_seconds)
-                .await;
+            app.await_and_resolve_demo(
+                approval_id_task,
+                rx,
+                timeout_seconds,
+                correlation_for_task,
+            )
+            .await;
         });
 
         vec![OutgoingMessage::ApprovalRequested { payload: request }]
@@ -1022,6 +1034,7 @@ impl App {
         approval_id: String,
         rx: tokio::sync::oneshot::Receiver<ApprovalDecision>,
         timeout_seconds: u64,
+        correlation_id: String,
     ) {
         let (decision, source) = match timeout(Duration::from_secs(timeout_seconds), rx).await {
             Ok(Ok(decision)) => (decision, SOURCE_USER.to_string()),
@@ -1035,6 +1048,7 @@ impl App {
             approval_id = %approval_id,
             decision = decision.as_str(),
             source = %source,
+            correlation_id = %correlation_id,
             "demo approval resolved",
         );
         // Demo path: no action to run afterwards — we emit exactly
@@ -1046,6 +1060,7 @@ impl App {
                 action_id: String::new(),
                 decision: decision.as_str().to_string(),
                 source,
+                correlation_id: Some(correlation_id),
             },
         });
     }
@@ -1087,6 +1102,12 @@ impl App {
             &risk,
             requires_approval,
         );
+        // PR 54 — frühester Punkt im Action-Pfad. Die `correlation_id`
+        // verkettet IpcCommandReceived → ActionPlanned →
+        // (ApprovalRequested → ApprovalResolved) → ActionStarted/Step/
+        // Completed bzw. ActionCancelled. Sie verlässt den Prozess
+        // nicht und wird nirgends persistiert.
+        let correlation_id = crate::audit::generate_correlation_id();
         let mut out: Vec<OutgoingMessage> = Vec::new();
 
         // PR 19 — Audit: der IPC-Command ist angekommen. Summary ist
@@ -1098,7 +1119,8 @@ impl App {
                 .with_action_id(&plan.action_id)
                 .with_risk(&plan.risk)
                 .with_source(crate::audit::SOURCE_UI)
-                .with_summary(format!("plan_demo_action kind={}", plan.kind)),
+                .with_summary(format!("plan_demo_action kind={}", plan.kind))
+                .with_correlation_id(&correlation_id),
         );
 
         // `action_planned` trägt den demo-kuratierten Titel. `target`
@@ -1111,6 +1133,7 @@ impl App {
                 description: Some(plan.summary.clone()),
                 target: crate::actions::ActionTarget::unknown(),
                 mapping: None,
+                correlation_id: Some(correlation_id.clone()),
             },
         });
         self.audit.record(
@@ -1119,7 +1142,8 @@ impl App {
                 .with_action_id(&plan.action_id)
                 .with_risk(&plan.risk)
                 .with_source(crate::audit::SOURCE_CORE)
-                .with_summary(&plan.title),
+                .with_summary(&plan.title)
+                .with_correlation_id(&correlation_id),
         );
 
         if requires_approval {
@@ -1136,6 +1160,7 @@ impl App {
                 timeout_seconds,
                 selected_target: None,
                 risk: plan.risk.clone(),
+                correlation_id: Some(correlation_id.clone()),
             };
             let rx = self.pending_approvals.register(&approval_id);
             out.push(OutgoingMessage::ApprovalRequested { payload: request });
@@ -1146,14 +1171,22 @@ impl App {
                     .with_approval_id(&approval_id)
                     .with_risk(&plan.risk)
                     .with_source(crate::audit::SOURCE_CORE)
-                    .with_summary(&plan.title),
+                    .with_summary(&plan.title)
+                    .with_correlation_id(&correlation_id),
             );
 
             let app = Arc::clone(self);
             let plan_task = plan.clone();
+            let correlation_for_task = correlation_id.clone();
             tokio::spawn(async move {
-                app.await_and_execute_demo_plan(plan_task, approval_id, rx, timeout_seconds)
-                    .await;
+                app.await_and_execute_demo_plan(
+                    plan_task,
+                    approval_id,
+                    rx,
+                    timeout_seconds,
+                    correlation_for_task,
+                )
+                .await;
             });
             return out;
         }
@@ -1164,8 +1197,9 @@ impl App {
         // folgen über den Broadcast-Kanal.
         let app = Arc::clone(self);
         let plan_task = plan;
+        let correlation_for_task = correlation_id;
         tokio::spawn(async move {
-            app.execute_demo_plan(plan_task).await;
+            app.execute_demo_plan(plan_task, correlation_for_task).await;
         });
         out
     }
@@ -1176,6 +1210,7 @@ impl App {
         approval_id: String,
         rx: tokio::sync::oneshot::Receiver<ApprovalDecision>,
         timeout_seconds: u64,
+        correlation_id: String,
     ) {
         plan.set_status(crate::actions::DemoPlanStatus::WaitingApproval);
         let (decision, source) = match timeout(Duration::from_secs(timeout_seconds), rx).await {
@@ -1191,6 +1226,7 @@ impl App {
             action_id = %plan.action_id,
             decision = decision.as_str(),
             source = %source,
+            correlation_id = %correlation_id,
             "demo plan approval resolved",
         );
 
@@ -1200,6 +1236,7 @@ impl App {
                 action_id: plan.action_id.clone(),
                 decision: decision.as_str().to_string(),
                 source: source.clone(),
+                correlation_id: Some(correlation_id.clone()),
             },
         });
         // PR 19 — Audit: die Resolution markiert das Ende der
@@ -1213,13 +1250,14 @@ impl App {
                 .with_risk(&plan.risk)
                 .with_result(decision.as_str())
                 .with_source(&source)
-                .with_summary(&plan.title),
+                .with_summary(&plan.title)
+                .with_correlation_id(&correlation_id),
         );
 
         match decision {
             ApprovalDecision::Approved => {
                 plan.set_status(crate::actions::DemoPlanStatus::Approved);
-                self.execute_demo_plan(plan).await;
+                self.execute_demo_plan(plan, correlation_id).await;
             }
             ApprovalDecision::Denied => {
                 plan.set_status(crate::actions::DemoPlanStatus::Denied);
@@ -1228,9 +1266,15 @@ impl App {
                         action_id: plan.action_id.clone(),
                         status: crate::actions::ActionStatus::Cancelled,
                         message: Some("Action denied by user".to_string()),
+                        correlation_id: Some(correlation_id.clone()),
                     },
                 });
-                self.record_plan_cancel_audit(&plan, crate::audit::RESULT_DENIED, &source);
+                self.record_plan_cancel_audit(
+                    &plan,
+                    crate::audit::RESULT_DENIED,
+                    &source,
+                    &correlation_id,
+                );
             }
             ApprovalDecision::Cancelled => {
                 plan.set_status(crate::actions::DemoPlanStatus::Denied);
@@ -1239,9 +1283,15 @@ impl App {
                         action_id: plan.action_id.clone(),
                         status: crate::actions::ActionStatus::Cancelled,
                         message: Some("Action cancelled".to_string()),
+                        correlation_id: Some(correlation_id.clone()),
                     },
                 });
-                self.record_plan_cancel_audit(&plan, crate::audit::RESULT_CANCELLED, &source);
+                self.record_plan_cancel_audit(
+                    &plan,
+                    crate::audit::RESULT_CANCELLED,
+                    &source,
+                    &correlation_id,
+                );
             }
             ApprovalDecision::TimedOut => {
                 plan.set_status(crate::actions::DemoPlanStatus::Expired);
@@ -1250,9 +1300,15 @@ impl App {
                         action_id: plan.action_id.clone(),
                         status: crate::actions::ActionStatus::Cancelled,
                         message: Some("Approval expired".to_string()),
+                        correlation_id: Some(correlation_id.clone()),
                     },
                 });
-                self.record_plan_cancel_audit(&plan, crate::audit::RESULT_EXPIRED, &source);
+                self.record_plan_cancel_audit(
+                    &plan,
+                    crate::audit::RESULT_EXPIRED,
+                    &source,
+                    &correlation_id,
+                );
             }
         }
     }
@@ -1262,6 +1318,7 @@ impl App {
         plan: &crate::actions::DemoPlan,
         result: &str,
         source: &str,
+        correlation_id: &str,
     ) {
         self.audit.record(
             crate::audit::AuditKind::ActionCancelled,
@@ -1270,11 +1327,16 @@ impl App {
                 .with_risk(&plan.risk)
                 .with_result(result)
                 .with_source(source)
-                .with_summary(&plan.title),
+                .with_summary(&plan.title)
+                .with_correlation_id(correlation_id),
         );
     }
 
-    async fn execute_demo_plan(self: Arc<Self>, mut plan: crate::actions::DemoPlan) {
+    async fn execute_demo_plan(
+        self: Arc<Self>,
+        mut plan: crate::actions::DemoPlan,
+        correlation_id: String,
+    ) {
         if plan.status.is_terminal() {
             // Idempotenz: ein bereits abgeschlossener Plan darf nicht
             // ein zweites Mal laufen. Die Executor-Tasks sind zwar
@@ -1287,6 +1349,7 @@ impl App {
             payload: crate::actions::ActionStartedPayload {
                 action_id: plan.action_id.clone(),
                 phase: crate::actions::ActionPhase::Started,
+                correlation_id: Some(correlation_id.clone()),
             },
         });
         self.audit.record(
@@ -1295,13 +1358,15 @@ impl App {
                 .with_action_id(&plan.action_id)
                 .with_risk(&plan.risk)
                 .with_source(crate::audit::SOURCE_CORE)
-                .with_summary(&plan.title),
+                .with_summary(&plan.title)
+                .with_correlation_id(&correlation_id),
         );
         self.broadcast(OutgoingMessage::ActionStep {
             payload: crate::actions::ActionStepPayload {
                 action_id: plan.action_id.clone(),
                 title: plan.step_label(),
                 description: None,
+                correlation_id: Some(correlation_id.clone()),
             },
         });
         // Einziger „echter" Seiteneffekt: `demo_wait` hält die Task
@@ -1316,6 +1381,7 @@ impl App {
                 action_id: plan.action_id.clone(),
                 status: crate::actions::ActionStatus::Completed,
                 message: Some("Demo plan completed (no side effects)".to_string()),
+                correlation_id: Some(correlation_id.clone()),
             },
         });
         self.audit.record(
@@ -1325,7 +1391,8 @@ impl App {
                 .with_risk(&plan.risk)
                 .with_result(crate::audit::RESULT_COMPLETED)
                 .with_source(crate::audit::SOURCE_CORE)
-                .with_summary(&plan.title),
+                .with_summary(&plan.title)
+                .with_correlation_id(&correlation_id),
         );
     }
 
@@ -1343,9 +1410,23 @@ impl App {
     /// broadcast channel.
     pub async fn dispatch_interaction(
         self: &Arc<Self>,
-        action: InteractionAction,
+        mut action: InteractionAction,
     ) -> Vec<OutgoingMessage> {
         let mut out = Vec::with_capacity(3);
+        // PR 54 — frühester Punkt im realen Action-Pfad. Ist die
+        // Action über `execute_open_application` /
+        // `execute_focus_window` reingekommen, gibt es noch keine
+        // Korrelation; hier vergeben wir sie. Tests dürfen die ID
+        // vorab setzen — dann übernehmen wir sie unverändert.
+        let correlation_id = match action.correlation_id.clone() {
+            Some(existing) => existing,
+            None => {
+                let fresh = crate::audit::generate_correlation_id();
+                action.correlation_id = Some(fresh.clone());
+                fresh
+            }
+        };
+
         // PR 32 — Audit: IPC-Command-Received for real interaction
         // actions. Summary carries only the interaction kind name
         // (`open_application` / `focus_window` / …) plus the Action-
@@ -1361,7 +1442,8 @@ impl App {
                     "interaction_{}: {}",
                     action.kind().as_str(),
                     action.title,
-                )),
+                ))
+                .with_correlation_id(&correlation_id),
         );
 
         out.push(self.interaction.plan_event(&action));
@@ -1373,11 +1455,16 @@ impl App {
             crate::audit::AuditFields::new()
                 .with_action_id(&action.action_id)
                 .with_source(SOURCE_CORE)
-                .with_summary(&action.title),
+                .with_summary(&action.title)
+                .with_correlation_id(&correlation_id),
         );
 
         if let Err(err) = self.interaction.policy().allows(action.kind()) {
-            out.extend(self.interaction.refusal_events(&action.action_id, &err));
+            out.extend(self.interaction.refusal_events(
+                &action.action_id,
+                &err,
+                Some(correlation_id.as_str()),
+            ));
             // PR 32 — Audit: refusal is observed as ActionFailed with
             // result=failed; the error string is already a short,
             // curated class (`layer_disabled` / `kind_not_allowed`,
@@ -1389,7 +1476,8 @@ impl App {
                     .with_action_id(&action.action_id)
                     .with_result(RESULT_FAILED)
                     .with_source(SOURCE_CORE)
-                    .with_summary(&action.title),
+                    .with_summary(&action.title)
+                    .with_correlation_id(&correlation_id),
             );
             return out;
         }
@@ -1421,6 +1509,7 @@ impl App {
             // als `medium`. Eine feinere Risikoklassifikation wäre eine
             // eigene Policy-Linie (außerhalb PR 17).
             risk: RISK_MEDIUM.to_string(),
+            correlation_id: Some(correlation_id.clone()),
         };
         let rx = self.pending_approvals.register(&approval_id);
         out.push(OutgoingMessage::ApprovalRequested { payload: request });
@@ -1435,7 +1524,8 @@ impl App {
                 .with_approval_id(&approval_id)
                 .with_risk(RISK_MEDIUM)
                 .with_source(SOURCE_CORE)
-                .with_summary(&action.title),
+                .with_summary(&action.title)
+                .with_correlation_id(&correlation_id),
         );
 
         let app = Arc::clone(self);
@@ -1454,6 +1544,14 @@ impl App {
         rx: tokio::sync::oneshot::Receiver<ApprovalDecision>,
         timeout_seconds: u64,
     ) {
+        // PR 54 — die Action trägt die `correlation_id` aus
+        // `dispatch_interaction`. Wenn sie aus irgendwelchen Gründen
+        // fehlt (z. B. ein zukünftiger Caller, der die Action selbst
+        // baut), erzeugen wir keine zweite ID — der Pfad wird einfach
+        // ohne Korrelation auditiert. Spec §6: `missing_correlation_id`
+        // ist ein Audit-Hinweis, kein Hard-Fail im lokalen Spike.
+        let correlation_id = action.correlation_id.clone();
+        let correlation_id_ref = correlation_id.as_deref();
         let (decision, source) = match timeout(Duration::from_secs(timeout_seconds), rx).await {
             Ok(Ok(decision)) => (decision, SOURCE_USER.to_string()),
             Ok(Err(_)) => {
@@ -1475,6 +1573,7 @@ impl App {
             action_id = %action.action_id,
             decision = decision.as_str(),
             source = %source,
+            correlation_id = ?correlation_id_ref,
             "approval resolved"
         );
 
@@ -1484,6 +1583,7 @@ impl App {
                 action_id: action.action_id.clone(),
                 decision: decision.as_str().to_string(),
                 source: source.clone(),
+                correlation_id: correlation_id.clone(),
             },
         });
         // PR 32 — Audit: ApprovalResolved mirrors decision + source.
@@ -1504,7 +1604,8 @@ impl App {
                 .with_risk(RISK_MEDIUM)
                 .with_result(resolved_result)
                 .with_source(&source)
-                .with_summary(&action.title),
+                .with_summary(&action.title)
+                .with_correlation_id_opt(correlation_id_ref),
         );
 
         match decision {
@@ -1533,6 +1634,7 @@ impl App {
                         action_id: action.action_id.clone(),
                         status: ActionStatus::Cancelled,
                         message: Some(message.to_string()),
+                        correlation_id: correlation_id.clone(),
                     },
                 });
                 // PR 32 — Audit: cancel branch trägt den kuratierten
@@ -1550,7 +1652,8 @@ impl App {
                         .with_action_id(&action.action_id)
                         .with_result(cancel_result)
                         .with_source(&source)
-                        .with_summary(&action.title),
+                        .with_summary(&action.title)
+                        .with_correlation_id_opt(correlation_id_ref),
                 );
             }
         }
@@ -1579,6 +1682,7 @@ impl App {
         action: &InteractionAction,
         messages: &[OutgoingMessage],
     ) {
+        let correlation = action.correlation_id.as_deref();
         for msg in messages {
             match msg {
                 OutgoingMessage::ActionStarted { .. } => {
@@ -1587,7 +1691,8 @@ impl App {
                         crate::audit::AuditFields::new()
                             .with_action_id(&action.action_id)
                             .with_source(SOURCE_CORE)
-                            .with_summary(&action.title),
+                            .with_summary(&action.title)
+                            .with_correlation_id_opt(correlation),
                     );
                 }
                 OutgoingMessage::ActionCompleted { payload } => {
@@ -1602,7 +1707,8 @@ impl App {
                             .with_action_id(&action.action_id)
                             .with_result(result)
                             .with_source(SOURCE_CORE)
-                            .with_summary(&action.title),
+                            .with_summary(&action.title)
+                            .with_correlation_id_opt(correlation),
                     );
                 }
                 OutgoingMessage::ActionFailed { .. } => {
@@ -1612,7 +1718,8 @@ impl App {
                             .with_action_id(&action.action_id)
                             .with_result(RESULT_FAILED)
                             .with_source(SOURCE_CORE)
-                            .with_summary(&action.title),
+                            .with_summary(&action.title)
+                            .with_correlation_id_opt(correlation),
                     );
                 }
                 OutgoingMessage::ActionCancelled { .. } => {
@@ -1622,7 +1729,8 @@ impl App {
                             .with_action_id(&action.action_id)
                             .with_result(RESULT_CANCELLED)
                             .with_source(SOURCE_CORE)
-                            .with_summary(&action.title),
+                            .with_summary(&action.title)
+                            .with_correlation_id_opt(correlation),
                     );
                 }
                 _ => {}
@@ -1666,6 +1774,7 @@ impl App {
             payload: ActionVerificationPayload {
                 action_id: action_id.clone(),
                 title: format!("Probe: {status}"),
+                correlation_id: None,
             },
         });
         out.push(OutgoingMessage::AccessibilityProbeResult {
@@ -1676,6 +1785,7 @@ impl App {
                 action_id,
                 status: ActionStatus::Completed,
                 message: Some(format!("{status}: {reason}")),
+                correlation_id: None,
             },
         });
         out
@@ -1742,6 +1852,7 @@ impl App {
             payload: ActionVerificationPayload {
                 action_id: action_id.clone(),
                 title: format!("Discovery: {status}"),
+                correlation_id: None,
             },
         });
         out.push(OutgoingMessage::AccessibilityDiscoveryResult {
@@ -1760,6 +1871,7 @@ impl App {
                         action_id,
                         status: ActionStatus::Completed,
                         message: Some(summary),
+                        correlation_id: None,
                     },
                 });
             }
@@ -1769,6 +1881,7 @@ impl App {
                         action_id,
                         status: ActionStatus::Completed,
                         message: Some(format!("{status}: {reason}")),
+                        correlation_id: None,
                     },
                 });
             }
@@ -1780,6 +1893,7 @@ impl App {
                         status: ActionStatus::Failed,
                         message: format!("{status}: {reason}"),
                         error: Some("recovery_hint=fallback_unavailable".to_string()),
+                        correlation_id: None,
                     },
                 });
             }
@@ -3351,6 +3465,9 @@ fn planned(
             description: None,
             target,
             mapping: None,
+            // PR 54 — read-only probe-/discovery-Pfade tragen keine
+            // Action-Korrelation (siehe Spec §6 „Nicht-Punkte").
+            correlation_id: None,
         },
     }
 }
@@ -3360,6 +3477,7 @@ fn started(action_id: &str) -> OutgoingMessage {
         payload: ActionStartedPayload {
             action_id: action_id.to_string(),
             phase: ActionPhase::Started,
+            correlation_id: None,
         },
     }
 }
@@ -3370,6 +3488,7 @@ fn step(action_id: &str, title: &str) -> OutgoingMessage {
             action_id: action_id.to_string(),
             title: title.to_string(),
             description: None,
+            correlation_id: None,
         },
     }
 }

@@ -95,6 +95,13 @@ pub struct InteractionAction {
     /// `docs/presence_desktop_interaction.md`, §7). For MVP this flag
     /// is carried through but not yet gating anything.
     pub trusted_only: bool,
+    /// PR 54 — additives, optionales Korrelations-Token. Wird vom
+    /// `App`-Lifecycle früh am Aktionspfad gesetzt (siehe
+    /// [`docs/contracts/AUDIT_CORRELATION_ID_SPEC.md`](../../../docs/contracts/AUDIT_CORRELATION_ID_SPEC.md))
+    /// und vom Executor in jeden ausgehenden Action-Event hinein
+    /// gespiegelt. Default `None`, damit reine Unit-Tests des
+    /// Executors weiterhin ohne Korrelation laufen.
+    pub correlation_id: Option<String>,
 }
 
 impl InteractionAction {
@@ -114,6 +121,7 @@ impl InteractionAction {
             payload: InteractionPayload::OpenApplication { name },
             requires_confirmation: false,
             trusted_only: false,
+            correlation_id: None,
         }
     }
 
@@ -137,6 +145,7 @@ impl InteractionAction {
             payload: InteractionPayload::FocusWindow { title, app },
             requires_confirmation: false,
             trusted_only: false,
+            correlation_id: None,
         }
     }
 }

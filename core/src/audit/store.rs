@@ -138,6 +138,7 @@ impl AuditStore {
             result: f.result,
             source: f.source,
             summary: f.summary,
+            correlation_id: f.correlation_id,
         }
     }
 }

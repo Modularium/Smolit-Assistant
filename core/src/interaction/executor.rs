@@ -85,15 +85,21 @@ impl<B: InteractionBackend> InteractionExecutor<B> {
 
     /// Builds a policy-refusal sequence (`action_started` +
     /// `action_failed`) for a `planned` that was already emitted.
+    ///
+    /// PR 54 — `correlation_id` is propagated to the started/failed
+    /// envelopes so the refusal pair stays linked to the surrounding
+    /// action lifecycle. Older callers passing `None` keep the
+    /// pre-PR-54 behavior.
     pub fn refusal_events(
         &self,
         action_id: &str,
         err: &InteractionError,
+        correlation_id: Option<&str>,
     ) -> Vec<OutgoingMessage> {
         let hint = recovery_hint_for(err);
         vec![
-            started(action_id),
-            failed(action_id, &format!("{err}"), hint),
+            started(action_id, correlation_id),
+            failed(action_id, &format!("{err}"), hint, correlation_id),
         ]
     }
 
@@ -106,11 +112,13 @@ impl<B: InteractionBackend> InteractionExecutor<B> {
     /// an approval.
     pub async fn run_approved(&self, action: InteractionAction) -> Vec<OutgoingMessage> {
         let mut out = Vec::with_capacity(5);
-        out.push(started(&action.action_id));
-        out.push(step(&action.action_id, "Resolving target"));
+        let corr = action.correlation_id.as_deref();
+        out.push(started(&action.action_id, corr));
+        out.push(step(&action.action_id, "Resolving target", corr));
         out.push(step(
             &action.action_id,
             step_title_for_kind(action.kind()),
+            corr,
         ));
 
         let result = match &action.payload {
@@ -133,8 +141,8 @@ impl<B: InteractionBackend> InteractionExecutor<B> {
 
         match result {
             Ok(verification) => {
-                out.push(verification_event(&action.action_id, &verification));
-                out.push(completed(&action.action_id, &verification));
+                out.push(verification_event(&action.action_id, &verification, corr));
+                out.push(completed(&action.action_id, &verification, corr));
                 info!(
                     action_id = %action.action_id,
                     backend = self.backend.name(),
@@ -146,7 +154,7 @@ impl<B: InteractionBackend> InteractionExecutor<B> {
             Err(err) => {
                 let hint = recovery_hint_for(&err);
                 let msg = format!("{err}");
-                out.push(failed(&action.action_id, &msg, hint));
+                out.push(failed(&action.action_id, &msg, hint, corr));
                 info!(
                     action_id = %action.action_id,
                     backend = self.backend.name(),
@@ -165,27 +173,29 @@ impl<B: InteractionBackend> InteractionExecutor<B> {
     /// flat vector suitable for sending over the IPC stream.
     pub async fn execute(&self, action: InteractionAction) -> Vec<OutgoingMessage> {
         let mut out = Vec::with_capacity(6);
+        let corr = action.correlation_id.as_deref();
 
         out.push(planned(&action));
-        out.push(started(&action.action_id));
+        out.push(started(&action.action_id, corr));
 
         if let Err(err) = self.policy.allows(action.kind()) {
             let hint = recovery_hint_for(&err);
-            out.push(failed(&action.action_id, &format!("{err}"), hint));
+            out.push(failed(&action.action_id, &format!("{err}"), hint, corr));
             return out;
         }
 
         if action.requires_confirmation && self.policy.require_confirmation {
             let err = InteractionError::ConfirmationRequired;
             let hint = recovery_hint_for(&err);
-            out.push(failed(&action.action_id, &format!("{err}"), hint));
+            out.push(failed(&action.action_id, &format!("{err}"), hint, corr));
             return out;
         }
 
-        out.push(step(&action.action_id, "Resolving target"));
+        out.push(step(&action.action_id, "Resolving target", corr));
         out.push(step(
             &action.action_id,
             step_title_for_kind(action.kind()),
+            corr,
         ));
 
         let result = match &action.payload {
@@ -208,8 +218,8 @@ impl<B: InteractionBackend> InteractionExecutor<B> {
 
         match result {
             Ok(verification) => {
-                out.push(verification_event(&action.action_id, &verification));
-                out.push(completed(&action.action_id, &verification));
+                out.push(verification_event(&action.action_id, &verification, corr));
+                out.push(completed(&action.action_id, &verification, corr));
                 info!(
                     action_id = %action.action_id,
                     backend = self.backend.name(),
@@ -221,7 +231,7 @@ impl<B: InteractionBackend> InteractionExecutor<B> {
             Err(err) => {
                 let hint = recovery_hint_for(&err);
                 let msg = format!("{err}");
-                out.push(failed(&action.action_id, &msg, hint));
+                out.push(failed(&action.action_id, &msg, hint, corr));
                 info!(
                     action_id = %action.action_id,
                     backend = self.backend.name(),
@@ -268,30 +278,37 @@ fn planned(action: &InteractionAction) -> OutgoingMessage {
             description: Some(format!("interaction:{}", action.kind().as_str())),
             target: action.target.clone(),
             mapping: None,
+            correlation_id: action.correlation_id.clone(),
         },
     }
 }
 
-fn started(action_id: &str) -> OutgoingMessage {
+fn started(action_id: &str, correlation_id: Option<&str>) -> OutgoingMessage {
     OutgoingMessage::ActionStarted {
         payload: ActionStartedPayload {
             action_id: action_id.to_string(),
             phase: ActionPhase::Started,
+            correlation_id: correlation_id.map(str::to_string),
         },
     }
 }
 
-fn step(action_id: &str, title: &str) -> OutgoingMessage {
+fn step(action_id: &str, title: &str, correlation_id: Option<&str>) -> OutgoingMessage {
     OutgoingMessage::ActionStep {
         payload: ActionStepPayload {
             action_id: action_id.to_string(),
             title: title.to_string(),
             description: None,
+            correlation_id: correlation_id.map(str::to_string),
         },
     }
 }
 
-fn verification_event(action_id: &str, verification: &VerificationResult) -> OutgoingMessage {
+fn verification_event(
+    action_id: &str,
+    verification: &VerificationResult,
+    correlation_id: Option<&str>,
+) -> OutgoingMessage {
     let prefix = match verification.confidence {
         VerificationConfidence::Verified => "Verified",
         VerificationConfidence::Uncertain => "Best-effort",
@@ -301,11 +318,16 @@ fn verification_event(action_id: &str, verification: &VerificationResult) -> Out
         payload: ActionVerificationPayload {
             action_id: action_id.to_string(),
             title: format!("{prefix}: {}", verification.title),
+            correlation_id: correlation_id.map(str::to_string),
         },
     }
 }
 
-fn completed(action_id: &str, verification: &VerificationResult) -> OutgoingMessage {
+fn completed(
+    action_id: &str,
+    verification: &VerificationResult,
+    correlation_id: Option<&str>,
+) -> OutgoingMessage {
     let message = match verification.confidence {
         VerificationConfidence::Verified => verification.message.clone(),
         VerificationConfidence::Uncertain => Some(
@@ -321,17 +343,24 @@ fn completed(action_id: &str, verification: &VerificationResult) -> OutgoingMess
             action_id: action_id.to_string(),
             status: ActionStatus::Completed,
             message,
+            correlation_id: correlation_id.map(str::to_string),
         },
     }
 }
 
-fn failed(action_id: &str, message: &str, hint: RecoveryHint) -> OutgoingMessage {
+fn failed(
+    action_id: &str,
+    message: &str,
+    hint: RecoveryHint,
+    correlation_id: Option<&str>,
+) -> OutgoingMessage {
     OutgoingMessage::ActionFailed {
         payload: ActionFailedPayload {
             action_id: action_id.to_string(),
             status: ActionStatus::Failed,
             message: message.to_string(),
             error: Some(format!("recovery_hint={}", hint.as_str())),
+            correlation_id: correlation_id.map(str::to_string),
         },
     }
 }
@@ -501,6 +530,7 @@ mod tests {
             },
             requires_confirmation: false,
             trusted_only: false,
+            correlation_id: None,
         };
         let out = exec.execute(action).await;
         find_first(&out, r#""type":"action_failed""#);

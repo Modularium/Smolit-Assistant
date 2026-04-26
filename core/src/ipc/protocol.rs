@@ -494,6 +494,7 @@ mod tests {
                     result: None,
                     source: Some("core".into()),
                     summary: Some("Demo action".into()),
+                    correlation_id: None,
                 }],
             },
         });
@@ -536,6 +537,7 @@ mod tests {
                 action_id: "".into(),
                 decision: "denied".into(),
                 source: "user".into(),
+                correlation_id: None,
             },
         });
         // Additive: `source` is present; existing receivers that
@@ -563,6 +565,7 @@ mod tests {
                 timeout_seconds: 20,
                 selected_target: None,
                 risk: RISK_MEDIUM.to_string(),
+                correlation_id: None,
             },
         });
         assert!(encoded.contains(r#""type":"approval_requested""#));
@@ -918,6 +921,7 @@ mod tests {
                 description: None,
                 target: ActionTarget::unknown(),
                 mapping: None,
+                correlation_id: None,
             },
         });
         assert_eq!(
@@ -932,6 +936,7 @@ mod tests {
             payload: ActionStartedPayload {
                 action_id: "act_000001".into(),
                 phase: ActionPhase::Started,
+                correlation_id: None,
             },
         });
         assert_eq!(
@@ -1014,6 +1019,7 @@ mod tests {
                 status: ActionStatus::Failed,
                 message: "ABrain command failed".into(),
                 error: None,
+                correlation_id: None,
             },
         });
         assert_eq!(

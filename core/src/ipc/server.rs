@@ -532,6 +532,11 @@ fn planned(
             description: None,
             target,
             mapping: None,
+            // PR 54 — `submit_text` ist heute (noch) kein
+            // Action-Lifecycle-Pfad mit Korrelation; das Feld bleibt
+            // additiv `None`, bis ein zukünftiger Native-Native-Call
+            // ihn füllt (Future-Work in der Spec).
+            correlation_id: None,
         },
     }
 }
@@ -541,6 +546,7 @@ fn started(action_id: &str) -> OutgoingMessage {
         payload: ActionStartedPayload {
             action_id: action_id.to_string(),
             phase: ActionPhase::Started,
+            correlation_id: None,
         },
     }
 }
@@ -551,6 +557,7 @@ fn step(action_id: &str, title: &str) -> OutgoingMessage {
             action_id: action_id.to_string(),
             title: title.to_string(),
             description: None,
+            correlation_id: None,
         },
     }
 }
@@ -561,6 +568,7 @@ fn completed(action_id: &str) -> OutgoingMessage {
             action_id: action_id.to_string(),
             status: ActionStatus::Completed,
             message: None,
+            correlation_id: None,
         },
     }
 }
@@ -572,6 +580,7 @@ fn failed(action_id: &str, message: &str) -> OutgoingMessage {
             status: ActionStatus::Failed,
             message: message.to_string(),
             error: None,
+            correlation_id: None,
         },
     }
 }
@@ -4681,4 +4690,5 @@ mod tests {
         assert!(requested.contains(r#""type":"approval_requested""#));
         assert!(requested.contains(r#""risk":"medium""#));
     }
+
 }
