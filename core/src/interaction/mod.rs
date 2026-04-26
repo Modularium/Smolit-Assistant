@@ -30,8 +30,10 @@ pub mod verifier;
 
 #[allow(unused_imports)]
 pub use accessibility::{
-    AccessibilityDiscovery, AccessibilityItem, AccessibilityProbe, DiscoveryConfidence,
-    discover_top_level, inspect_target,
+    AccessibilityDiscovery, AccessibilityItem, AccessibilityProbe, AccessibilityRegistryClient,
+    AccessibilityRpcConfig, AccessibilityRpcError, DiscoveryConfidence, RegistryRootChild,
+    discover_top_level, discover_top_level_with_config, inspect_target,
+    inspect_target_with_config,
 };
 #[allow(unused_imports)]
 pub use action::{InteractionAction, InteractionKind, InteractionPayload};

@@ -186,6 +186,16 @@ pub struct InteractionConfig {
     pub focus_window_cmd_template: Option<String>,
 }
 
+/// Accessibility-related runtime config. Today only the read-only AT-SPI
+/// RPC FA-1 spike toggle (ADR-0002 / PR 53). Default-off; even when
+/// `rpc_enabled=true` the actual RPC path additionally requires the
+/// `accessibility_rpc` Cargo feature **and** a wired registry client —
+/// without all three the path returns `Unavailable` with an honest reason.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AccessibilityConfig {
+    pub rpc_enabled: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApprovalConfig {
     /// How long the core waits for an `approval_response` before
@@ -414,6 +424,8 @@ pub struct Config {
     pub audio: AudioConfig,
     pub ipc: IpcConfig,
     pub interaction: InteractionConfig,
+    #[serde(default)]
+    pub accessibility: AccessibilityConfig,
     pub approval: ApprovalConfig,
     pub text_provider: TextProviderConfig,
 }
@@ -500,6 +512,16 @@ impl Config {
         let approval_timeout_seconds = parse_u64(
             lookup("SMOLIT_APPROVAL_TIMEOUT_SECONDS").as_deref(),
             DEFAULT_APPROVAL_TIMEOUT_SECONDS,
+        );
+
+        // Accessibility RPC FA-1 (ADR-0002, PR 53). Default-off.
+        // The runtime path additionally requires the `accessibility_rpc`
+        // Cargo feature; without the feature this flag still parses but
+        // the orchestrator returns `Unavailable { reason:
+        // "accessibility_rpc_feature_disabled" }`.
+        let accessibility_rpc_enabled = parse_bool(
+            lookup("SMOLIT_ACCESSIBILITY_RPC_ENABLED").as_deref(),
+            false,
         );
 
         // Text-Provider-Kette. Env-Format: komma-separierte
@@ -611,6 +633,9 @@ impl Config {
             },
             approval: ApprovalConfig {
                 timeout_seconds: approval_timeout_seconds,
+            },
+            accessibility: AccessibilityConfig {
+                rpc_enabled: accessibility_rpc_enabled,
             },
             text_provider: TextProviderConfig {
                 chain: text_provider_chain,

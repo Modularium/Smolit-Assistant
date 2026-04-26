@@ -257,6 +257,11 @@ pub mod source {
     /// The caller supplied a `hint` and we echoed it back in a
     /// structured shape. No independent AT-SPI confirmation.
     pub const ACCESSIBILITY_HINT_ECHO: &str = "accessibility_hint_echo";
+
+    /// Item came from a real AT-SPI registry root `GetChildren` call
+    /// via the FA-1 RPC path. Items carrying this source label are the
+    /// **only** items allowed to bear `confidence: verified`.
+    pub const ACCESSIBILITY_REGISTRY_ROOT: &str = "accessibility_registry_root";
 }
 
 /// A very small symbolic description of one accessible target. Kept
@@ -367,6 +372,215 @@ pub fn inspect_target(hint: &str) -> AccessibilityDiscovery {
         }
         AccessibilityProbe::Failed { reason } => AccessibilityDiscovery::Failed { reason },
     }
+}
+
+// ---------------------------------------------------------------------------
+// FA-1 — read-only AT-SPI registry RPC scaffold (ADR-0002, PR 53).
+// ---------------------------------------------------------------------------
+//
+// This block introduces the mockable boundary for a real registry-root
+// `GetChildren` call without yet pulling in `atspi`/`zbus`. The default
+// build keeps the historic env-only behaviour bit-for-bit. The opt-in
+// path (`AccessibilityConfig::rpc_enabled` plus the `accessibility_rpc`
+// Cargo feature plus a wired client) is the only way to produce
+// `confidence: verified` items in the wire — `into_verified_item` is
+// the single constructor and lives at the bottom of this block.
+//
+// FA-1 is deliberately partial: production calls reach the orchestrator
+// without a registry client and honestly fall through to
+// `Unavailable { reason: "accessibility_rpc_backend_not_implemented" }`.
+// Tests inject a mock that returns synthetic registry rows.
+
+/// Read-only RPC config for the accessibility spike. Kept tiny and
+/// `Default`-friendly; lifted from [`crate::config::AccessibilityConfig`]
+/// at call sites to avoid pulling the full `Config` graph into helpers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct AccessibilityRpcConfig {
+    pub enabled: bool,
+}
+
+/// One direct child of the AT-SPI registry root, as returned by an
+/// `AccessibilityRegistryClient`. Depth is fixed at one — there is no
+/// recursive `children` field, no nested target. A future tree-walker
+/// would need its own ADR (ADR-0002 §D1, FA-2/FA-3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegistryRootChild {
+    pub name: String,
+    pub role: String,
+    pub app_name: Option<String>,
+    /// Item is a password / sensitive text field — must never be
+    /// surfaced even as a name.
+    pub is_password: bool,
+    /// AT-SPI `STATE_INVISIBLE` (or equivalent). Filtered out before any
+    /// item leaves this module.
+    pub is_invisible: bool,
+}
+
+/// Honest failure classification for the RPC path. Every variant maps
+/// to an `AccessibilityDiscovery::Unavailable` (or `Failed`) — none
+/// produces `Discovered` or `Verified`. The reason strings are stable
+/// so a UI / log can match on them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AccessibilityRpcError {
+    DbusSessionMissing,
+    A11yBusUnavailable,
+    PermissionDenied,
+    /// FA-1 partial: feature compiled, env on, but no real client is
+    /// wired. Honest fallback in production.
+    BackendNotImplemented,
+    /// Catch-all for unexpected RPC errors. Reason is sanitised at the
+    /// call site.
+    Other(String),
+}
+
+impl AccessibilityRpcError {
+    pub fn unavailable_reason(&self) -> String {
+        match self {
+            Self::DbusSessionMissing => "dbus_session_missing".into(),
+            Self::A11yBusUnavailable => "a11y_bus_unavailable".into(),
+            Self::PermissionDenied => "permission_denied".into(),
+            Self::BackendNotImplemented => "accessibility_rpc_backend_not_implemented".into(),
+            Self::Other(detail) => format!("accessibility_rpc_error: {detail}"),
+        }
+    }
+}
+
+/// Reason emitted when the RPC orchestrator runs without the
+/// `accessibility_rpc` Cargo feature. Stable across releases.
+pub const ACCESSIBILITY_RPC_FEATURE_DISABLED_REASON: &str = "accessibility_rpc_feature_disabled";
+
+/// Adapter trait that any future `atspi`/`zbus`-backed client must
+/// implement. The contract is intentionally narrow:
+///
+/// * Read-only — no `set_*`, no `do_action`, no `activate`.
+/// * Single call — registry root `GetChildren` only. No recursion, no
+///   per-child follow-up.
+/// * Synchronous — keeps the orchestrator trivial; a future async
+///   variant can be added as an additional method without breaking
+///   this one.
+///
+/// Production has no live implementation in FA-1 (partial spike).
+/// Tests provide a mock that returns synthetic `RegistryRootChild`
+/// rows.
+pub trait AccessibilityRegistryClient {
+    /// Read direct children of the AT-SPI registry root. Depth is
+    /// fixed at one by signature: there is no way to retrieve the
+    /// children of an item from this trait.
+    fn registry_root_children(&self) -> Result<Vec<RegistryRootChild>, AccessibilityRpcError>;
+}
+
+impl RegistryRootChild {
+    /// Pure conversion from a registry row to a wire item. The **only**
+    /// place that constructs `confidence: verified`. Filters out
+    /// password / invisible / unnamed entries before they reach the
+    /// wire. Returning `None` means "drop silently from the result
+    /// list" — not a failure, just an honest omission.
+    fn into_verified_item(self) -> Option<AccessibilityItem> {
+        if self.is_password || self.is_invisible {
+            return None;
+        }
+        let name = self.name.trim().to_string();
+        if name.is_empty() {
+            return None;
+        }
+        let role = self.role;
+        let kind = match role.as_str() {
+            "frame" | "window" | "dialog" => "window",
+            _ => "application",
+        }
+        .to_string();
+        Some(AccessibilityItem {
+            kind,
+            name,
+            confidence: DiscoveryConfidence::Verified,
+            source: source::ACCESSIBILITY_REGISTRY_ROOT.to_string(),
+            role: Some(role),
+            hint: None,
+            detail: None,
+            matched_hint: None,
+            app_name: self.app_name,
+        })
+    }
+}
+
+/// Pure helper that converts a registry-root child list into a
+/// discovery result. Tests call this directly; the orchestrator below
+/// calls it after a successful trait call. Always lives outside the
+/// `cfg(feature = "accessibility_rpc")` gate so the conversion logic is
+/// covered by the default-features test run.
+pub fn apply_registry_children(children: Vec<RegistryRootChild>) -> AccessibilityDiscovery {
+    let items: Vec<AccessibilityItem> = children
+        .into_iter()
+        .filter_map(RegistryRootChild::into_verified_item)
+        .collect();
+    if items.is_empty() {
+        // ADR-0002 §"Failure modes": empty registry stays Uncertain
+        // (a screen reader could surface items after activation),
+        // never Unavailable.
+        AccessibilityDiscovery::Uncertain {
+            reason: "registry_empty".into(),
+            items,
+        }
+    } else {
+        AccessibilityDiscovery::Ok {
+            reason: "accessibility_rpc registry root GetChildren".into(),
+            items,
+        }
+    }
+}
+
+/// FA-1 orchestrator. Honors the three-step gate: config flag, Cargo
+/// feature, wired client. Any of those missing produces an honest
+/// `Unavailable` with a stable reason and never falls back to a
+/// verified-but-fake answer.
+pub fn discover_top_level_with_config(
+    config: &AccessibilityRpcConfig,
+    client: Option<&dyn AccessibilityRegistryClient>,
+) -> AccessibilityDiscovery {
+    if !config.enabled {
+        // Default path: behave exactly like pre-PR-53 callers.
+        return discover_top_level();
+    }
+    if !cfg!(feature = "accessibility_rpc") {
+        let _ = client;
+        return AccessibilityDiscovery::Unavailable {
+            reason: ACCESSIBILITY_RPC_FEATURE_DISABLED_REASON.into(),
+        };
+    }
+    match AccessibilityProbe::detect() {
+        AccessibilityProbe::Unavailable { reason } => {
+            return AccessibilityDiscovery::Unavailable { reason };
+        }
+        AccessibilityProbe::Failed { reason } => {
+            return AccessibilityDiscovery::Failed { reason };
+        }
+        AccessibilityProbe::Uncertain { .. } => {}
+    }
+    let Some(client) = client else {
+        return AccessibilityDiscovery::Unavailable {
+            reason: AccessibilityRpcError::BackendNotImplemented.unavailable_reason(),
+        };
+    };
+    match client.registry_root_children() {
+        Ok(children) => apply_registry_children(children),
+        Err(err) => AccessibilityDiscovery::Unavailable {
+            reason: err.unavailable_reason(),
+        },
+    }
+}
+
+/// FA-1 hint-inspect orchestrator. Deliberately delegates back to the
+/// hint-echo path: name-matching against the registry is FA-2 (a
+/// follow-up ADR). Even with the feature on, hint inspection in FA-1
+/// stays at `confidence: discovered` — there is no path here that
+/// produces `verified`.
+pub fn inspect_target_with_config(
+    hint: &str,
+    config: &AccessibilityRpcConfig,
+    _client: Option<&dyn AccessibilityRegistryClient>,
+) -> AccessibilityDiscovery {
+    let _ = config;
+    inspect_target(hint)
 }
 
 #[cfg(test)]
@@ -506,6 +720,271 @@ mod tests {
             }
             AccessibilityDiscovery::Uncertain { .. } => {
                 panic!("inspect_target with non-empty hint should not return Uncertain");
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // FA-1 RPC layer tests (ADR-0002, PR 53). All invariants below run
+    // on the *default* feature set so CI without
+    // `--features accessibility_rpc` covers them. The feature-gated
+    // end-to-end test is at the bottom of this module.
+    // -----------------------------------------------------------------
+
+    /// Mock client for the verified-from-registry test path. Returns
+    /// whatever rows the test set up; never panics; never reads any
+    /// real D-Bus state.
+    struct MockRegistryClient {
+        result: Result<Vec<RegistryRootChild>, AccessibilityRpcError>,
+    }
+
+    impl MockRegistryClient {
+        fn ok(rows: Vec<RegistryRootChild>) -> Self {
+            Self { result: Ok(rows) }
+        }
+    }
+
+    impl AccessibilityRegistryClient for MockRegistryClient {
+        fn registry_root_children(
+            &self,
+        ) -> Result<Vec<RegistryRootChild>, AccessibilityRpcError> {
+            self.result.clone()
+        }
+    }
+
+    fn sample_app_row(name: &str) -> RegistryRootChild {
+        RegistryRootChild {
+            name: name.to_string(),
+            role: "application".to_string(),
+            app_name: Some(name.to_string()),
+            is_password: false,
+            is_invisible: false,
+        }
+    }
+
+    // Test 1.
+    #[test]
+    fn default_without_feature_or_env_never_verified() {
+        let cfg = AccessibilityRpcConfig::default();
+        let result = discover_top_level_with_config(&cfg, None);
+        for item in result.items() {
+            assert_ne!(
+                item.confidence,
+                DiscoveryConfidence::Verified,
+                "fallback path leaked verified confidence"
+            );
+        }
+    }
+
+    // Test 2.
+    #[test]
+    fn rpc_env_enabled_without_feature_reports_feature_disabled() {
+        let cfg = AccessibilityRpcConfig { enabled: true };
+        let result = discover_top_level_with_config(&cfg, None);
+        if !cfg!(feature = "accessibility_rpc") {
+            match result {
+                AccessibilityDiscovery::Unavailable { reason } => {
+                    assert_eq!(reason, ACCESSIBILITY_RPC_FEATURE_DISABLED_REASON);
+                }
+                other => panic!("expected feature-disabled Unavailable, got {other:?}"),
+            }
+        }
+    }
+
+    // Test 3.
+    #[test]
+    fn missing_dbus_session_or_display_never_emits_verified_without_feature() {
+        // Without the cargo feature, the orchestrator short-circuits at
+        // the feature gate and the mock never runs — so verified must
+        // not appear regardless of host env.
+        let cfg = AccessibilityRpcConfig { enabled: true };
+        let client = MockRegistryClient::ok(vec![sample_app_row("Firefox")]);
+        let result = discover_top_level_with_config(
+            &cfg,
+            Some(&client as &dyn AccessibilityRegistryClient),
+        );
+        if !cfg!(feature = "accessibility_rpc") {
+            for item in result.items() {
+                assert_ne!(item.confidence, DiscoveryConfidence::Verified);
+            }
+        }
+    }
+
+    // Test 4.
+    #[test]
+    fn hint_echo_remains_discovered() {
+        let cfg = AccessibilityRpcConfig { enabled: true };
+        let result = inspect_target_with_config("Firefox", &cfg, None);
+        for item in result.items() {
+            assert_eq!(
+                item.confidence,
+                DiscoveryConfidence::Discovered,
+                "hint inspect leaked verified confidence"
+            );
+            assert_eq!(item.source, source::ACCESSIBILITY_HINT_ECHO);
+        }
+    }
+
+    // Test 5.
+    #[test]
+    fn mock_registry_child_can_be_verified_via_apply_helper() {
+        let result = apply_registry_children(vec![sample_app_row("Firefox")]);
+        match result {
+            AccessibilityDiscovery::Ok { items, .. } => {
+                assert_eq!(items.len(), 1);
+                let item = &items[0];
+                assert_eq!(item.confidence, DiscoveryConfidence::Verified);
+                assert_eq!(item.source, source::ACCESSIBILITY_REGISTRY_ROOT);
+                assert_eq!(item.name, "Firefox");
+                assert_eq!(item.matched_hint, None);
+            }
+            other => panic!("expected Ok with one verified item, got {other:?}"),
+        }
+    }
+
+    // Test 6.
+    #[test]
+    fn password_or_invisible_items_are_filtered() {
+        let rows = vec![
+            RegistryRootChild {
+                name: "Vault password".into(),
+                role: "password_text".into(),
+                app_name: Some("Keyring".into()),
+                is_password: true,
+                is_invisible: false,
+            },
+            RegistryRootChild {
+                name: "Hidden ghost".into(),
+                role: "frame".into(),
+                app_name: Some("Ghost".into()),
+                is_password: false,
+                is_invisible: true,
+            },
+            sample_app_row("Firefox"),
+        ];
+        let result = apply_registry_children(rows);
+        match result {
+            AccessibilityDiscovery::Ok { items, .. } => {
+                assert_eq!(items.len(), 1);
+                assert_eq!(items[0].name, "Firefox");
+            }
+            other => panic!("expected Ok with one survivor, got {other:?}"),
+        }
+    }
+
+    // Test 7.
+    #[test]
+    fn registry_depth_limit_is_one_by_trait_signature() {
+        // The trait exposes a single read-only method that returns a
+        // flat `Vec<RegistryRootChild>`. There is no follow-up call to
+        // fetch children of children, and `RegistryRootChild` has no
+        // `children` field. Any nested walker would require a new
+        // trait method (and a new ADR).
+        fn assert_root_only<T: AccessibilityRegistryClient + ?Sized>(_: &T) {}
+        let client = MockRegistryClient::ok(vec![sample_app_row("Firefox")]);
+        assert_root_only(&client);
+        let row: RegistryRootChild = sample_app_row("Firefox");
+        let _name: &str = &row.name;
+    }
+
+    // Test 8.
+    #[test]
+    fn permission_denied_and_friends_map_to_stable_unavailable_reasons() {
+        assert_eq!(
+            AccessibilityRpcError::PermissionDenied.unavailable_reason(),
+            "permission_denied"
+        );
+        assert_eq!(
+            AccessibilityRpcError::A11yBusUnavailable.unavailable_reason(),
+            "a11y_bus_unavailable"
+        );
+        assert_eq!(
+            AccessibilityRpcError::DbusSessionMissing.unavailable_reason(),
+            "dbus_session_missing"
+        );
+        assert_eq!(
+            AccessibilityRpcError::BackendNotImplemented.unavailable_reason(),
+            "accessibility_rpc_backend_not_implemented"
+        );
+    }
+
+    // Test 9.
+    #[test]
+    fn rpc_failure_never_falls_back_to_verified() {
+        // Empty registry → Uncertain (per ADR-0002 §"Failure modes").
+        let result = apply_registry_children(vec![]);
+        match result {
+            AccessibilityDiscovery::Uncertain { items, reason } => {
+                assert!(items.is_empty());
+                assert_eq!(reason, "registry_empty");
+            }
+            other => panic!("empty registry must stay Uncertain, got {other:?}"),
+        }
+        // Unnamed row gets dropped — we never invent a name.
+        let unnamed = RegistryRootChild {
+            name: "   ".into(),
+            role: "frame".into(),
+            app_name: None,
+            is_password: false,
+            is_invisible: false,
+        };
+        let result = apply_registry_children(vec![unnamed]);
+        match result {
+            AccessibilityDiscovery::Uncertain { items, .. } => assert!(items.is_empty()),
+            other => panic!("unnamed row must drop, got {other:?}"),
+        }
+    }
+
+    // Test 10.
+    #[test]
+    fn serialization_keeps_existing_fields_stable() {
+        // PR 53 must not change the wire shape. Verify both a hint-echo
+        // (discovered, source=accessibility_hint_echo) and a verified
+        // registry item (verified, source=accessibility_registry_root)
+        // serialize via the documented field names.
+        let echo = AccessibilityItem::hint_echo("Firefox");
+        let json = serde_json::to_string(&echo).unwrap();
+        assert!(json.contains(r#""confidence":"discovered""#));
+        assert!(json.contains(r#""source":"accessibility_hint_echo""#));
+        assert!(json.contains(r#""matched_hint":"Firefox""#));
+
+        let result = apply_registry_children(vec![sample_app_row("Firefox")]);
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains(r#""status":"ok""#));
+        assert!(json.contains(r#""confidence":"verified""#));
+        assert!(json.contains(r#""source":"accessibility_registry_root""#));
+        // matched_hint must be omitted on verified registry rows.
+        assert!(!json.contains(r#""matched_hint""#));
+    }
+
+    // Feature-gated end-to-end check. Skipped on default builds.
+    #[cfg(feature = "accessibility_rpc")]
+    #[test]
+    fn rpc_path_with_feature_and_mock_client_can_emit_verified() {
+        // The orchestrator runs the env probe before the mock; on a
+        // bare CI runner without DISPLAY/DBUS, that probe correctly
+        // returns Unavailable and the mock is never invoked. Either
+        // outcome is acceptable — the invariant is "if items came back,
+        // they came from the mock and are verified".
+        let cfg = AccessibilityRpcConfig { enabled: true };
+        let client = MockRegistryClient::ok(vec![sample_app_row("Firefox")]);
+        let result = discover_top_level_with_config(
+            &cfg,
+            Some(&client as &dyn AccessibilityRegistryClient),
+        );
+        match result {
+            AccessibilityDiscovery::Ok { items, .. } => {
+                assert!(items.iter().all(|i| i.confidence == DiscoveryConfidence::Verified
+                    && i.source == source::ACCESSIBILITY_REGISTRY_ROOT));
+            }
+            AccessibilityDiscovery::Unavailable { .. }
+            | AccessibilityDiscovery::Failed { .. } => {
+                // Bare-env runner: probe stage rejected before the mock.
+            }
+            AccessibilityDiscovery::Uncertain { .. } => {
+                // Acceptable when the probe says Uncertain and the mock
+                // returns an empty registry — none of the rows reached
+                // verified, which is exactly what we want.
             }
         }
     }

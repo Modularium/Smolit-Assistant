@@ -24,9 +24,10 @@ use crate::config::{
     LocalHttpConfig,
 };
 use crate::interaction::{
-    AccessibilityDiscovery, AccessibilityProbe, CommandBackend, CommandBackendConfig,
-    InteractionAction, InteractionExecutor, InteractionKind, InteractionPolicy, SelectedTarget,
-    discover_top_level, inspect_target,
+    AccessibilityDiscovery, AccessibilityProbe, AccessibilityRegistryClient,
+    AccessibilityRpcConfig, CommandBackend, CommandBackendConfig, InteractionAction,
+    InteractionExecutor, InteractionKind, InteractionPolicy, SelectedTarget,
+    discover_top_level_with_config, inspect_target_with_config,
 };
 use crate::ipc::protocol::{
     InteractionFocusTarget, OutgoingMessage, SpeakingEndedPayload, SpeakingStartedPayload,
@@ -1712,9 +1713,21 @@ impl App {
             None => ActionTarget::unknown(),
         };
 
+        // FA-1 (PR 53): when `accessibility.rpc_enabled=true` route the
+        // call through the gated orchestrator instead of the legacy
+        // env-only helpers. Production has no live registry client
+        // wired, so the RPC path falls through to a stable
+        // `Unavailable { reason: "accessibility_rpc_backend_not_implemented" }`.
+        // ADR-0002 §D3: the only path producing `confidence: verified`
+        // is the registry-root client result inside
+        // `discover_top_level_with_config`.
+        let rpc_config = AccessibilityRpcConfig {
+            enabled: self.config.accessibility.rpc_enabled,
+        };
+        let registry_client: Option<&dyn AccessibilityRegistryClient> = None;
         let result = match &trimmed_hint {
-            Some(name) => inspect_target(name),
-            None => discover_top_level(),
+            Some(name) => inspect_target_with_config(name, &rpc_config, registry_client),
+            None => discover_top_level_with_config(&rpc_config, registry_client),
         };
 
         let status = result.status_str();
