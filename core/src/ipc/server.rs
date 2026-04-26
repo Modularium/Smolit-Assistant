@@ -5264,4 +5264,372 @@ mod tests {
         );
     }
 
+    // --- PR 56 — Capability Guard Runtime Spike ---
+    //
+    // Lockt das in PR 56 eingeführte Guard-Wiring:
+    //   * `interaction_open_application` läuft weiterhin durch die
+    //     bestehende Approval-Linie (Guard liefert Allow).
+    //   * `interaction_focus_window` bleibt default-disabled / double-
+    //     opt-in (Guard hebt das nicht auf).
+    //   * `plan_demo_action` emittiert weiterhin `capability_id` und
+    //     `correlation_id` (Guard ist Allow für die drei Demo-Kinds).
+    //   * Eine direkt konstruierte `InteractionAction` mit
+    //     TypeText/SendShortcut wird vom Guard fail-closed
+    //     verweigert; das Audit trägt
+    //     `result = "capability_guard_denied"` und einen kuratierten
+    //     Reason-Suffix in `summary`.
+    //   * Der Guard requestet **kein** Approval für eine future
+    //     Capability.
+    //   * Unsupported Interactions bleiben unsupported.
+    //   * PR-54-correlation_id- und PR-55-capability_id-Lifecycle-
+    //     Tests bleiben grün — siehe die Test-Sections oben.
+
+    fn extract_results(frame: &str) -> Vec<String> {
+        const PAT: &str = r#""result":""#;
+        let mut out = Vec::new();
+        let mut cursor = 0;
+        while let Some(rel) = frame[cursor..].find(PAT) {
+            let start = cursor + rel + PAT.len();
+            if let Some(end_rel) = frame[start..].find('"') {
+                out.push(frame[start..start + end_rel].to_string());
+                cursor = start + end_rel + 1;
+            } else {
+                break;
+            }
+        }
+        out
+    }
+
+    #[tokio::test]
+    async fn open_application_still_requires_existing_approval_after_guard() {
+        // PR-56-Invariante: Guard sagt Allow für
+        // `interaction.open_application`; die existierende
+        // Approval-Linie aus PR 17 / PR 25 läuft unverändert.
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_open_application","application":"calendar"}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let _planned = recv_text(&mut ws).await;
+        let requested = recv_text(&mut ws).await;
+        assert!(
+            requested.contains(r#""type":"approval_requested""#),
+            "guard must NOT bypass approval: {requested}",
+        );
+        assert!(
+            requested.contains(r#""capability_id":"interaction.open_application""#),
+            "PR-55 capability_id must still be present: {requested}",
+        );
+        // Kein action_failed trotz Guard-Wiring.
+        assert!(!requested.contains("capability_guard_denied"));
+    }
+
+    #[tokio::test]
+    async fn focus_window_still_respects_existing_disabled_default_after_guard() {
+        // PR-56-Invariante: Guard hebt die bestehende Default-
+        // Disabled-Linie (`allow_focus_window=false`) NICHT auf;
+        // der existierende Policy-v0-Refusal liefert weiterhin
+        // ActionFailed mit `recovery_hint=fallback_unavailable` —
+        // **nicht** `capability_guard_denied`.
+        let url = spawn_server_with_approval(
+            InteractionConfig {
+                enabled: true,
+                backend: "command".into(),
+                allow_open_application: true,
+                allow_focus_window: false,
+                allow_type_text: false,
+                allow_shortcuts: false,
+                require_confirmation: true,
+                open_app_cmd_template: Some("/bin/true".into()),
+                focus_window_cmd_template: Some("/bin/true".into()),
+            },
+            ApprovalConfig { timeout_seconds: 5 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_focus_window","target":{"type":"window","name":"calendar"}}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let _planned = recv_text(&mut ws).await;
+        let _started = recv_text(&mut ws).await;
+        let failed = recv_text(&mut ws).await;
+        assert!(failed.contains(r#""type":"action_failed""#));
+        // Existierender Policy-Refusal (kein Guard-Refusal):
+        // `focus_window` Action-Kind disallowed.
+        assert!(failed.contains("focus_window"));
+        assert!(failed.contains("recovery_hint=fallback_unavailable"));
+        // Crucial: NICHT vom Guard abgelehnt — der Guard sagt für
+        // `interaction.focus_window` Allow.
+        assert!(!failed.contains("capability_guard_denied"));
+    }
+
+    #[tokio::test]
+    async fn plan_demo_action_still_emits_capability_and_correlation_ids() {
+        // PR-56-Invariante: Guard-Wiring im Demo-Pfad ändert die
+        // bestehende PR-54-/PR-55-Lifecycle-Form nicht.
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"plan_demo_action","title":"Echo","kind":"demo_echo","requires_approval":false}"#.into(),
+        ))
+        .await
+        .unwrap();
+        for _ in 0..4 {
+            let _ = recv_text(&mut ws).await;
+        }
+
+        ws.send(Message::Text(r#"{"type":"audit_recent"}"#.into()))
+            .await
+            .unwrap();
+        let frame = recv_text(&mut ws).await;
+        assert!(frame.contains(r#""correlation_id":"corr_"#));
+        assert!(frame.contains(r#""capability_id":"assistant.demo.echo""#));
+        // Allow-Pfad: kein guard-deny im Audit.
+        assert!(!frame.contains("capability_guard_denied"));
+    }
+
+    #[tokio::test]
+    async fn guard_deny_for_type_text_emits_capability_guard_denied_audit() {
+        // Direkter App-Call mit einer programmatisch gebauten
+        // TypeText-Action: bestätigt, dass der Guard *vor* der
+        // bestehenden Policy-/Approval-Linie greift und die Audit-
+        // Wire-Form `capability_guard_denied` schreibt — ohne dabei
+        // ein Approval zu requesten.
+        let app = test_app_with(InteractionConfig {
+            enabled: true,
+            backend: "command".into(),
+            allow_open_application: true,
+            allow_focus_window: true,
+            // Test umgeht die Policy-Sperre absichtlich, damit
+            // sicher der Guard zuerst greift, nicht die Policy:
+            allow_type_text: true,
+            allow_shortcuts: true,
+            require_confirmation: false,
+            open_app_cmd_template: Some("/bin/true".into()),
+            focus_window_cmd_template: Some("/bin/true".into()),
+        });
+        let action = crate::interaction::InteractionAction {
+            action_id: app.next_action_id(),
+            title: "Type test".into(),
+            target: crate::actions::ActionTarget::unknown(),
+            payload: crate::interaction::InteractionPayload::TypeText {
+                text: "hello".into(),
+            },
+            requires_confirmation: false,
+            trusted_only: false,
+            correlation_id: None,
+        };
+        let out = app.dispatch_interaction(action).await;
+        // Reihenfolge: ActionPlanned → ActionStarted → ActionFailed.
+        assert!(matches!(out[0], OutgoingMessage::ActionPlanned { .. }));
+        assert!(matches!(out[1], OutgoingMessage::ActionStarted { .. }));
+        let failed_json = serde_json::to_string(&out[2]).unwrap();
+        assert!(
+            failed_json.contains("capability_guard_denied"),
+            "guard deny must surface in action_failed message: {failed_json}",
+        );
+        assert!(
+            failed_json.contains("interaction_type_text_not_supported"),
+            "specific reason must be present: {failed_json}",
+        );
+        // Kein viertes Frame — keine Approval-Karte für eine
+        // future / unsupported Capability.
+        assert_eq!(out.len(), 3, "guard deny must NOT emit approval: {out:?}");
+
+        // Audit: `result = capability_guard_denied`, summary trägt
+        // den Reason-Suffix.
+        let events = serde_json::to_string(&app.audit().list_recent(None)).unwrap();
+        assert!(
+            events.contains(r#""result":"capability_guard_denied""#),
+            "audit must carry the new RESULT_CAPABILITY_GUARD_DENIED: {events}",
+        );
+        assert!(
+            events.contains("[guard:interaction_type_text_not_supported]"),
+            "audit summary must carry guard reason suffix: {events}",
+        );
+        // Kein approval_requested im Audit.
+        assert!(!events.contains(r#""kind":"approval_requested""#));
+    }
+
+    #[tokio::test]
+    async fn guard_deny_for_send_shortcut_emits_capability_guard_denied_audit() {
+        let app = test_app_with(InteractionConfig {
+            enabled: true,
+            backend: "command".into(),
+            allow_open_application: true,
+            allow_focus_window: true,
+            allow_type_text: true,
+            allow_shortcuts: true,
+            require_confirmation: false,
+            open_app_cmd_template: Some("/bin/true".into()),
+            focus_window_cmd_template: Some("/bin/true".into()),
+        });
+        let action = crate::interaction::InteractionAction {
+            action_id: app.next_action_id(),
+            title: "Shortcut test".into(),
+            target: crate::actions::ActionTarget::unknown(),
+            payload: crate::interaction::InteractionPayload::SendShortcut {
+                combo: "ctrl+alt+t".into(),
+            },
+            requires_confirmation: false,
+            trusted_only: false,
+            correlation_id: None,
+        };
+        let out = app.dispatch_interaction(action).await;
+        assert_eq!(out.len(), 3, "guard deny must NOT emit approval: {out:?}");
+        let failed_json = serde_json::to_string(&out[2]).unwrap();
+        assert!(failed_json.contains("interaction_send_shortcut_not_supported"));
+    }
+
+    #[tokio::test]
+    async fn unsupported_interactions_remain_unsupported() {
+        // Anker-Test gegen Drift: `is_executable_today` für
+        // type_text / send_shortcut bleibt `false`, der Guard
+        // verweigert sie, und es gibt **keinen** IPC-Pfad, der sie
+        // aktivieren könnte.
+        use crate::capabilities::{
+            INTERACTION_SEND_SHORTCUT, INTERACTION_TYPE_TEXT, is_executable_today,
+        };
+        assert!(!is_executable_today(INTERACTION_TYPE_TEXT));
+        assert!(!is_executable_today(INTERACTION_SEND_SHORTCUT));
+        // Der Guard liefert spezifische Reasons, nicht
+        // `unknown_capability_id`.
+        let d_tt = crate::capability_guard::guard_interaction_kind(
+            crate::interaction::InteractionKind::TypeText,
+        );
+        let d_ss = crate::capability_guard::guard_interaction_kind(
+            crate::interaction::InteractionKind::SendShortcut,
+        );
+        assert!(matches!(
+            d_tt,
+            crate::capability_guard::CapabilityGuardDecision::Deny {
+                reason: "interaction_type_text_not_supported",
+                ..
+            },
+        ));
+        assert!(matches!(
+            d_ss,
+            crate::capability_guard::CapabilityGuardDecision::Deny {
+                reason: "interaction_send_shortcut_not_supported",
+                ..
+            },
+        ));
+    }
+
+    #[tokio::test]
+    async fn pr54_correlation_lifecycle_still_stable() {
+        // Anker-Test gegen Drift: PR-54-Invariante (alle
+        // Audit-Events einer Trace teilen sich eine
+        // `correlation_id`) bleibt nach PR-56-Wiring erhalten.
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_open_application","application":"calendar"}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let _planned = recv_text(&mut ws).await;
+        let requested = recv_text(&mut ws).await;
+        let approval_id = extract_approval_id(&requested);
+        let approve = format!(
+            r#"{{"type":"approval_response","approval_id":"{approval_id}","decision":"approved"}}"#
+        );
+        ws.send(Message::Text(approve)).await.unwrap();
+        for _ in 0..6 {
+            let _ = recv_text(&mut ws).await;
+        }
+        ws.send(Message::Text(r#"{"type":"audit_recent"}"#.into()))
+            .await
+            .unwrap();
+        let frame = recv_text(&mut ws).await;
+        let ids = extract_correlation_ids(&frame);
+        assert_all_equal_and_corr_prefixed(&ids, "PR-56 anchor: open_application chain");
+    }
+
+    #[tokio::test]
+    async fn pr55_capability_audit_lifecycle_still_stable() {
+        // Anker-Test gegen Drift: PR-55-Invariante
+        // (`capability_id` über alle Audit-Events einer Trace
+        // konstant) bleibt nach PR-56-Wiring erhalten. Außerdem
+        // erscheint **kein** `capability_guard_denied` im
+        // Allow-Pfad.
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"interaction_open_application","application":"calendar"}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let _planned = recv_text(&mut ws).await;
+        let requested = recv_text(&mut ws).await;
+        let approval_id = extract_approval_id(&requested);
+        let approve = format!(
+            r#"{{"type":"approval_response","approval_id":"{approval_id}","decision":"approved"}}"#
+        );
+        ws.send(Message::Text(approve)).await.unwrap();
+        for _ in 0..6 {
+            let _ = recv_text(&mut ws).await;
+        }
+        ws.send(Message::Text(r#"{"type":"audit_recent"}"#.into()))
+            .await
+            .unwrap();
+        let frame = recv_text(&mut ws).await;
+        let cap_ids = extract_capability_ids(&frame);
+        assert!(!cap_ids.is_empty(), "audit must carry capability_id: {frame}");
+        for id in &cap_ids {
+            assert_eq!(id, "interaction.open_application");
+        }
+        // Allow-Pfad: weder result=capability_guard_denied noch
+        // guard-Reason-Suffix in summary.
+        let results = extract_results(&frame);
+        assert!(
+            !results.iter().any(|r| r == "capability_guard_denied"),
+            "allow path must not produce guard-denied audit: {frame}",
+        );
+        assert!(!frame.contains("[guard:"));
+    }
+
+    #[tokio::test]
+    async fn request_approval_demo_still_emits_capability_id_after_guard() {
+        // PR-56 hat `request_approval_demo` einen defensiven Guard
+        // bekommen. Heute liefert er für `assistant.plan_demo_action`
+        // immer Allow; die Wire-Form (`approval_requested` mit
+        // `capability_id` und `correlation_id`) bleibt unverändert.
+        let url = spawn_server_with_approval(
+            interaction_with_confirmation(),
+            ApprovalConfig { timeout_seconds: 10 },
+        )
+        .await;
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+        ws.send(Message::Text(
+            r#"{"type":"request_approval_demo","title":"Demo","summary":"x","risk":"low"}"#.into(),
+        ))
+        .await
+        .unwrap();
+        let frame = recv_text(&mut ws).await;
+        assert!(frame.contains(r#""type":"approval_requested""#));
+        assert!(frame.contains(r#""capability_id":"assistant.plan_demo_action""#));
+        assert!(frame.contains(r#""correlation_id":"corr_"#));
+        assert!(!frame.contains("capability_guard_denied"));
+    }
 }
