@@ -106,6 +106,12 @@ pub const RESULT_COMPLETED: &str = "completed";
 pub const RESULT_FAILED: &str = "failed";
 pub const RESULT_CANCELLED: &str = "cancelled";
 pub const RESULT_REJECTED: &str = "rejected";
+/// PR 56 — kuratiertes Result für die fail-closed Capability-Guard-
+/// Linie (siehe [`crate::capability_guard`]). Bewusst **getrennt** von
+/// `RESULT_FAILED`: ein Guard-Deny ist eine deterministische
+/// Vor-Filterung, kein Backend-Fehler. UI / Audit-Reader können den
+/// Unterschied lesen, ohne zusätzliche Felder zu parsen.
+pub const RESULT_CAPABILITY_GUARD_DENIED: &str = "capability_guard_denied";
 
 pub const KNOWN_RESULTS: &[&str] = &[
     RESULT_APPROVED,
@@ -115,6 +121,7 @@ pub const KNOWN_RESULTS: &[&str] = &[
     RESULT_FAILED,
     RESULT_CANCELLED,
     RESULT_REJECTED,
+    RESULT_CAPABILITY_GUARD_DENIED,
 ];
 
 /// Sanitisiert einen `source`-String. Unbekannte Werte fallen auf

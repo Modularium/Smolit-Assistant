@@ -978,6 +978,23 @@ impl App {
         summary: String,
         risk: String,
     ) -> Vec<OutgoingMessage> {
+        // PR 56 — defensiver Capability-Guard. Heute liefert er für
+        // `assistant.plan_demo_action` immer `Allow`; auf einen
+        // hypothetischen Future-Drift hin verweigert er fail-closed
+        // mit einer kuratierten Error-Antwort, statt eine
+        // ApprovalRequest-Karte ohne ausführbare Capability zu
+        // emittieren.
+        if let crate::capability_guard::CapabilityGuardDecision::Deny { reason, .. } =
+            crate::capability_guard::guard_capability(
+                crate::capability_guard::CapabilityGuardInput::for_capability(
+                    crate::capabilities::ASSISTANT_PLAN_DEMO_ACTION,
+                ),
+            )
+        {
+            return vec![OutgoingMessage::Error {
+                message: format!("capability_guard_denied: {reason}"),
+            }];
+        }
         let approval_id = self.next_approval_id();
         let timeout_seconds = self.config.approval.timeout_seconds;
         let sanitized_risk = sanitize_risk(risk);
@@ -1118,6 +1135,40 @@ impl App {
         //   demo_wait → assistant.demo.wait
         //   noop / unknown → assistant.plan_demo_action
         let capability_id = crate::capabilities::capability_id_for_plan(&plan.kind);
+        // PR 56 — defensiver Capability-Guard. Für die drei
+        // Demo-Kinds liefert er heute immer `Allow`; ein hypothetischer
+        // Drift im Mapping würde sich hier als ActionFailed mit
+        // `result = capability_guard_denied` zeigen, ohne den
+        // Mock-Executor zu starten.
+        if let crate::capability_guard::CapabilityGuardDecision::Deny {
+            reason,
+            recovery_hint,
+        } = crate::capability_guard::guard_demo_kind(&plan.kind)
+        {
+            self.audit.record(
+                crate::audit::AuditKind::ActionFailed,
+                crate::audit::AuditFields::new()
+                    .with_action_id(&plan.action_id)
+                    .with_risk(&plan.risk)
+                    .with_result(crate::audit::RESULT_CAPABILITY_GUARD_DENIED)
+                    .with_source(crate::audit::SOURCE_CORE)
+                    .with_summary(format!("{} [guard:{reason}]", plan.title))
+                    .with_correlation_id(&correlation_id)
+                    .with_capability_id(capability_id),
+            );
+            let hint = recovery_hint.unwrap_or(
+                crate::capability_guard::RECOVERY_HINT_FALLBACK_UNAVAILABLE,
+            );
+            return vec![OutgoingMessage::ActionFailed {
+                payload: crate::actions::ActionFailedPayload {
+                    action_id: plan.action_id.clone(),
+                    status: crate::actions::ActionStatus::Failed,
+                    message: format!("capability_guard_denied: {reason}"),
+                    error: Some(format!("recovery_hint={hint}")),
+                    correlation_id: Some(correlation_id.clone()),
+                },
+            }];
+        }
         let mut out: Vec<OutgoingMessage> = Vec::new();
 
         // PR 19 — Audit: der IPC-Command ist angekommen. Summary ist
@@ -1353,6 +1404,61 @@ impl App {
         );
     }
 
+    /// PR 56 — emittiert die Wire-Frames + den Audit-Eintrag für eine
+    /// Capability-Guard-Deny-Entscheidung im Interaction-Pfad. Hält
+    /// die existierende `action_started` → `action_failed`-Form ein
+    /// (kein neues Outgoing-Envelope) und schreibt einen separaten
+    /// Audit-Eintrag mit `result = "capability_guard_denied"` (siehe
+    /// [`crate::audit::RESULT_CAPABILITY_GUARD_DENIED`]) plus dem
+    /// kuratierten Reason-Token im `summary`-Suffix.
+    fn emit_capability_guard_denied(
+        &self,
+        action: &InteractionAction,
+        reason: &'static str,
+        recovery_hint: Option<&'static str>,
+        capability_id: Option<&'static str>,
+        correlation_id: &str,
+    ) -> Vec<OutgoingMessage> {
+        let hint = recovery_hint.unwrap_or(
+            crate::capability_guard::RECOVERY_HINT_FALLBACK_UNAVAILABLE,
+        );
+        let messages = vec![
+            OutgoingMessage::ActionStarted {
+                payload: ActionStartedPayload {
+                    action_id: action.action_id.clone(),
+                    phase: ActionPhase::Started,
+                    correlation_id: Some(correlation_id.to_string()),
+                },
+            },
+            OutgoingMessage::ActionFailed {
+                payload: ActionFailedPayload {
+                    action_id: action.action_id.clone(),
+                    status: ActionStatus::Failed,
+                    message: format!("capability_guard_denied: {reason}"),
+                    error: Some(format!("recovery_hint={hint}")),
+                    correlation_id: Some(correlation_id.to_string()),
+                },
+            },
+        ];
+        // Audit: `result` ist das neue, kuratierte Token aus PR 56.
+        // Das Reason-Token landet als kompakter Suffix in `summary`,
+        // damit `audit_recent` ohne neue Felder den spezifischen
+        // Grund trägt. summary wird vom Sanitizer auf 80 Zeichen
+        // gekürzt — die Title-Länge der Demo-/Interaction-Pfade
+        // passt komfortabel hinein.
+        self.audit.record(
+            crate::audit::AuditKind::ActionFailed,
+            crate::audit::AuditFields::new()
+                .with_action_id(&action.action_id)
+                .with_result(crate::audit::RESULT_CAPABILITY_GUARD_DENIED)
+                .with_source(SOURCE_CORE)
+                .with_summary(format!("{} [guard:{reason}]", action.title))
+                .with_correlation_id(correlation_id)
+                .with_capability_id_opt(capability_id),
+        );
+        messages
+    }
+
     async fn execute_demo_plan(
         self: Arc<Self>,
         mut plan: crate::actions::DemoPlan,
@@ -1489,6 +1595,29 @@ impl App {
                 .with_correlation_id(&correlation_id)
                 .with_capability_id_opt(capability_id),
         );
+
+        // PR 56 — Capability Guard: fail-closed Vor-Filter, der
+        // Future-/Unsupported-Kinds (z. B. `interaction.type_text`)
+        // ablehnt, **bevor** der bestehende Policy-/Approval-Pfad
+        // läuft. Für die heute live Capabilities
+        // (`interaction.open_application` / `_focus_window`) liefert
+        // er `Allow`; das Wire-Verhalten gegenüber PR 55 bleibt
+        // unverändert. Der Guard hebt **keine** bestehende Sperre
+        // auf — er kann nur zusätzlich verweigern.
+        if let crate::capability_guard::CapabilityGuardDecision::Deny {
+            reason,
+            recovery_hint,
+        } = crate::capability_guard::guard_interaction_kind(action.kind())
+        {
+            out.extend(self.emit_capability_guard_denied(
+                &action,
+                reason,
+                recovery_hint,
+                capability_id,
+                &correlation_id,
+            ));
+            return out;
+        }
 
         if let Err(err) = self.interaction.policy().allows(action.kind()) {
             out.extend(self.interaction.refusal_events(
