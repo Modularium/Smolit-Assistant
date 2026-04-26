@@ -21,8 +21,8 @@ pub use correlation::{
     CORRELATION_ID_PREFIX, MAX_CORRELATION_ID_LEN, MIN_CORRELATION_ID_LEN, sanitize_correlation_id,
 };
 pub use event::{
-    AuditEvent, AuditFields, AuditKind, RESULT_CANCELLED, RESULT_COMPLETED, RESULT_DENIED,
-    RESULT_EXPIRED, RESULT_REJECTED, SOURCE_CORE, SOURCE_UI,
+    AuditEvent, AuditFields, AuditKind, RESULT_CANCELLED, RESULT_CAPABILITY_GUARD_DENIED,
+    RESULT_COMPLETED, RESULT_DENIED, RESULT_EXPIRED, RESULT_REJECTED, SOURCE_CORE, SOURCE_UI,
 };
 #[allow(unused_imports)]
 pub use event::{

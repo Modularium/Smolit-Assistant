@@ -4,6 +4,7 @@ mod approvals;
 mod audio;
 mod audit;
 mod capabilities;
+mod capability_guard;
 mod config;
 mod event_loop;
 mod interaction;

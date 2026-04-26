@@ -182,6 +182,43 @@ Admin- und Data-Capabilities sind im Vokabular geführt, aber
 `false` — sie können nicht ausgeführt und folglich auch nicht in
 einen lebenden Audit-Lifecycle geschrieben werden.
 
+### Optional: Capability Guard Deny (PR 56)
+
+Seit PR 56 läuft im Smolit-Assistant Core ein lokaler
+Capability-Guard
+([`core/src/capability_guard.rs`](../../core/src/capability_guard.rs)),
+der die in PR 55 eingeführten Konstanten und Metadaten als
+deny-only / fail-closed Filter nutzt. Wenn der Guard verweigert,
+schreibt der Audit-Pfad einen Eintrag mit:
+
+- `result = "capability_guard_denied"` — neue, kuratierte
+  Whitelist-Konstante
+  ([`crate::audit::RESULT_CAPABILITY_GUARD_DENIED`]); bewusst
+  **getrennt** von `failed`, weil ein Guard-Deny eine
+  deterministische Vor-Filterung ist, kein Backend-Fehler.
+- `summary` mit kuratiertem Suffix `[guard:<reason>]`. Erlaubte
+  Reason-Tokens in
+  [`crate::capability_guard::KNOWN_GUARD_REASONS`]:
+  `unknown_capability_id`, `capability_not_executable_today`,
+  `future_capability_not_implemented`,
+  `interaction_type_text_not_supported`,
+  `interaction_send_shortcut_not_supported`.
+- `correlation_id` und `capability_id` wie üblich (PR 54 / PR 55).
+
+Garantien:
+
+- **Fail-closed.** Unbekannte / future / unsupported Capabilities
+  werden lokal abgelehnt; es entsteht kein Approval-Request, kein
+  Backend-Run.
+- **Whitelist-only.** Der Reason-Suffix in `summary` ist
+  ausschließlich aus den kuratierten Tokens; keine User-Inhalte.
+- **Kein neuer Wire-Typ.** Die Wire-Form bleibt
+  `action_planned` → `action_started` → `action_failed` (oder ein
+  `error`-Envelope auf dem Demo-Approval-Pfad). Keine neue UI,
+  kein neues IPC-Command.
+- **Anti-Bypass.** Der Guard hebt **keine** bestehende Sperre auf;
+  er kann nur zusätzlich verweigern.
+
 ## UI (PR 19)
 
 Ein kleines `AuditPanel` (`ui/scripts/audit/audit_panel.gd` +
