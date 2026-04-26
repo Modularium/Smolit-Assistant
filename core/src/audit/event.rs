@@ -181,6 +181,15 @@ pub struct AuditEvent {
     /// reine Settings-Probes, ping/get_status) lassen es leer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub correlation_id: Option<String>,
+    /// PR 55 — additives, optionales Capability-Token. Trägt die
+    /// kanonische Capability-ID des Aktionspfads
+    /// (Spec [`docs/contracts/CAPABILITY_VOCABULARY.md`](../../../docs/contracts/CAPABILITY_VOCABULARY.md)).
+    /// Werte stammen ausschließlich aus
+    /// [`crate::capabilities::KNOWN_CAPABILITY_IDS`]; ungültige
+    /// Eingaben werden in [`AuditFields::sanitized`] zu `None`
+    /// geklemmt. Beschreibend, **nicht** policy-enforcing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capability_id: Option<String>,
 }
 
 /// Felder-Bundle für einen neuen Audit-Eintrag. Wird vom Store
@@ -195,6 +204,7 @@ pub struct AuditFields {
     pub source: Option<String>,
     pub summary: Option<String>,
     pub correlation_id: Option<String>,
+    pub capability_id: Option<String>,
 }
 
 impl AuditFields {
@@ -248,6 +258,22 @@ impl AuditFields {
         self
     }
 
+    /// PR 55 — additiver Builder für eine optionale `capability_id`.
+    /// Validierung läuft in [`Self::sanitized`] über
+    /// [`crate::capabilities::sanitize_capability_id`]; nur Werte aus
+    /// [`crate::capabilities::KNOWN_CAPABILITY_IDS`] überleben.
+    pub fn with_capability_id(mut self, id: impl Into<String>) -> Self {
+        self.capability_id = Some(id.into());
+        self
+    }
+
+    /// PR 55 — Convenience-Variante analog zu
+    /// [`Self::with_correlation_id_opt`].
+    pub fn with_capability_id_opt<S: Into<String>>(mut self, id: Option<S>) -> Self {
+        self.capability_id = id.map(Into::into);
+        self
+    }
+
     /// Sanitisiert die Felder. Leere Zeichenketten und unbekannte
     /// Vokabeln werden zu `None` — wir speichern lieber nichts als
     /// kaputten Kontext.
@@ -260,6 +286,7 @@ impl AuditFields {
             source: sanitize_source(self.source),
             summary: sanitize_summary(self.summary),
             correlation_id: super::correlation::sanitize_correlation_id(self.correlation_id),
+            capability_id: crate::capabilities::sanitize_capability_id(self.capability_id),
         }
     }
 }

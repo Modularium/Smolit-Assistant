@@ -495,6 +495,7 @@ mod tests {
                     source: Some("core".into()),
                     summary: Some("Demo action".into()),
                     correlation_id: None,
+                    capability_id: None,
                 }],
             },
         });
@@ -566,6 +567,7 @@ mod tests {
                 selected_target: None,
                 risk: RISK_MEDIUM.to_string(),
                 correlation_id: None,
+                capability_id: None,
             },
         });
         assert!(encoded.contains(r#""type":"approval_requested""#));

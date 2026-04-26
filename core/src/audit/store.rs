@@ -139,6 +139,7 @@ impl AuditStore {
             source: f.source,
             summary: f.summary,
             correlation_id: f.correlation_id,
+            capability_id: f.capability_id,
         }
     }
 }

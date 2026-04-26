@@ -92,6 +92,14 @@ pub struct ApprovalRequest {
     /// ignorieren es.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub correlation_id: Option<String>,
+    /// PR 55 — additives, optionales Capability-Token. Trägt die
+    /// kanonische Capability-ID des Aktionspfads
+    /// (Spec [`docs/contracts/CAPABILITY_VOCABULARY.md`](../../../docs/contracts/CAPABILITY_VOCABULARY.md)).
+    /// Werte stammen ausschließlich aus
+    /// [`crate::capabilities::KNOWN_CAPABILITY_IDS`]; UI nutzt das
+    /// Feld als descriptive metadata, nicht als Permission-Eingabe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capability_id: Option<String>,
 }
 
 #[cfg(test)]
