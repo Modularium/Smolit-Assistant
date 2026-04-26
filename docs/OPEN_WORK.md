@@ -354,6 +354,39 @@ Folgearbeit: Cross-Repo-Propagation zu ABrain (echo), AdminBot
 (Pflicht für Mutation), OceanData (akzeptieren) — bleiben Spec
 FA-3 → FA-6.
 
+**Erledigt in PR 55 (2026-04-26, Runtime FA-1 spike):**
+Lokale Umsetzung der Capability Vocabulary FA-1/FA-2. Neues Modul
+[`core/src/capabilities.rs`](../../core/src/capabilities.rs) führt
+String-Konstanten für die heute live Capabilities
+(`interaction.*`, `assistant.*`, `provider.*`, `audit.*`) plus
+Dokumentations-Konstanten für die zukünftigen `admin.*` / `data.*`
+IDs ein. Mapping-Helfer `capability_id_for_interaction`,
+`capability_id_for_demo_kind`, `capability_id_for_plan`;
+Metadaten-Helfer `is_executable_today`, `risk_for_capability`,
+`requires_approval_by_default`, `audit_required_by_default`,
+`correlation_required_by_default`; Sanitization-Helfer
+`sanitize_capability_id` (Whitelist + Naming-Regel-Check).
+`AuditEvent`, `AuditFields` und `ApprovalRequest` haben ein neues
+optionales `capability_id`-Feld; `App::plan_demo_action`,
+`App::dispatch_interaction` und `App::request_approval_demo`
+schreiben die kanonische Capability in den Audit-/Approval-
+Lifecycle alongside `correlation_id`. **Keine** Policy Engine,
+**keine** Runtime-Registry, **kein** Cross-Repo-Wire,
+**keine** UI-Änderung, **kein** neues IPC-Command. Tests
+(13 Unit + 6 IPC-Integration) locken Naming-Regeln, Mapping,
+Lifecycle-Stabilität und Sanitization. Details:
+[`PR55_CAPABILITY_CONSTANTS_RUNTIME.md`](./reviews/PR55_CAPABILITY_CONSTANTS_RUNTIME.md).
+Folgearbeit:
+
+- Policy-Regeln, die `capability_id` als Eingabe nehmen
+  (Vocabulary FA-4) — bleibt eigene PR.
+- AdminBot FA-0 (`admin.status.read`, read-only) hinter
+  Feature-Flag (ADR-0005-Stufe 0) — separat, später.
+- OceanData Context-Capability-Bindung — separat, hinter
+  ADR-0006-Code-Spike.
+- Action-Event-Payloads tragen heute kein `capability_id`; eine
+  spätere additive Erweiterung wäre Spec FA-4 → FA-6.
+
 **Erledigt in PR 47 (2026-04-25, Docs/Contract-only):**
 [`docs/contracts/ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md`](./contracts/ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md)
 schließt ADR-0005 FA-1 auf Doku-Ebene. Vier Initial-Klassen
@@ -391,8 +424,13 @@ Reihe):**
   Akzeptanz) und fail-closed-Verhalten bleiben eigene Folge-PRs
   (Spec FA-3 → FA-6).
 - **FA-3.** ~~Capability Vocabulary~~ — **erledigt in PR 46**.
-  *Implementation* (Code-Konstanten, Validation-Tests, UI-Display-
-  Names) bleibt eigene Folge-PR-Reihe.
+  *Implementation* (Code-Konstanten, Validation-Tests) ist
+  **erledigt in PR 55** (Runtime FA-1 spike): kuratierte Konstanten
+  in [`core/src/capabilities.rs`](../../core/src/capabilities.rs),
+  optionales `capability_id` auf `AuditEvent` /
+  `ApprovalRequest`, Wiring im realen Action-Lifecycle. UI-Display-
+  Names und Policy-Engine-Bindung bleiben eigene Folge-PRs
+  (Vocabulary §12 FA-4 → FA-5).
 - **FA-4.** Spike-PR (Stufe 0 read-only) hinter Feature-Flag, erst
   nach Implementation-Teil von FA-2 (`correlation_id` in
   `AuditEvent`) + FA-3 (Capability-Konstanten).

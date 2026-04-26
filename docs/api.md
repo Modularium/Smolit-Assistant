@@ -640,6 +640,49 @@ Eigenschaften:
   behalten dieselbe `correlation_id`; ein Re-Approve erzeugt keine
   zweite ID, sondern landet als `ipc_command_rejected` im Audit.
 
+#### Optional: `capability_id` (PR 55)
+
+Seit PR 55 trägt jeder Action-/Approval-Lifecycle zusätzlich ein
+optionales, additives `capability_id`-Feld. Es benennt die
+kanonische Capability laut
+[`docs/contracts/CAPABILITY_VOCABULARY.md` §5](./contracts/CAPABILITY_VOCABULARY.md)
+und wird vom Core aus den heute existierenden Mappings
+([`InteractionKind`](./../core/src/interaction/action.rs),
+Demo-Plan-Kinds) abgeleitet:
+
+- `interaction.open_application` für `interaction_open_application`,
+- `interaction.focus_window` für `interaction_focus_window`,
+- `assistant.demo.echo` / `assistant.demo.wait` für
+  `plan_demo_action` mit `kind=demo_echo` / `kind=demo_wait`,
+- `assistant.plan_demo_action` für `plan_demo_action` ohne
+  spezifischen Kind und für `request_approval_demo`.
+
+Das Feld erscheint heute auf:
+
+- `approval_requested` (Wire),
+- die zugehörigen `audit_recent`-Einträge (siehe 2.7).
+
+Eigenschaften:
+
+- **Additiv und optional.** Kein neues IPC-Command, kein neues
+  Outgoing-Envelope, keine Pflicht für Clients. UI nutzt
+  `capability_id` als descriptive metadata (Dev-Anzeige); es
+  bleibt **nicht** Eingabe einer Permission-Entscheidung — die
+  Approval-Linie bleibt Policy v0.
+- **Whitelist.** Werte stammen ausschließlich aus
+  [`crate::capabilities::KNOWN_CAPABILITY_IDS`]. Ungültige oder
+  unbekannte Tokens werden in der Audit-Sanitization zu `None`
+  geklemmt und nie in den Store geschrieben.
+- **Stabil über den Lifecycle.** Approval-Klammer, Cancel-Pfade,
+  Re-Approve und Timeout behalten dieselbe `capability_id`.
+- **Lokal.** Nur Smolit-Assistant kennt diese Schicht; AdminBot-
+  und OceanData-Wires sind nicht Teil von PR 55.
+
+Action-Event-Payloads (`action_planned`, `action_started`, …)
+tragen in PR 55 **noch keine** `capability_id` — die Wire-Form der
+Action-Events bleibt unverändert. Eine spätere Erweiterung wäre
+additiv möglich (Spec FA-4 → FA-6).
+
 #### Action Kinds (`action_kind`)
 
 `query` · `speech` · `ui` · `system` · `automation` · `unknown`.
@@ -1082,6 +1125,16 @@ sie eindeutig einem `action_id` zuordnen.
     `audit_recent`-Read selbst, reine Settings-Probes oder
     `ipc_command_rejected`-Refusals außerhalb eines Lifecycles)
     lassen das Feld weg. Ältere UIs ignorieren es.
+  - optional `capability_id: string` (PR 55 — Runtime FA-1 spike)
+    aus der Whitelist
+    [`crate::capabilities::KNOWN_CAPABILITY_IDS`]; benannt in
+    [`docs/contracts/CAPABILITY_VOCABULARY.md` §5](./contracts/CAPABILITY_VOCABULARY.md).
+    Heute geschrieben für `interaction.open_application`,
+    `interaction.focus_window`, `assistant.plan_demo_action`,
+    `assistant.demo.echo`, `assistant.demo.wait`. Audit-Einträge
+    ohne Action-Kontext und non-Action-Commands lassen das Feld
+    weg. Ungültige / unbekannte Werte werden in der Sanitization
+    auf `None` geklemmt.
 
   Seit PR 32 (2026-04-24) erfasst der Ring-Buffer **zusätzlich zum
   `plan_demo_action`-Pfad** den echten
