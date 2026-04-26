@@ -1,16 +1,24 @@
 # Capability Vocabulary
 
-- **Status:** Runtime FA-1 implemented in Smolit-Assistant (PR 55).
-  Cross-Repo-Bindung (FA-3 → FA-6) bleibt Docs/Future-Work.
-- **Date:** 2026-04-25 (Draft); 2026-04-26 (Runtime FA-1 spike).
+- **Status:** Runtime FA-1 + FA-2 implemented in Smolit-Assistant
+  (PR 55). PR 56 ergänzt einen kleinen, lokalen Capability-Guard
+  ([`core/src/capability_guard.rs`](../../core/src/capability_guard.rs))
+  mit deny-only / fail-closed-Verhalten für Future-/Unsupported-
+  Capabilities. Cross-Repo-Bindung (FA-3 → FA-6) bleibt Docs/
+  Future-Work; eine echte Policy Engine bleibt explizit außerhalb
+  des Scopes.
+- **Date:** 2026-04-25 (Draft); 2026-04-26 (Runtime FA-1 spike +
+  Runtime Guard spike).
 - **Scope:** Cross-Repo *Spec*; lokale Runtime-Implementation bleibt
   bewusst auf Smolit-Assistant beschränkt. Smolit-Assistant kennt
   jetzt eine kleine Konstanten-/Mapping-Schicht
   ([`core/src/capabilities.rs`](../../core/src/capabilities.rs))
   und trägt optional `capability_id` durch
-  Audit/Approval-Lifecycle. Es gibt **keine** dynamische Registry,
-  **keine** Policy Engine, **keine** AdminBot/OceanData/ABrain-
-  Integration.
+  Audit/Approval-Lifecycle; PR 56 hat den
+  [`capability_guard`](../../core/src/capability_guard.rs)
+  ergänzt, der diese Metadaten **rein deny-only** nutzt. Es gibt
+  **keine** dynamische Registry, **keine** Policy Engine,
+  **keine** AdminBot/OceanData/ABrain-Integration.
 - **Workstream:** E (Approval / Policy / Tool-Gating) — Folgearbeit
   aus PR 44 §12 und PR 45
   [`ADR-0005 §14 FA-3`](../adr/ADR-0005-adminbot-safety-boundary.md).
@@ -283,9 +291,9 @@ kanonisch ihre eigenen `purpose`-/`AccessDecision`-Vokabularien
 
 ## 11. Non-goals
 
-PR 46 war Docs/Contract-only. PR 55 (Runtime FA-1 spike) bleibt
-ebenfalls eng gehalten — die folgenden Punkte sind weiterhin
-**außerhalb** des Scopes:
+PR 46 war Docs/Contract-only. PR 55 (Runtime FA-1 spike) und
+PR 56 (Runtime Guard spike) bleiben ebenfalls eng gehalten — die
+folgenden Punkte sind weiterhin **außerhalb** des Scopes:
 
 - **Keine dynamische Registry.** Die Konstanten in
   [`core/src/capabilities.rs`](../../core/src/capabilities.rs) sind
@@ -295,6 +303,11 @@ ebenfalls eng gehalten — die folgenden Punkte sind weiterhin
   / `audit_required_by_default` / `correlation_required_by_default`
   sind **descriptive metadata**. Die Approval-Linie bleibt Policy v0
   (PR 25); die Helper verändern keine Entscheidung.
+- **Kein OPA / Rego im Core.** Der Capability-Guard aus PR 56 ist
+  ein deterministischer Match auf bestehende Konstanten; er ist
+  **deny-only** und gewährt keine neuen Rechte. Eine echte
+  Policy-Auswertungs-Engine (Privacy-Mode, Provider-Choice-
+  Constraints, Multi-Tenant) bleibt eigene Folge-Arbeit.
 - **Keine AdminBot-Capability-Registry-Änderung.**
 - **Keine Provider-Whitelist-Erweiterung** (siehe
   [`docs/provider_fallback_and_settings_architecture.md`](../provider_fallback_and_settings_architecture.md)).
@@ -328,14 +341,25 @@ Reihenfolge nicht bindend; alle Schritte hinter eigenen PRs:
   `known_capability_ids_match_documented_values`,
   `invalid_capability_id_is_not_accepted` in
   [`core/src/capabilities.rs`](../../core/src/capabilities.rs)).
-- **FA-3.** AdminBot-Capability-Mapping in einem zukünftigen
+- **FA-3.** *Teilweise erledigt in PR 56* — lokaler
+  Capability-Guard
+  ([`core/src/capability_guard.rs`](../../core/src/capability_guard.rs)),
+  der die existierenden Metadaten **deny-only / fail-closed**
+  nutzt: unbekannte / future / unsupported Capabilities
+  (`admin.*`, `data.*`, `interaction.type_text`,
+  `interaction.send_shortcut`) werden vor Approval/Executor
+  abgelehnt. Lebenswichtig nicht enthalten: kein neuer Permission-
+  Pfad, keine Cross-Repo-Wire-Bindung — die zukünftige
+  AdminBot-Capability-Bindung in einem
   `docs/contracts/ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md`
-  ([ADR-0005 §14 FA-1](../adr/ADR-0005-adminbot-safety-boundary.md)).
+  ([ADR-0005 §14 FA-1](../adr/ADR-0005-adminbot-safety-boundary.md))
+  bleibt eigene PR.
 - **FA-4.** Policy-Regeln, die `capability_id` als
   Eingabe nehmen (z. B. „blocke `provider.text.generate` mit
   `cloud_http`-Provider, wenn Privacy-Mode aktiv"). PR 55 stellt
-  die Code-Konstanten bereit; eine Policy-Engine wäre eigene
-  Folge-Arbeit.
+  die Code-Konstanten bereit, PR 56 die Deny-Linie für
+  Future-/Unsupported-Capabilities; eine ausgewachsene
+  Policy-Engine bleibt eigene Folge-Arbeit.
 - **FA-5.** UI-Display-Names — Approval-Card-Texte pro
   Capability-ID, lokalisiert.
 - **FA-6.** Audit-Sanitization-Erweiterung: `capability_id` ist in

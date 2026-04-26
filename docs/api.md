@@ -683,6 +683,41 @@ tragen in PR 55 **noch keine** `capability_id` — die Wire-Form der
 Action-Events bleibt unverändert. Eine spätere Erweiterung wäre
 additiv möglich (Spec FA-4 → FA-6).
 
+#### Capability Guard fail-closed Deny (PR 56)
+
+Seit PR 56 läuft im Smolit-Assistant Core ein kleiner, lokaler
+Capability-Guard
+([`core/src/capability_guard.rs`](./../core/src/capability_guard.rs))
+**vor** dem bestehenden Approval-/Policy-v0-Pfad. Er nutzt die in
+PR 55 eingeführten Capability-Konstanten und Metadaten und ist
+**deny-only / fail-closed**:
+
+- Allow für die heute live ausführbaren Capabilities
+  (`interaction.open_application`, `interaction.focus_window`,
+  `assistant.plan_demo_action`, `assistant.demo.echo`,
+  `assistant.demo.wait`, `provider.*`, `audit.read_recent`).
+- Deny für unbekannte / Future- / Unsupported-Capabilities
+  (`admin.*`, `data.*`, `interaction.type_text`,
+  `interaction.send_shortcut`, sowie unbekannte Tokens).
+
+Wenn der Guard verweigert, **ändert sich kein bestehendes IPC-
+Format**:
+
+- Outgoing-Wire bleibt die Sequenz `action_planned` →
+  `action_started` → `action_failed` (oder bei
+  `request_approval_demo` ein `error`-Envelope, bei
+  `plan_demo_action` direkt ein `action_failed`).
+- `action_failed.message` trägt das Präfix
+  `capability_guard_denied: <reason>`; `error` trägt
+  `recovery_hint=fallback_unavailable`.
+- Es wird **kein** `approval_requested` für eine future Capability
+  emittiert — der Approval-Pfad bleibt in der Hand der bestehenden
+  Policy-v0-Linie für allowed Capabilities.
+
+Der Guard ist **kein** Permission-Erteiler; er kann nur zusätzlich
+verweigern. Bestehende Sperren (`allow_focus_window=false`,
+`require_confirmation=true`, …) bleiben unverändert maßgeblich.
+
 #### Action Kinds (`action_kind`)
 
 `query` · `speech` · `ui` · `system` · `automation` · `unknown`.
@@ -1114,10 +1149,17 @@ sie eindeutig einem `action_id` zuordnen.
     `action_started` / `action_completed` / `action_cancelled` /
     `action_failed`
   - optional `action_id: string`, `approval_id: string`,
-    `risk: "low"|"medium"|"high"`, `result: string`,
+    `risk: "low"|"medium"|"high"`, `result: string`
+    (Whitelist: `approved` / `denied` / `expired` / `completed` /
+    `failed` / `cancelled` / `rejected` / **`capability_guard_denied`**
+    seit PR 56),
     `source: "user"|"timeout"|"system"|"ui"|"core"`,
     `summary: string` (hart auf 80 Zeichen gekürzt, Whitespace
     gestrippt). Felder ohne Wert werden nicht serialisiert.
+    Bei `result = "capability_guard_denied"` trägt `summary` einen
+    kuratierten Suffix `[guard:<reason>]` mit Reason-Tokens aus
+    [`crate::capability_guard::KNOWN_GUARD_REASONS`]; das ermöglicht
+    Audit-Reading ohne neues Feld.
   - optional `correlation_id: "corr_<token>"` (PR 54 — Runtime FA-1
     spike). Trägt den lokalen Lifecycle-Trace; siehe
     [`docs/contracts/AUDIT_CORRELATION_ID_SPEC.md`](./contracts/AUDIT_CORRELATION_ID_SPEC.md)

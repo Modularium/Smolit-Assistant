@@ -387,6 +387,47 @@ Folgearbeit:
 - Action-Event-Payloads tragen heute kein `capability_id`; eine
   spätere additive Erweiterung wäre Spec FA-4 → FA-6.
 
+**Erledigt in PR 56 (2026-04-26, Runtime Guard spike):**
+Lokaler, fail-closed Capability-Guard
+([`core/src/capability_guard.rs`](../../core/src/capability_guard.rs))
+nutzt die in PR 55 eingeführten Konstanten und Metadaten. Neue
+Typen `CapabilityGuardDecision` (Allow / Deny mit kuratiertem
+`reason` + optionalem `recovery_hint`), `CapabilityGuardInput`,
+plus drei Entry-Helfer `guard_capability`,
+`guard_interaction_kind`, `guard_demo_kind`. Fünf kuratierte
+Reasons: `unknown_capability_id`,
+`capability_not_executable_today`,
+`future_capability_not_implemented`,
+`interaction_type_text_not_supported`,
+`interaction_send_shortcut_not_supported`. Wiring in
+`App::dispatch_interaction` (vor `policy.allows`),
+`App::plan_demo_action` und `App::request_approval_demo` (jeweils
+defensiv — heute immer Allow für die live Demo-/Interaction-
+Pfade). Audit-Whitelist um `RESULT_CAPABILITY_GUARD_DENIED`
+erweitert; ein Guard-Deny erscheint als
+`action_failed`-Wire-Frame mit Präfix
+`capability_guard_denied: <reason>` und Audit-Eintrag mit
+`result = "capability_guard_denied"` plus `summary`-Suffix
+`[guard:<reason>]`. **Keine** Policy Engine, **kein** OPA/Rego,
+**keine** dynamische Registry, **kein** neues IPC-Command,
+**kein** neues Outgoing-Envelope, **keine** UI-Änderung, **keine**
+neuen Desktop-Fähigkeiten, **kein** type_text/send_shortcut-Backend,
+**kein** Approval-Bypass. PR-54-correlation_id- und
+PR-55-capability_id-Lifecycle bleiben unverändert. Tests
+(17 Unit + 9 IPC-Integration; gesamt 469 passed). Details:
+[`PR56_CAPABILITY_GUARD_RUNTIME.md`](./reviews/PR56_CAPABILITY_GUARD_RUNTIME.md).
+Folgearbeit:
+
+- Privacy/provider-spezifischer Guard
+  (z. B. `provider.text.generate` + `cloud_http` + Privacy-Mode)
+  wäre eigene PR — Vocabulary FA-4.
+- AdminBot status-read-only (`admin.status.read`) bleibt
+  ADR-0005-Stufe-0 hinter eigenem Feature-Flag.
+- OceanData Context-Capabilities (`data.context.query` etc.)
+  bleiben hinter ADR-0006-Code-Spike.
+- Eine ausgewachsene Policy-Engine (Multi-Tenant, dynamische
+  Regeln, OPA-artige Auswertung) ist explizit **nicht** geplant.
+
 **Erledigt in PR 47 (2026-04-25, Docs/Contract-only):**
 [`docs/contracts/ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md`](./contracts/ADMINBOT_SAFETY_BOUNDARY_CONTRACT.md)
 schließt ADR-0005 FA-1 auf Doku-Ebene. Vier Initial-Klassen
