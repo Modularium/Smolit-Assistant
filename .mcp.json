@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/home/dev/EcoSphereNetwork/Smolit-Assistant",
+        "/home/dev/EcoSphereNetwork/smolitux-ui"
+      ],
+      "env": {}
+    }
+  }
+}
